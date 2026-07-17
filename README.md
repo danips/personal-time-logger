@@ -57,15 +57,16 @@ The GitHub Pages files are publicly fetchable because Firefox's updater cannot a
    - `AMO_JWT_ISSUER`: the AMO JWT issuer/API key.
    - `AMO_JWT_SECRET`: the AMO JWT secret.
 5. Open **Settings > Pages** and set **Source** to **GitHub Actions**.
-6. If the normal Pages URL is not `https://OWNER.github.io/REPOSITORY`, add an Actions repository variable named `FIREFOX_UPDATE_BASE_URL` containing the actual HTTPS base URL without a trailing slash.
+6. Open **Settings > Environments > github-pages**. Under **Deployment branches and tags**, allow the tag pattern `v*` (or choose **No restriction**) so release tags can deploy.
+7. If the normal Pages URL is not `https://OWNER.github.io/REPOSITORY`, add an Actions repository variable named `FIREFOX_UPDATE_BASE_URL` containing the actual HTTPS base URL without a trailing slash.
 
 ### Publish the first version
 
 The Git tag must match `manifest.json` with a leading `v`:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 Watch **Actions > Release Firefox extension**. It lints the allow-listed extension files, asks Mozilla to sign an unlisted XPI, creates `updates.json`, and deploys both to GitHub Pages.
@@ -74,13 +75,13 @@ On every device, open `https://OWNER.github.io/REPOSITORY/` in Firefox and insta
 
 ### Publish later versions
 
-1. Change `version` in `manifest.json` to a higher numeric version such as `0.1.1`.
+1. Change `version` in `manifest.json` to a higher numeric version such as `0.1.2`.
 2. Commit and push the code.
 3. Tag that commit and push the tag:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 Firefox periodically checks the deployed `updates.json` and installs a higher signed version. In `about:addons`, **Check for Updates** can trigger an immediate check.
