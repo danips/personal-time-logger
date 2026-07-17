@@ -11,7 +11,10 @@
       <header class="topbar">
         <div>
           <h1>Calendar</h1>
-          <p id="statusLine" class="status">Loading...</p>
+          <div class="calendar-status-row">
+            <p id="statusLine" class="status">Loading...</p>
+            <button id="undoResizeButton" class="undo-resize-button" type="button" hidden>Undo resize</button>
+          </div>
         </div>
         <div class="toolbar">
           <button id="prevWeek" class="icon-button" type="button" title="Previous week" aria-label="Previous week">‹</button>

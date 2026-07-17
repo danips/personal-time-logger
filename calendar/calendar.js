@@ -18,6 +18,7 @@ import { $, entryTitle, formatError, projectColor, statusFromError } from "../sr
 const DAY_COUNT = 7;
 const MINUTES_PER_DAY = 24 * 60;
 const SNAP_MINUTES = 15;
+const RESIZE_SNAP_MINUTES = 1;
 const SLOT_HEIGHT = 12;
 const PX_PER_MINUTE = SLOT_HEIGHT / SNAP_MINUTES;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,9 +36,15 @@ let selectedEntryId = "";
 let editingEntryId = "";
 let editingMultiplyValue = "";
 let unsubscribeEntryEvents = null;
+let lastResizeUndo = null;
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
+}
+
+function setResizeUndo(action) {
+  lastResizeUndo = action;
+  $("#undoResizeButton").hidden = !action;
 }
 
 function addMinutes(date, minutes) {
@@ -95,6 +102,22 @@ function isSameLocalDate(a, b) {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
+}
+
+function calendarDayIndex(date) {
+  for (let index = 0; index < DAY_COUNT; index += 1) {
+    if (isSameLocalDate(date, addDays(weekStart, index))) return index;
+  }
+  return -1;
+}
+
+function snapDateToGrid(date, direction) {
+  const day = startOfDay(date);
+  const minutes = minutesSinceStartOfDay(date);
+  const snapped = direction === "up"
+    ? Math.ceil(minutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES
+    : Math.floor(minutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES;
+  return addMinutes(day, snapped);
 }
 
 function intersectsWeek(entry, start, end) {
@@ -164,7 +187,9 @@ function buildSegments(entries) {
         displaySeconds,
         totalSeconds: displaySeconds ? effectiveSeconds * actualDurationSeconds(visibleStart, visibleEnd) / displaySeconds : 0,
         startMinute: minutesSinceStartOfDay(visibleStart),
-        endMinute: minutesSinceStartOfDay(visibleEnd)
+        endMinute: minutesSinceStartOfDay(visibleEnd),
+        startsEntry: visibleStart.getTime() === entryStart.getTime(),
+        endsEntry: visibleEnd.getTime() === displayEnd.getTime()
       });
     }
   }
@@ -313,9 +338,27 @@ function renderEntryBlock(column, segment) {
   duration.textContent = durationLabel;
   content.append(project, details, duration);
   block.append(fill, content);
+  if (entry.end_at && entry.id === selectedEntryId && segment.startsEntry) {
+    block.append(createResizeHandle("top", entry));
+  }
+  if (entry.end_at && entry.id === selectedEntryId && segment.endsEntry) {
+    block.append(createResizeHandle("bottom", entry));
+  }
   block.addEventListener("pointerdown", beginDrag);
   block.addEventListener("click", selectEntryFromBlock);
   column.append(block);
+}
+
+function createResizeHandle(edge, entry) {
+  const handle = document.createElement("div");
+  handle.className = `resize-handle resize-handle-${edge}`;
+  handle.dataset.resizeEdge = edge;
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-orientation", "horizontal");
+  handle.setAttribute("aria-label", `${edge === "top" ? "Change start" : "Change end"} of ${entryTitle(entry)}`);
+  handle.title = edge === "top" ? "Drag to change start time" : "Drag to change end time";
+  handle.addEventListener("pointerdown", beginResize);
+  return handle;
 }
 
 function renderCalendar(segmentsByDay) {
@@ -480,6 +523,7 @@ function minutesToLabel(minutes) {
 
 function beginDrag(event) {
   if (event.button !== 0) return;
+  if (event.target.closest(".resize-handle")) return;
   const block = event.currentTarget;
   const entry = getEntryById(block.dataset.entryId);
   if (!entry) return;
@@ -500,6 +544,152 @@ function beginDrag(event) {
   window.addEventListener("pointermove", moveDrag);
   window.addEventListener("pointerup", endDrag, { once: true });
   window.addEventListener("pointercancel", endDrag, { once: true });
+}
+
+function resizeTargetFromPointer(clientX, clientY) {
+  const columns = [...document.querySelectorAll(".day-column")];
+  if (!columns.length) return null;
+
+  let best = null;
+  let bestDistance = Infinity;
+  for (const column of columns) {
+    const rect = column.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
+    const distance = clientX >= rect.left && clientX <= rect.right ? 0 : Math.abs(clientX - center);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { column, rect };
+    }
+  }
+
+  if (!best) return null;
+  const rawMinute = (clientY - best.rect.top) / PX_PER_MINUTE;
+  const minute = clamp(
+    Math.round(rawMinute / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES,
+    0,
+    MINUTES_PER_DAY
+  );
+  const dayIndex = Number(best.column.dataset.dayIndex || 0);
+  const date = addMinutes(addDays(weekStart, dayIndex), minute);
+  return { column: best.column, dayIndex, minute, date };
+}
+
+function showResizeGuide(target) {
+  if (!target) return;
+  if (!preview) {
+    preview = document.createElement("div");
+    preview.className = "resize-guide";
+  }
+  preview.style.top = `${clamp(target.minute * PX_PER_MINUTE - 1, 0, MINUTES_PER_DAY * PX_PER_MINUTE - 3)}px`;
+  target.column.append(preview);
+}
+
+function beginResize(event) {
+  if (event.button !== 0) return;
+  const handle = event.currentTarget;
+  const block = handle.closest(".entry-block");
+  const entry = block && getEntryById(block.dataset.entryId);
+  if (!entry || !entry.end_at || entry.id !== selectedEntryId) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  dragState = {
+    type: "resize",
+    edge: handle.dataset.resizeEdge,
+    entry,
+    block,
+    handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    target: null
+  };
+  handle.setPointerCapture(event.pointerId);
+  window.addEventListener("pointermove", moveResize);
+  window.addEventListener("pointerup", endResize, { once: true });
+  window.addEventListener("pointercancel", endResize, { once: true });
+}
+
+function moveResize(event) {
+  if (!dragState || dragState.type !== "resize") return;
+  if (!dragState.active) {
+    const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+    if (distance < DRAG_THRESHOLD_PX) return;
+    dragState.active = true;
+    dragState.block.classList.add("resize-source");
+  }
+
+  const target = resizeTargetFromPointer(event.clientX, event.clientY);
+  if (!target) return;
+  const start = new Date(dragState.entry.start_at);
+  const end = new Date(dragState.entry.end_at);
+  const earliestEnd = addMinutes(start, RESIZE_SNAP_MINUTES);
+  const latestStart = addMinutes(end, -RESIZE_SNAP_MINUTES);
+  if (dragState.edge === "top" && target.date > latestStart) {
+    target.date = snapDateToGrid(latestStart, "down");
+  }
+  if (dragState.edge === "bottom" && target.date < earliestEnd) {
+    target.date = snapDateToGrid(earliestEnd, "up");
+  }
+
+  const targetDay = calendarDayIndex(target.date);
+  if (targetDay >= 0 && targetDay < DAY_COUNT) {
+    target.dayIndex = targetDay;
+    target.column = document.querySelector(`.day-column[data-day-index="${targetDay}"]`);
+    target.minute = minutesSinceStartOfDay(target.date);
+  }
+  dragState.target = target;
+  showResizeGuide(target);
+
+  const nextStart = dragState.edge === "top" ? target.date : start;
+  const nextEnd = dragState.edge === "bottom" ? target.date : end;
+  setStatus(`${dragState.edge === "top" ? "Start" : "End"}: ${shortDay(target.date)} ${localTime(target.date)} · ${formatElapsed(Math.round(actualDurationSeconds(nextStart, nextEnd)))}`);
+}
+
+async function endResize() {
+  if (!dragState || dragState.type !== "resize") return;
+  const state = dragState;
+  dragState = null;
+  window.removeEventListener("pointermove", moveResize);
+  window.removeEventListener("pointerup", endResize);
+  window.removeEventListener("pointercancel", endResize);
+  state.block.classList.remove("resize-source");
+  if (preview) {
+    preview.remove();
+    preview = null;
+  }
+
+  if (!state.active || !state.target) {
+    await render();
+    setStatus("Ready");
+    return;
+  }
+
+  state.block.dataset.skipClick = "true";
+  setTimeout(() => {
+    state.block.dataset.skipClick = "";
+  }, 0);
+
+  const changes = state.edge === "top"
+    ? { start_at: state.target.date.toISOString() }
+    : { end_at: state.target.date.toISOString() };
+  const undo = {
+    id: state.entry.id,
+    start_at: state.entry.start_at,
+    end_at: state.entry.end_at
+  };
+
+  try {
+    if (editingEntryId === state.entry.id) closeEditor();
+    await updateEntry(state.entry.id, changes);
+    setResizeUndo(undo);
+    setStatus("Entry resized");
+    await render();
+    await runSync({ force: false });
+  } catch (error) {
+    setStatus(formatError(error));
+    await render();
+  }
 }
 
 function moveDrag(event) {
@@ -548,6 +738,7 @@ async function endDrag() {
   }
 
   try {
+    setResizeUndo(null);
     if (editingEntryId === state.entry.id) closeEditor();
     await updateEntry(state.entry.id, changes);
     setStatus("Entry moved");
@@ -556,6 +747,26 @@ async function endDrag() {
   } catch (error) {
     setStatus(formatError(error));
     await render();
+  }
+}
+
+async function undoResize() {
+  if (!lastResizeUndo) return;
+  const undo = lastResizeUndo;
+  setResizeUndo(null);
+
+  try {
+    if (editingEntryId === undo.id) closeEditor();
+    await updateEntry(undo.id, {
+      start_at: undo.start_at,
+      end_at: undo.end_at
+    });
+    setStatus("Resize undone");
+    await render();
+    await runSync({ force: false });
+  } catch (error) {
+    setResizeUndo(undo);
+    setStatus(formatError(error));
   }
 }
 
@@ -575,6 +786,7 @@ async function mergeSelectedEntry() {
   if (!selectedEntryId || !sourceId) return;
 
   try {
+    setResizeUndo(null);
     await mergeEntries(selectedEntryId, sourceId);
     closeEditor();
     setStatus("Entries merged");
@@ -589,6 +801,7 @@ async function duplicateSelectedEntry() {
   if (!selectedEntryId) return;
 
   try {
+    setResizeUndo(null);
     const duplicate = await duplicateEntry(selectedEntryId);
     closeEditor();
     selectedEntryId = duplicate.id;
@@ -644,6 +857,7 @@ async function saveCalendarEdit(event) {
   }
 
   try {
+    setResizeUndo(null);
     await updateEntry(editingEntryId, {
       project: $("#calendarEditProject").value.trim(),
       task: $("#calendarEditTask").value.trim(),
@@ -672,6 +886,7 @@ async function clearSelection() {
 
 async function changeWeek(nextStart) {
   closeEditor();
+  setResizeUndo(null);
   weekStart = startOfWeek(nextStart);
   initialScrollDone = false;
   await render();
@@ -685,6 +900,7 @@ function bindEvents() {
   $("#nextWeek").addEventListener("click", () => changeWeek(addDays(weekStart, DAY_COUNT)));
   $("#todayButton").addEventListener("click", () => changeWeek(new Date()));
   $("#syncButton").addEventListener("click", () => runSync({ force: true }));
+  $("#undoResizeButton").addEventListener("click", undoResize);
   $("#duplicateEntryButton").addEventListener("click", duplicateSelectedEntry);
   $("#calendarMergeButton").addEventListener("click", mergeSelectedEntry);
   $("#calendarEditForm").addEventListener("submit", saveCalendarEdit);

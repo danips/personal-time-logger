@@ -348,6 +348,9 @@ function updateElapsed() {
   $("#elapsed").textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
   $("#stopButton").classList.toggle("hidden", !latest);
   activePanel.classList.toggle("is-running", Boolean(latest));
+  activePanel.tabIndex = latest ? 0 : -1;
+  activePanel.setAttribute("role", latest ? "button" : "region");
+  activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "No active timer");
   dot.classList.toggle("hidden", !latest);
   if (latest) dot.style.setProperty("--project-color", projectColor(latest));
 }
@@ -508,7 +511,23 @@ async function showEdit(id) {
   $("#editEnd").value = toLocalInputValue(entry.end_at);
   $("#editStatus").value = entry.status || "ok";
   renderMergeTargets(entry, entries);
+  setNewTimerOpen(false);
   $("#editPanel").classList.remove("hidden");
+  $("#editProject").focus();
+}
+
+function editActiveTimer(event) {
+  if (event && event.target.closest("#stopButton")) return;
+  const latest = activeEntries[0];
+  if (!latest) return;
+  showEdit(latest.id);
+}
+
+function editActiveTimerFromKeyboard(event) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  editActiveTimer(event);
 }
 
 function hideEdit() {
@@ -604,6 +623,8 @@ function bindEvents() {
   $("#newTimerToggle").addEventListener("click", toggleNewTimer);
   $("#startButton").addEventListener("click", startTimer);
   $("#stopButton").addEventListener("click", stopTimer);
+  $(".active-panel").addEventListener("click", editActiveTimer);
+  $(".active-panel").addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", () => runSync({ force: true }));
   $("#exportButton").addEventListener("click", exportCsv);
   $("#loadMoreRecent").addEventListener("click", () => {

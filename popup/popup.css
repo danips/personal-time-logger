@@ -147,6 +147,16 @@ h2 {
   border-color: #75b987;
   background: #edf7f0;
   box-shadow: inset 3px 0 0 #188038;
+  cursor: pointer;
+}
+
+.active-panel.is-running:hover {
+  background: #e4f2e8;
+}
+
+.active-panel.is-running:focus-visible {
+  outline: 2px solid #0b57d0;
+  outline-offset: 2px;
 }
 
 .active-copy {
@@ -601,6 +611,14 @@ textarea {
     background: #21372a;
     border-color: #75b987;
     box-shadow: inset 3px 0 0 #75b987;
+  }
+
+  .active-panel.is-running:hover {
+    background: #294632;
+  }
+
+  .active-panel.is-running:focus-visible {
+    outline-color: #8ab4f8;
   }
 
   button:hover {

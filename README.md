@@ -8,7 +8,7 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 - Project, task, description, billable, and multiply fields in the popup.
 - Start, active-timer Stop, header Sync, and Export CSV controls.
 - Last 10 non-deleted entries with inline editing.
-- Weekly calendar view with draggable time logs.
+- Weekly calendar view with movable and resizable time logs.
 - Multiple-active-timer warning.
 - Options page for Google auth, spreadsheet setup, sync interval, and device ID.
 - IndexedDB local storage using database `timelogger_db`.
@@ -153,6 +153,7 @@ Mock remote rows are stored locally in IndexedDB settings. No Google API calls a
 2. Fill in any timer fields.
 3. Click **Start**.
 4. Click **Stop** when finished.
+   Click the active timer card to open it in the edit panel when you need to change its details or start time.
 5. Use the header sync button to push/pull immediately.
 6. Use **Export CSV** to download completed, non-deleted local entries.
 7. Click a recent entry row to edit it.
@@ -171,6 +172,8 @@ Set **Duration multiplier** in Options. Entries with **Multiply** checked store 
 The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid. Entries that overlap in time are shown side by side.
 
 Drag a time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`. Completed entries keep their original duration when moved. Active timers keep running and only their `start_at` value changes.
+
+Select a completed time log, then drag its top or bottom edge to change its start or end time. Resize handles are only available on the selected log. Resizing snaps to one-minute intervals and keeps a minimum duration of one minute. Use **Undo resize** beside the calendar status immediately afterward to restore the previous times.
 
 Click a time log in the calendar to select it and open its edit panel. Click the selected time log again to clear the selection. If another completed log in the week has the exact same project, task, and description, the merge panel lets you combine them into one entry with the total duration of both logs. The same merge action is available from the popup edit panel for recent entries.
 
@@ -225,7 +228,7 @@ Deleted entries and active timers are excluded by default.
 - Google Sheets is not a real database.
 - Sync is polling-based, not real-time.
 - Conflict handling is intentionally simple.
-- Calendar dragging snaps start times to 15-minute intervals and preserves completed-entry duration.
+- Calendar moving snaps to 15-minute intervals and preserves completed-entry duration; resizing a selected entry snaps to one-minute intervals.
 - Merging keeps one entry, marks the other deleted locally, and requires matching project, task, and description.
 - Deleted entries remain in the sheet as tombstones so multiple devices can converge during sync.
 - The extension reads the whole `time_entries` sheet on every sync.
