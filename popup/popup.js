@@ -18,7 +18,6 @@ import {
 import {
   $,
   entryTitle,
-  escapeHtml,
   formatError,
   projectColor,
   setStatus,
@@ -57,7 +56,11 @@ function entryDuration(entry) {
 }
 
 function projectDot(entry) {
-  return `<span class="project-dot" style="--project-color: ${projectColor(entry)}" aria-hidden="true"></span>`;
+  const dot = document.createElement("span");
+  dot.className = "project-dot";
+  dot.style.setProperty("--project-color", projectColor(entry));
+  dot.setAttribute("aria-hidden", "true");
+  return dot;
 }
 
 function entryChips(entry, { includeMultiply = true } = {}) {
@@ -70,8 +73,15 @@ function entryChips(entry, { includeMultiply = true } = {}) {
 }
 
 function renderChips(chips) {
-  if (!chips.length) return "";
-  return `<div class="entry-chips">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>`;
+  if (!chips.length) return null;
+  const container = document.createElement("div");
+  container.className = "entry-chips";
+  for (const chip of chips) {
+    const element = document.createElement("span");
+    element.textContent = chip;
+    container.append(element);
+  }
+  return container;
 }
 
 function groupChips(group) {
@@ -217,26 +227,65 @@ function renderEntryRow(entry, { child = false } = {}) {
   const duration = formatElapsed(entryDuration(entry));
   const details = entryDetails(entry);
   const multiplier = hasMultiplier(entry) ? `x${entry.multiply}` : "";
-  return `
-    <article class="entry-row ${child ? "entry-row-child" : ""} ${entry.status === "needs_review" ? "needs-review" : ""}" data-edit-id="${escapeHtml(entry.id)}" role="button" tabindex="0" aria-label="Edit ${escapeHtml(entryTitle(entry))}">
-      <div class="entry-main">
-        <div class="entry-title">${projectDot(entry)}<span>${escapeHtml(entry.project || "Untitled project")}</span></div>
-        <div class="entry-meta" title="${escapeHtml(details)}">${escapeHtml(details)}</div>
-        <div class="entry-time-row">
-          <span class="entry-meta">
-            ${escapeHtml(localTime(entry.start_at))}
-            ${entry.end_at ? ` - ${escapeHtml(localTime(entry.end_at))}` : " - active"}
-          </span>
-          <span class="entry-duration-col entry-time-duration">${escapeHtml(duration)}</span>
-          ${multiplier ? `<span class="entry-multiplier">${escapeHtml(multiplier)}</span>` : ""}
-        </div>
-        ${renderChips(entryChips(entry, { includeMultiply: false }))}
-      </div>
-      <div class="entry-actions">
-        <button class="play-button" type="button" data-restart-id="${escapeHtml(entry.id)}" title="Start from this entry" aria-label="Start from ${escapeHtml(entryTitle(entry))}">▶</button>
-      </div>
-    </article>
-  `;
+
+  const row = document.createElement("article");
+  row.className = [
+    "entry-row",
+    child ? "entry-row-child" : "",
+    entry.status === "needs_review" ? "needs-review" : ""
+  ].filter(Boolean).join(" ");
+  row.dataset.editId = entry.id;
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.setAttribute("aria-label", `Edit ${entryTitle(entry)}`);
+
+  const main = document.createElement("div");
+  main.className = "entry-main";
+
+  const title = document.createElement("div");
+  title.className = "entry-title";
+  const titleText = document.createElement("span");
+  titleText.textContent = entry.project || "Untitled project";
+  title.append(projectDot(entry), titleText);
+
+  const detail = document.createElement("div");
+  detail.className = "entry-meta";
+  detail.title = details;
+  detail.textContent = details;
+
+  const timeRow = document.createElement("div");
+  timeRow.className = "entry-time-row";
+  const time = document.createElement("span");
+  time.className = "entry-meta";
+  time.textContent = `${localTime(entry.start_at)}${entry.end_at ? ` - ${localTime(entry.end_at)}` : " - active"}`;
+  const durationElement = document.createElement("span");
+  durationElement.className = "entry-duration-col entry-time-duration";
+  durationElement.textContent = duration;
+  timeRow.append(time, durationElement);
+  if (multiplier) {
+    const multiplierElement = document.createElement("span");
+    multiplierElement.className = "entry-multiplier";
+    multiplierElement.textContent = multiplier;
+    timeRow.append(multiplierElement);
+  }
+
+  main.append(title, detail, timeRow);
+  const chips = renderChips(entryChips(entry, { includeMultiply: false }));
+  if (chips) main.append(chips);
+
+  const actions = document.createElement("div");
+  actions.className = "entry-actions";
+  const play = document.createElement("button");
+  play.className = "play-button";
+  play.type = "button";
+  play.dataset.restartId = entry.id;
+  play.title = "Start from this entry";
+  play.setAttribute("aria-label", `Start from ${entryTitle(entry)}`);
+  play.textContent = "▶";
+  actions.append(play);
+
+  row.append(main, actions);
+  return row;
 }
 
 function renderRecentTimerGroup(group) {
@@ -244,27 +293,51 @@ function renderRecentTimerGroup(group) {
   if (group.entries.length === 1) return renderEntryRow(entry);
 
   const expanded = expandedRecentGroups.has(group.key);
-  return `
-    <section class="timer-group">
-      <article class="entry-row timer-group-row ${entry.status === "needs_review" ? "needs-review" : ""}">
-        <div class="entry-main">
-          <div class="entry-title">${projectDot(entry)}<span>${escapeHtml(entry.project || "Untitled project")}</span></div>
-          <div class="entry-meta">${escapeHtml(entryDetails(entry))}</div>
-          ${renderChips(groupChips(group))}
-        </div>
-        <div class="entry-actions">
-          <span class="entry-duration-col">${escapeHtml(formatElapsed(group.totalSeconds))}</span>
-          <button class="count-button" type="button" data-toggle-group="${escapeHtml(group.key)}" aria-expanded="${expanded ? "true" : "false"}">
-            ${group.entries.length}
-          </button>
-          <button class="play-button" type="button" data-restart-id="${escapeHtml(entry.id)}" title="Start from this group" aria-label="Start from ${escapeHtml(entryTitle(entry))}">▶</button>
-        </div>
-      </article>
-      <div class="timer-instances ${expanded ? "" : "hidden"}">
-        ${group.entries.map((item) => renderEntryRow(item, { child: true })).join("")}
-      </div>
-    </section>
-  `;
+  const section = document.createElement("section");
+  section.className = "timer-group";
+
+  const summary = document.createElement("article");
+  summary.className = `entry-row timer-group-row${entry.status === "needs_review" ? " needs-review" : ""}`;
+  const main = document.createElement("div");
+  main.className = "entry-main";
+  const title = document.createElement("div");
+  title.className = "entry-title";
+  const titleText = document.createElement("span");
+  titleText.textContent = entry.project || "Untitled project";
+  title.append(projectDot(entry), titleText);
+  const detail = document.createElement("div");
+  detail.className = "entry-meta";
+  detail.textContent = entryDetails(entry);
+  main.append(title, detail);
+  const chips = renderChips(groupChips(group));
+  if (chips) main.append(chips);
+
+  const actions = document.createElement("div");
+  actions.className = "entry-actions";
+  const duration = document.createElement("span");
+  duration.className = "entry-duration-col";
+  duration.textContent = formatElapsed(group.totalSeconds);
+  const count = document.createElement("button");
+  count.className = "count-button";
+  count.type = "button";
+  count.dataset.toggleGroup = group.key;
+  count.setAttribute("aria-expanded", expanded ? "true" : "false");
+  count.textContent = String(group.entries.length);
+  const play = document.createElement("button");
+  play.className = "play-button";
+  play.type = "button";
+  play.dataset.restartId = entry.id;
+  play.title = "Start from this group";
+  play.setAttribute("aria-label", `Start from ${entryTitle(entry)}`);
+  play.textContent = "▶";
+  actions.append(duration, count, play);
+  summary.append(main, actions);
+
+  const instances = document.createElement("div");
+  instances.className = `timer-instances${expanded ? "" : " hidden"}`;
+  instances.append(...group.entries.map((item) => renderEntryRow(item, { child: true })));
+  section.append(summary, instances);
+  return section;
 }
 
 function updateElapsed() {
@@ -309,32 +382,48 @@ async function renderRecent() {
   const loadMore = $("#loadMoreRecent");
 
   if (!entries.length) {
-    container.innerHTML = '<p class="entry-meta">No entries yet.</p>';
+    const empty = document.createElement("p");
+    empty.className = "entry-meta";
+    empty.textContent = "No entries yet.";
+    container.replaceChildren(empty);
     loadMore.classList.add("hidden");
     return;
   }
 
-  container.innerHTML = groupRecentEntries(entries, allEntries).map((week) => `
-    <section class="week-group">
-      <header class="week-group-header">
-        <strong>${escapeHtml(week.label)}</strong>
-        <span>${escapeHtml(formatElapsed(week.totalSeconds))}</span>
-      </header>
-      <div class="week-group-days">
-        ${week.days.map((day) => `
-          <section class="day-group">
-            <header class="day-group-header">
-              <strong>${escapeHtml(day.label)}</strong>
-              <span>${escapeHtml(formatElapsed(day.totalSeconds))}</span>
-            </header>
-            <div class="day-group-entries">
-              ${day.groups.map(renderRecentTimerGroup).join("")}
-            </div>
-          </section>
-        `).join("")}
-      </div>
-    </section>
-  `).join("");
+  const weekElements = groupRecentEntries(entries, allEntries).map((week) => {
+    const section = document.createElement("section");
+    section.className = "week-group";
+    const header = document.createElement("header");
+    header.className = "week-group-header";
+    const label = document.createElement("strong");
+    label.textContent = week.label;
+    const total = document.createElement("span");
+    total.textContent = formatElapsed(week.totalSeconds);
+    header.append(label, total);
+
+    const days = document.createElement("div");
+    days.className = "week-group-days";
+    for (const day of week.days) {
+      const daySection = document.createElement("section");
+      daySection.className = "day-group";
+      const dayHeader = document.createElement("header");
+      dayHeader.className = "day-group-header";
+      const dayLabel = document.createElement("strong");
+      dayLabel.textContent = day.label;
+      const dayTotal = document.createElement("span");
+      dayTotal.textContent = formatElapsed(day.totalSeconds);
+      dayHeader.append(dayLabel, dayTotal);
+      const groups = document.createElement("div");
+      groups.className = "day-group-entries";
+      groups.append(...day.groups.map(renderRecentTimerGroup));
+      daySection.append(dayHeader, groups);
+      days.append(daySection);
+    }
+
+    section.append(header, days);
+    return section;
+  });
+  container.replaceChildren(...weekElements);
 
   loadMore.classList.toggle("hidden", allEntries.length <= recentLimit);
   loadMore.textContent = `Load more (${Math.max(0, allEntries.length - recentLimit)} left)`;
@@ -425,7 +514,7 @@ async function showEdit(id) {
 function hideEdit() {
   editingId = "";
   editingMultiplyValue = "";
-  $("#mergeTarget").innerHTML = "";
+  $("#mergeTarget").replaceChildren();
   $("#mergeEdit").disabled = true;
   $("#editProjectDot").classList.add("hidden");
   $("#editPanel").classList.add("hidden");
@@ -434,13 +523,19 @@ function hideEdit() {
 function renderMergeTargets(entry, entries) {
   const candidates = entries.filter((candidate) => canMergeEntries(entry, candidate));
   const select = $("#mergeTarget");
-  select.innerHTML = candidates.length
-    ? candidates.map((candidate) => `
-      <option value="${escapeHtml(candidate.id)}">
-        ${escapeHtml(shortDateTime(candidate.start_at))} · ${escapeHtml(formatElapsed(candidate.duration_seconds || durationSeconds(candidate.start_at, candidate.end_at)))}
-      </option>
-    `).join("")
-    : '<option value="">No matching completed entries</option>';
+  const options = candidates.map((candidate) => {
+    const option = document.createElement("option");
+    option.value = candidate.id;
+    option.textContent = `${shortDateTime(candidate.start_at)} · ${formatElapsed(candidate.duration_seconds || durationSeconds(candidate.start_at, candidate.end_at))}`;
+    return option;
+  });
+  if (!options.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No matching completed entries";
+    options.push(option);
+  }
+  select.replaceChildren(...options);
   $("#mergeEdit").disabled = !candidates.length;
 }
 

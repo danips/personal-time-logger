@@ -18,13 +18,11 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 
 ## Load In Chromium
 
-1. Copy `config.example.js` to `config.js`.
-2. For mock testing, set `USE_MOCK_SHEETS = true` in `config.js`.
-3. Open `chrome://extensions`.
-4. Enable Developer mode.
-5. Click **Load unpacked**.
-6. Select this project folder.
-7. Open the extension options page and confirm the OAuth status shown there.
+1. Open `chrome://extensions`.
+2. Enable Developer mode.
+3. Click **Load unpacked**.
+4. Select this project folder.
+5. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
 
 ## Load In Firefox
 
@@ -33,7 +31,7 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 3. Select `manifest.json` in this folder.
 4. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
 
-For mock testing, copy `config.example.js` to `config.js` and set `USE_MOCK_SHEETS = true` in that development-only file.
+For mock testing, enable **Use local mock Sheets data** in Options.
 
 Firefox temporary add-ons are removed when Firefox restarts. The manifest includes a stable Gecko extension ID for installed development builds.
 
@@ -101,15 +99,6 @@ The release package is generated from an explicit allow-list. The local `config.
 8. Open the installed extension's Options page.
 9. Enter the client ID and secret, click **Save Credentials**, and then click **Sign In**.
 
-For temporary development builds only, credentials can instead be placed in an ignored `config.js` file:
-
-```js
-export const GOOGLE_CLIENT_ID = "your-client-id.apps.googleusercontent.com";
-export const GOOGLE_CLIENT_SECRET = "your-device-client-secret";
-export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-export const USE_MOCK_SHEETS = false;
-```
-
 When you click **Sign In**, the extension shows a Google device code and opens Google's device authorization page. Leave the options page open while Google authorizes the device. This path is the same in Chromium and Firefox, avoids extension redirect URI mismatch issues, and stores a refresh token locally so the extension can refresh access tokens after the usual one-hour access token expires.
 
 The device-flow credentials and tokens are stored in the local Firefox profile. They are not included in published XPI files or synchronized by the extension.
@@ -151,12 +140,9 @@ If the popup or options page reports `sheet tab/header missing`, open Options an
 
 Mock mode lets you test the popup, IndexedDB, CSV export, edit flow, and sync flow without Google OAuth.
 
-1. Copy `config.example.js` to `config.js`.
-2. Set:
-
-```js
-export const USE_MOCK_SHEETS = true;
-```
+1. Open the extension's Options page.
+2. Enable **Use local mock Sheets data (development only)**.
+3. Click **Save Settings**.
 
 Mock remote rows are stored locally in IndexedDB settings. No Google API calls are made.
 
@@ -243,7 +229,7 @@ Deleted entries and active timers are excluded by default.
 - Deleted entries remain in the sheet as tombstones so multiple devices can converge during sync.
 - The extension reads the whole `time_entries` sheet on every sync.
 - OAuth uses Google device flow so setup is the same in Chromium and Firefox.
-- The cross-browser refresh-token path uses Google device flow and stores a personal OAuth client secret in local `config.js`; do not publish that config.
+- The cross-browser refresh-token path uses Google device flow and stores personal OAuth credentials in the local extension profile.
 - No team or multi-user support.
 - No unit tests by design.
 - No external dependencies by design.
@@ -254,7 +240,6 @@ Deleted entries and active timers are excluded by default.
 
 ```text
 manifest.json
-config.example.js
 README.md
 popup/
 calendar/
@@ -263,7 +248,7 @@ src/
 icons/
 ```
 
-`config.js` is intentionally ignored by git because it contains your local OAuth client ID.
+OAuth credentials are stored in IndexedDB through the Options page and are not part of the extension package.
 
 ## Next Improvements
 

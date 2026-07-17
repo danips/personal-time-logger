@@ -38,9 +38,12 @@ async function saveSettings() {
   await setSpreadsheetId(spreadsheetId);
   await setSetting("sync_interval_seconds", interval);
   await setSetting("duration_multiplier", multiplier);
+  await setSetting("use_mock_sheets", $("#useMockSheets").checked);
+  resetConfigCache();
   $("#syncInterval").value = String(interval);
   $("#durationMultiplier").value = String(multiplier);
   setStatus("Settings saved");
+  await refresh();
 }
 
 async function saveGoogleCredentials() {
@@ -73,6 +76,7 @@ async function refresh() {
   $("#spreadsheetId").value = await getSetting("spreadsheet_id", "");
   $("#syncInterval").value = String(await getSetting("sync_interval_seconds", 60));
   $("#durationMultiplier").value = String(await getSetting("duration_multiplier", 1));
+  $("#useMockSheets").checked = Boolean(await getSetting("use_mock_sheets", false));
 
   if (config.USE_MOCK_SHEETS) {
     $("#authStatus").textContent = "mock mode, no Google sign-in required";

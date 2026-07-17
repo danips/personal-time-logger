@@ -37,7 +37,6 @@ for (const directory of ["calendar", "icons", "options", "popup", "src"]) {
   await cp(path.join(projectRoot, directory), path.join(outputDirectory, directory), { recursive: true });
 }
 
-await cp(path.join(projectRoot, "config.example.js"), path.join(outputDirectory, "config.js"));
 await writeFile(
   path.join(outputDirectory, "manifest.json"),
   `${JSON.stringify(manifest, null, 2)}\n`,

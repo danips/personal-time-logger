@@ -216,7 +216,7 @@ function dailyTotalsFromSegments(segmentsByDay) {
 function renderHeader(dailyTotals = []) {
   const header = $("#dayHeader");
   const today = startOfDay(new Date());
-  header.innerHTML = "";
+  header.replaceChildren();
 
   const corner = document.createElement("div");
   corner.className = "corner-header";
@@ -227,10 +227,11 @@ function renderHeader(dailyTotals = []) {
     const date = addDays(weekStart, index);
     const element = document.createElement("div");
     element.className = `day-heading${isSameLocalDate(date, today) ? " today" : ""}`;
-    element.innerHTML = `
-      <strong>${calendarHeaderDate(date)}</strong>
-      <em>${formatTotalHours(dailyTotals[index] || 0)}</em>
-    `;
+    const dateLabel = document.createElement("strong");
+    dateLabel.textContent = calendarHeaderDate(date);
+    const total = document.createElement("em");
+    total.textContent = formatTotalHours(dailyTotals[index] || 0);
+    element.append(dateLabel, total);
     header.append(element);
   }
 }
@@ -290,17 +291,28 @@ function renderEntryBlock(column, segment) {
   if (isMultiplied) {
     block.style.setProperty("--actual-percent", `${actualPercent}%`);
   }
-  block.innerHTML = `
-    <div class="entry-fill" aria-hidden="true"></div>
-    <div class="entry-content">
-      <div class="entry-project"><span class="calendar-project-dot" aria-hidden="true"></span><span class="entry-project-text"></span></div>
-      <div class="entry-details"></div>
-      <div class="entry-duration"></div>
-    </div>
-  `;
-  $(".entry-project-text", block).textContent = projectLabel;
-  $(".entry-details", block).textContent = detailsLabel;
-  $(".entry-duration", block).textContent = durationLabel;
+  const fill = document.createElement("div");
+  fill.className = "entry-fill";
+  fill.setAttribute("aria-hidden", "true");
+  const content = document.createElement("div");
+  content.className = "entry-content";
+  const project = document.createElement("div");
+  project.className = "entry-project";
+  const dot = document.createElement("span");
+  dot.className = "calendar-project-dot";
+  dot.setAttribute("aria-hidden", "true");
+  const projectText = document.createElement("span");
+  projectText.className = "entry-project-text";
+  projectText.textContent = projectLabel;
+  project.append(dot, projectText);
+  const details = document.createElement("div");
+  details.className = "entry-details";
+  details.textContent = detailsLabel;
+  const duration = document.createElement("div");
+  duration.className = "entry-duration";
+  duration.textContent = durationLabel;
+  content.append(project, details, duration);
+  block.append(fill, content);
   block.addEventListener("pointerdown", beginDrag);
   block.addEventListener("click", selectEntryFromBlock);
   column.append(block);
@@ -309,7 +321,7 @@ function renderEntryBlock(column, segment) {
 function renderCalendar(segmentsByDay) {
   const grid = $("#calendarGrid");
   const today = startOfDay(new Date());
-  grid.innerHTML = "";
+  grid.replaceChildren();
   renderTimeAxis(grid);
 
   for (let index = 0; index < DAY_COUNT; index += 1) {
@@ -364,13 +376,19 @@ function renderSelectionPanel() {
     `${localTime(new Date(selected.start_at))} - ${selected.end_at ? localTime(new Date(selected.end_at)) : "active"}`,
     formatElapsed(selected.duration_seconds || durationSeconds(selected.start_at, selected.end_at || undefined))
   ].join(" · ");
-  $("#calendarMergeTarget").innerHTML = candidates.length
-    ? candidates.map((entry) => `
-      <option value="${entry.id}">
-        ${shortDay(new Date(entry.start_at))} ${localTime(new Date(entry.start_at))} · ${formatElapsed(entry.duration_seconds || durationSeconds(entry.start_at, entry.end_at))}
-      </option>
-    `).join("")
-    : '<option value="">No matching completed entries this week</option>';
+  const mergeOptions = candidates.map((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = `${shortDay(new Date(entry.start_at))} ${localTime(new Date(entry.start_at))} · ${formatElapsed(entry.duration_seconds || durationSeconds(entry.start_at, entry.end_at))}`;
+    return option;
+  });
+  if (!mergeOptions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No matching completed entries this week";
+    mergeOptions.push(option);
+  }
+  $("#calendarMergeTarget").replaceChildren(...mergeOptions);
   $("#calendarMergeButton").disabled = !candidates.length;
   $("#duplicateEntryButton").disabled = !selected.end_at;
   $("#duplicateEntryButton").title = selected.end_at

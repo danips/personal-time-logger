@@ -64,6 +64,16 @@ input {
   font: inherit;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
 button {
   min-height: 36px;
   border: 1px solid #9aa0a6;

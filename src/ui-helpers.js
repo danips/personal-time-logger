@@ -44,11 +44,3 @@ export function setStatus(element, status, detail = "") {
   element.textContent = detail ? `${status}: ${detail}` : status;
   element.dataset.status = status;
 }
-
-export function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
