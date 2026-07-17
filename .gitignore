@@ -1,0 +1,8 @@
+config.js
+config.json
+time-logger.xpi
+node_modules/
+web-ext-artifacts/
+*.xpi
+/.project
+tmp/

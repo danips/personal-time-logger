@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Time Logger</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="topbar">
+        <div>
+          <h1>Time Logger</h1>
+          <div class="status-row">
+            <p id="syncStatus" class="status" data-status="pending">pending</p>
+            <span id="dirtyBadge" class="dirty-badge hidden" title="Unsynced local changes">0 pending</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="openCalendar" class="icon-button" title="Calendar" aria-label="Calendar" type="button">▦</button>
+          <button id="headerSyncButton" class="icon-button" title="Sync now" aria-label="Sync now" type="button">↻</button>
+          <button id="openOptions" class="icon-button" title="Options" aria-label="Options" type="button">...</button>
+        </div>
+      </header>
+
+      <section id="activeWarning" class="warning hidden"></section>
+
+      <section class="active-panel">
+        <div class="active-copy">
+          <span class="active-label-row">
+            <span id="activeProjectDot" class="project-dot active-project-dot hidden" aria-hidden="true"></span>
+            <span class="label">Active</span>
+          </span>
+          <strong id="activeTitle">No active timer</strong>
+        </div>
+        <div class="active-controls">
+          <div id="elapsed" class="elapsed">00:00:00</div>
+          <button id="stopButton" class="stop-active-button" type="button">■ Stop</button>
+        </div>
+      </section>
+
+      <div class="section-divider" aria-hidden="true"></div>
+
+      <section class="new-timer">
+        <button id="newTimerToggle" class="new-timer-toggle" type="button" aria-expanded="false" aria-controls="newTimerPanel">
+          <span>New timer</span>
+          <span class="new-timer-icon" aria-hidden="true">+</span>
+        </button>
+        <div id="newTimerPanel" class="new-timer-panel hidden">
+          <form id="entryForm" class="entry-form">
+            <label>
+              Project
+              <input id="project" name="project" autocomplete="off">
+            </label>
+            <label>
+              Task
+              <input id="task" name="task" autocomplete="off">
+            </label>
+            <label>
+              Description
+              <textarea id="description" name="description" rows="2"></textarea>
+            </label>
+            <div class="checkbox-group">
+              <label class="checkbox-row">
+                <input id="billable" name="billable" type="checkbox">
+                <span>Billable</span>
+              </label>
+              <label class="checkbox-row">
+                <input id="multiply" name="multiply" type="checkbox">
+                <span>Multiply</span>
+              </label>
+            </div>
+          </form>
+
+          <div class="actions">
+            <button id="startButton" type="button">Start</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider" aria-hidden="true"></div>
+
+      <section id="editPanel" class="edit-panel hidden" aria-live="polite">
+        <h2 class="edit-title">
+          <span id="editProjectDot" class="project-dot hidden" aria-hidden="true"></span>
+          <span>Edit Entry</span>
+        </h2>
+        <form id="editForm">
+          <label>
+            Project
+            <input id="editProject">
+          </label>
+          <label>
+            Task
+            <input id="editTask">
+          </label>
+          <label>
+            Description
+            <textarea id="editDescription" rows="2"></textarea>
+          </label>
+          <div class="checkbox-group">
+            <label class="checkbox-row">
+              <input id="editBillable" type="checkbox">
+              <span>Billable</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="editMultiply" type="checkbox">
+              <span>Multiply</span>
+            </label>
+          </div>
+          <label>
+            Start
+            <input id="editStart" type="datetime-local" step="1">
+          </label>
+          <label>
+            End
+            <input id="editEnd" type="datetime-local" step="1">
+          </label>
+          <label>
+            Status
+            <select id="editStatus">
+              <option value="ok">ok</option>
+              <option value="needs_review">needs_review</option>
+            </select>
+          </label>
+        </form>
+        <div class="merge-tools">
+          <label>
+            Merge with matching entry
+            <select id="mergeTarget"></select>
+          </label>
+          <button id="mergeEdit" type="button">Merge</button>
+        </div>
+        <div class="edit-actions">
+          <button id="saveEdit" type="button">Save</button>
+          <button id="cancelEdit" type="button">Cancel</button>
+          <button id="deleteEdit" class="danger" type="button">Delete</button>
+        </div>
+      </section>
+
+      <section class="recent">
+        <div class="recent-heading">
+          <h2>Recent Entries</h2>
+          <button id="exportButton" class="secondary-button" type="button">Export CSV</button>
+        </div>
+        <div id="recentEntries" class="recent-list"></div>
+        <button id="loadMoreRecent" class="load-more-button hidden" type="button">Load more</button>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

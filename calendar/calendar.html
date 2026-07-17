@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Time Logger Calendar</title>
+    <link rel="stylesheet" href="calendar.css">
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <h1>Calendar</h1>
+          <p id="statusLine" class="status">Loading...</p>
+        </div>
+        <div class="toolbar">
+          <button id="prevWeek" class="icon-button" type="button" title="Previous week" aria-label="Previous week">‹</button>
+          <label class="week-label">
+            Week
+            <input id="weekPicker" type="week">
+          </label>
+          <button id="nextWeek" class="icon-button" type="button" title="Next week" aria-label="Next week">›</button>
+          <button id="todayButton" type="button">Today</button>
+          <button id="syncButton" type="button">Sync</button>
+        </div>
+      </header>
+
+      <section id="mergePanel" class="merge-panel" hidden>
+        <div>
+          <strong id="selectedEntryTitle">No entry selected</strong>
+          <p id="selectedEntryMeta"></p>
+        </div>
+        <label>
+          Merge with
+          <select id="calendarMergeTarget"></select>
+        </label>
+        <div class="merge-actions">
+          <button id="duplicateEntryButton" type="button">Duplicate</button>
+          <button id="calendarMergeButton" type="button">Merge</button>
+        </div>
+      </section>
+
+      <section id="calendarEditPanel" class="calendar-edit-panel" hidden>
+        <div class="edit-panel-heading">
+          <strong>Edit time log</strong>
+          <span id="calendarEditDuration"></span>
+        </div>
+        <form id="calendarEditForm" class="calendar-edit-form">
+          <label>
+            Project
+            <input id="calendarEditProject">
+          </label>
+          <label>
+            Task
+            <input id="calendarEditTask">
+          </label>
+          <label class="description-field">
+            Description
+            <textarea id="calendarEditDescription" rows="2"></textarea>
+          </label>
+          <label>
+            Start
+            <input id="calendarEditStart" type="datetime-local" step="1" required>
+          </label>
+          <label>
+            End
+            <input id="calendarEditEnd" type="datetime-local" step="1">
+          </label>
+          <div class="calendar-status-column">
+            <div class="calendar-status-controls">
+              <label>
+                Status
+                <select id="calendarEditStatus">
+                  <option value="ok">ok</option>
+                  <option value="needs_review">needs_review</option>
+                </select>
+              </label>
+              <div class="calendar-checkboxes">
+                <label class="calendar-checkbox-row">
+                  <input id="calendarEditBillable" type="checkbox">
+                  <span>Billable</span>
+                </label>
+                <label class="calendar-checkbox-row">
+                  <input id="calendarEditMultiply" type="checkbox">
+                  <span>Multiply</span>
+                </label>
+              </div>
+            </div>
+            <div class="calendar-edit-actions">
+              <button type="submit">Save</button>
+              <button id="cancelCalendarEditButton" type="button">Cancel</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="calendar-shell" aria-label="Weekly time log calendar">
+        <div id="dayHeader" class="day-header"></div>
+        <div id="calendarScroll" class="calendar-scroll">
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="calendar.js"></script>
+  </body>
+</html>

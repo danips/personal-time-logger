@@ -1,0 +1,99 @@
+name: Release Firefox extension
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: firefox-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-sign:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+      WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Resolve release version and update URL
+        env:
+          CONFIGURED_BASE_URL: ${{ vars.FIREFOX_UPDATE_BASE_URL }}
+        run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          update_base_url="$CONFIGURED_BASE_URL"
+          if [[ -z "$update_base_url" ]]; then
+            repository_owner="${GITHUB_REPOSITORY_OWNER,,}"
+            repository_name="${GITHUB_REPOSITORY#*/}"
+            update_base_url="https://${repository_owner}.github.io/${repository_name}"
+          fi
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+          echo "UPDATE_BASE_URL=${update_base_url%/}" >> "$GITHUB_ENV"
+
+      - name: Prepare release source
+        run: >-
+          node scripts/prepare-firefox-release.mjs
+          --base-url "$UPDATE_BASE_URL"
+          --expected-version "$RELEASE_VERSION"
+          --output web-ext-artifacts/release-source
+
+      - name: Lint extension
+        run: >-
+          npx --yes web-ext@10.3.0 lint
+          --source-dir web-ext-artifacts/release-source
+          --self-hosted
+
+      - name: Sign unlisted extension with Mozilla
+        run: >-
+          npx --yes web-ext@10.3.0 sign
+          --source-dir web-ext-artifacts/release-source
+          --artifacts-dir web-ext-artifacts/signed
+          --channel unlisted
+          --api-key "$WEB_EXT_API_KEY"
+          --api-secret "$WEB_EXT_API_SECRET"
+          --no-input
+
+      - name: Build Firefox update site
+        run: |
+          mapfile -t signed_xpis < <(find web-ext-artifacts/signed -maxdepth 1 -type f -name '*.xpi')
+          if [[ "${#signed_xpis[@]}" -ne 1 ]]; then
+            echo "Expected exactly one signed XPI, found ${#signed_xpis[@]}" >&2
+            exit 1
+          fi
+          node scripts/create-update-site.mjs \
+            --base-url "$UPDATE_BASE_URL" \
+            --xpi "${signed_xpis[0]}" \
+            --source web-ext-artifacts/release-source \
+            --output web-ext-artifacts/site
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: web-ext-artifacts/site
+
+  deploy:
+    needs: build-and-sign
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy signed extension and update feed
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Time Logger Options</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Time Logger Options</h1>
+        <p id="statusLine" class="status">Loading...</p>
+      </header>
+
+      <section class="panel">
+        <h2>Google Account</h2>
+        <label>
+          OAuth client ID
+          <input id="googleClientId" type="text" autocomplete="off" spellcheck="false">
+        </label>
+        <label>
+          OAuth client secret
+          <input id="googleClientSecret" type="password" autocomplete="off" spellcheck="false">
+        </label>
+        <p class="note">Stored only in this Firefox profile. Each device needs its own one-time setup.</p>
+        <dl>
+          <div>
+            <dt>OAuth status</dt>
+            <dd id="authStatus">Loading...</dd>
+          </div>
+          <div>
+            <dt>OAuth client ID</dt>
+            <dd class="copy-row">
+              <code id="oauthClientId"></code>
+              <button id="copyClientId" type="button">Copy</button>
+            </dd>
+          </div>
+          <div>
+            <dt>Device ID</dt>
+            <dd><code id="deviceId"></code></dd>
+          </div>
+        </dl>
+        <p class="note">Google sign-in uses device authorization with a TVs and Limited Input devices OAuth client.</p>
+        <div id="deviceAuthPanel" class="device-auth" hidden>
+          <p>Google device sign-in code</p>
+          <strong id="deviceUserCode"></strong>
+          <p>
+            Open <a id="deviceVerificationUrl" href="#" target="_blank" rel="noreferrer"></a>
+            and enter the code above.
+          </p>
+          <p id="deviceAuthExpires" class="note"></p>
+        </div>
+        <div class="actions">
+          <button id="saveGoogleCredentials" type="button">Save Credentials</button>
+          <button id="signInButton" type="button">Sign In</button>
+          <button id="signOutButton" type="button">Sign Out</button>
+          <button id="copyOAuthSetup" type="button">Copy OAuth Setup</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Spreadsheet</h2>
+        <label>
+          Google Spreadsheet ID
+          <input id="spreadsheetId" autocomplete="off" spellcheck="false">
+        </label>
+        <label>
+          Sync interval seconds
+          <input id="syncInterval" type="number" min="30" step="1">
+        </label>
+        <label>
+          Duration multiplier
+          <input id="durationMultiplier" type="number" min="0.01" step="0.01">
+        </label>
+        <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
+        <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
+        <div class="actions">
+          <button id="saveSettings" type="button">Save Settings</button>
+          <button id="initSheet" type="button">Create/Initialize Spreadsheet</button>
+          <button id="testConnection" type="button">Test Connection</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
