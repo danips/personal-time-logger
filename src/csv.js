@@ -51,13 +51,13 @@ export function entriesToCsv(entries) {
   return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
 }
 
-export function downloadCsv(entries) {
+export function downloadCsv(entries, filename = `time-entries-${new Date().toISOString().slice(0, 10)}.csv`) {
   const csv = entriesToCsv(entries);
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `time-entries-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = filename;
   document.body.append(link);
   link.click();
   link.remove();

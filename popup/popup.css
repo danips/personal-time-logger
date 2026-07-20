@@ -342,12 +342,6 @@ textarea {
   margin-bottom: 0;
 }
 
-.secondary-button {
-  min-height: 30px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
 .recent-list {
   display: grid;
   gap: 8px;

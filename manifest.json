@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Personal Time Logger",
   "description": "Local-first time tracking with Google Sheets sync.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "host_permissions": [
     "https://www.googleapis.com/*",
     "https://oauth2.googleapis.com/*"

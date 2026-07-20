@@ -1,6 +1,5 @@
-import { getActiveEntries, getAllEntries, getDirtyEntries, getSetting, getVisibleEntries } from "../src/db.js";
+import { getActiveEntries, getDirtyEntries, getSetting, getVisibleEntries } from "../src/db.js";
 import { canMergeEntries, createEntry, hasMultiplier, mergeEntries, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
-import { downloadCsv } from "../src/csv.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
 import {
@@ -605,10 +604,6 @@ async function mergeEdit() {
   }
 }
 
-async function exportCsv() {
-  downloadCsv(await getAllEntries());
-}
-
 async function startPolling() {
   const configured = Number(await getSetting("sync_interval_seconds", 60)) || 60;
   const interval = Math.max(30, configured) * 1000;
@@ -626,7 +621,6 @@ function bindEvents() {
   $(".active-panel").addEventListener("click", editActiveTimer);
   $(".active-panel").addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", () => runSync({ force: true }));
-  $("#exportButton").addEventListener("click", exportCsv);
   $("#loadMoreRecent").addEventListener("click", () => {
     recentLimit += RECENT_PAGE_SIZE;
     renderRecent().catch((error) => {

@@ -1,5 +1,6 @@
 import { getVisibleEntries } from "../src/db.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, updateEntry } from "../src/entries.js";
+import { downloadCsv } from "../src/csv.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
 import {
@@ -73,6 +74,14 @@ function shortDay(date) {
 
 function calendarHeaderDate(date) {
   return date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function localDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")
+  ].join("-");
 }
 
 function formatTotalHours(seconds) {
@@ -893,12 +902,18 @@ async function changeWeek(nextStart) {
   setStatus("Ready");
 }
 
+function exportDisplayedWeek() {
+  const weekEnd = addDays(weekStart, DAY_COUNT - 1);
+  downloadCsv(renderedEntries, `time-entries-${localDateKey(weekStart)}-to-${localDateKey(weekEnd)}.csv`);
+}
+
 function bindEvents() {
   bindMinuteRollover($("#calendarEditStart"));
   bindMinuteRollover($("#calendarEditEnd"));
   $("#prevWeek").addEventListener("click", () => changeWeek(addDays(weekStart, -DAY_COUNT)));
   $("#nextWeek").addEventListener("click", () => changeWeek(addDays(weekStart, DAY_COUNT)));
   $("#todayButton").addEventListener("click", () => changeWeek(new Date()));
+  $("#exportButton").addEventListener("click", exportDisplayedWeek);
   $("#syncButton").addEventListener("click", () => runSync({ force: true }));
   $("#undoResizeButton").addEventListener("click", undoResize);
   $("#duplicateEntryButton").addEventListener("click", duplicateSelectedEntry);

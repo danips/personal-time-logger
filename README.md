@@ -6,9 +6,9 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 
 - Popup timer with live elapsed time.
 - Project, task, description, billable, and multiply fields in the popup.
-- Start, active-timer Stop, header Sync, and Export CSV controls.
+- Start, active-timer Stop, and header Sync controls in the popup.
 - Last 10 non-deleted entries with inline editing.
-- Weekly calendar view with movable and resizable time logs.
+- Weekly calendar view with movable and resizable time logs and displayed-week CSV export.
 - Multiple-active-timer warning.
 - Options page for Google auth, spreadsheet setup, sync interval, and device ID.
 - IndexedDB local storage using database `timelogger_db`.
@@ -139,7 +139,7 @@ If the popup or options page reports `sheet tab/header missing`, open Options an
 
 ## Mock Mode
 
-Mock mode lets you test the popup, IndexedDB, CSV export, edit flow, and sync flow without Google OAuth.
+Mock mode lets you test the popup, calendar, IndexedDB, CSV export, edit flow, and sync flow without Google OAuth.
 
 1. Open the extension's Options page.
 2. Enable **Use local mock Sheets data (development only)**.
@@ -155,10 +155,10 @@ Mock remote rows are stored locally in IndexedDB settings. No Google API calls a
 4. Click **Stop** when finished.
    Click the active timer card to open it in the edit panel when you need to change its details or start time.
 5. Use the header sync button to push/pull immediately.
-6. Use **Export CSV** to download completed, non-deleted local entries.
-7. Click a recent entry row to edit it.
-8. Use the play button on a recent entry to start a new timer with the same details.
-9. Use the calendar button to open the weekly calendar view.
+6. Click a recent entry row to edit it.
+7. Use the play button on a recent entry to start a new timer with the same details.
+8. Use the calendar button to open the weekly calendar view.
+9. Use **Export CSV** in the calendar to download entries for its displayed week.
 10. Use the merge controls in a recent entry edit panel or selected calendar entry to combine matching completed logs.
 
 Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when Google auth is not ready.
@@ -170,6 +170,8 @@ Set **Duration multiplier** in Options. Entries with **Multiply** checked store 
 ## Calendar View
 
 The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid. Entries that overlap in time are shown side by side.
+
+Click **Export CSV** to download the entries shown in the displayed week. The downloaded filename includes that week's Monday and Sunday dates.
 
 Drag a time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`. Completed entries keep their original duration when moved. Active timers keep running and only their `start_at` value changes.
 
@@ -221,7 +223,7 @@ The CSV export includes:
 
 `Duration (hours)` is the original elapsed time. `Multiplied duration (hours)` is the effective duration after applying the value in `Multiply`.
 
-Deleted entries and active timers are excluded by default.
+The calendar exports the displayed week. Deleted entries and active timers are excluded from the CSV.
 
 ## Known Limitations
 
