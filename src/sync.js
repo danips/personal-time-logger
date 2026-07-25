@@ -1,5 +1,5 @@
 import { getAllEntries, getDirtyEntries, putEntry, putEntries, setSetting, getSetting } from "./db.js";
-import { appendRemoteEntry, readRemoteEntries, updateRemoteEntry } from "./sheets.js";
+import { appendRemoteEntry, readRemoteConfig, readRemoteEntries, updateRemoteConfig, updateRemoteEntry } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
 import { nowIso } from "./time.js";
@@ -103,6 +103,25 @@ async function markMultipleActiveTimers() {
   return changed;
 }
 
+async function pushLocalConfig({ interactiveAuth }) {
+  const localValue = await getSetting("duration_multiplier", "1");
+  const localUpdatedAt = await getSetting("duration_multiplier_updated_at", "");
+  if (!localUpdatedAt) return;
+  await updateRemoteConfig("duration_multiplier", String(localValue), localUpdatedAt, { interactiveAuth });
+}
+
+async function pullRemoteConfig({ interactiveAuth }) {
+  const remoteConfig = await readRemoteConfig({ interactiveAuth });
+  const remote = remoteConfig["duration_multiplier"];
+  if (remote && remote.updated_at) {
+    const localUpdatedAt = await getSetting("duration_multiplier_updated_at", "");
+    if (remote.updated_at > localUpdatedAt) {
+      await setSetting("duration_multiplier", remote.value);
+      await setSetting("duration_multiplier_updated_at", remote.updated_at);
+    }
+  }
+}
+
 export async function syncNow({ interactiveAuth = false, force = false } = {}) {
   if (!platform.isOnline()) {
     const error = codedError("OFFLINE", "offline");
@@ -127,6 +146,9 @@ export async function syncNow({ interactiveAuth = false, force = false } = {}) {
       const thirdRead = await readRemoteEntries({ interactiveAuth });
       await pushDirtyEntries(thirdRead.entries, thirdRead.rowMap, { interactiveAuth });
     }
+
+    await pullRemoteConfig({ interactiveAuth });
+    await pushLocalConfig({ interactiveAuth });
 
     const timestamp = nowIso();
     await clearBackoff();

@@ -9,6 +9,11 @@ const SHEET_NAME = "time_entries";
 const FULL_RANGE = `${SHEET_NAME}!A:Q`;
 const HEADER_RANGE = `${SHEET_NAME}!A1:Q1`;
 const MOCK_ROWS_KEY = "mock_remote_rows";
+const CONFIG_SHEET_NAME = "config";
+const CONFIG_FULL_RANGE = `${CONFIG_SHEET_NAME}!A:C`;
+const CONFIG_HEADER_RANGE = `${CONFIG_SHEET_NAME}!A1:C1`;
+const CONFIG_HEADERS = ["key", "value", "updated_at"];
+const MOCK_CONFIG_KEY = "mock_remote_config";
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -110,6 +115,7 @@ export async function createOrInitializeSpreadsheet({ interactiveAuth = true } =
   }
 
   await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
+  await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
   return { spreadsheetId, mock: false };
 }
 
@@ -147,6 +153,113 @@ async function ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth = false }
   }
 }
 
+async function ensureConfigSheet(spreadsheetId, { interactiveAuth = false } = {}) {
+  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+
+  const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`, {}, { interactiveAuth });
+  const existingSheet = (metadata.sheets || []).find((sheet) => sheet.properties && sheet.properties.title === CONFIG_SHEET_NAME);
+
+  if (!existingSheet) {
+    await apiFetch(`/${spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({
+        requests: [{ addSheet: { properties: { title: CONFIG_SHEET_NAME } } }]
+      })
+    }, { interactiveAuth });
+  }
+
+  const headerData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_HEADER_RANGE)}`, {}, { interactiveAuth })
+    .catch((error) => {
+      if (error.code === "SHEET_MISSING") return { values: [] };
+      throw error;
+    });
+  const headerRow = headerData.values && headerData.values[0] ? headerData.values[0] : [];
+
+  if (JSON.stringify(headerRow) !== JSON.stringify(CONFIG_HEADERS)) {
+    await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_HEADER_RANGE)}?valueInputOption=RAW`, {
+      method: "PUT",
+      body: JSON.stringify({ values: [CONFIG_HEADERS] })
+    }, { interactiveAuth });
+  }
+}
+
+async function mockConfigRows() {
+  const rows = await getSetting(MOCK_CONFIG_KEY);
+  if (Array.isArray(rows) && rows.length) {
+    if (JSON.stringify(rows[0] || []) !== JSON.stringify(CONFIG_HEADERS)) {
+      rows[0] = CONFIG_HEADERS;
+      await setSetting(MOCK_CONFIG_KEY, rows);
+    }
+    return rows;
+  }
+  const initial = [CONFIG_HEADERS];
+  await setSetting(MOCK_CONFIG_KEY, initial);
+  return initial;
+}
+
+function rowsToConfig(rows) {
+  const config = {};
+  (rows || []).slice(1).forEach((row) => {
+    if (row[0]) {
+      config[row[0]] = { value: row[1] || "", updated_at: row[2] || "" };
+    }
+  });
+  return config;
+}
+
+export async function readRemoteConfig({ interactiveAuth = false } = {}) {
+  const config = await getConfig();
+  if (config.USE_MOCK_SHEETS) {
+    const rows = await mockConfigRows();
+    return rowsToConfig(rows);
+  }
+
+  const spreadsheetId = await getSpreadsheetId();
+  if (!spreadsheetId) return {};
+
+  await ensureConfigSheet(spreadsheetId, { interactiveAuth });
+  const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_FULL_RANGE)}`, {}, { interactiveAuth });
+  return rowsToConfig(data.values || []);
+}
+
+export async function updateRemoteConfig(key, value, updatedAt, { interactiveAuth = false } = {}) {
+  const config = await getConfig();
+  if (config.USE_MOCK_SHEETS) {
+    const rows = await mockConfigRows();
+    const existingIndex = rows.findIndex((row, i) => i > 0 && row[0] === key);
+    const row = [key, value, updatedAt];
+    if (existingIndex >= 0) {
+      rows[existingIndex] = row;
+    } else {
+      rows.push(row);
+    }
+    await setSetting(MOCK_CONFIG_KEY, rows);
+    return;
+  }
+
+  const spreadsheetId = await getSpreadsheetId();
+  if (!spreadsheetId) return;
+
+  await ensureConfigSheet(spreadsheetId, { interactiveAuth });
+
+  const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_FULL_RANGE)}`, {}, { interactiveAuth });
+  const rows = data.values || [CONFIG_HEADERS];
+  const existingIndex = rows.findIndex((r, i) => i > 0 && r[0] === key);
+
+  if (existingIndex >= 0) {
+    const rowIndex = existingIndex + 1;
+    await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A${rowIndex}:C${rowIndex}`)}?valueInputOption=RAW`, {
+      method: "PUT",
+      body: JSON.stringify({ values: [[key, value, updatedAt]] })
+    }, { interactiveAuth });
+  } else {
+    await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A:C`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: "POST",
+      body: JSON.stringify({ values: [[key, value, updatedAt]] })
+    }, { interactiveAuth });
+  }
+}
+
 export async function testConnection({ interactiveAuth = false } = {}) {
   const config = await getConfig();
   if (config.USE_MOCK_SHEETS) {
@@ -156,6 +269,7 @@ export async function testConnection({ interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
   await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
+  await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
   return { ok: true, mock: false };
 }
 

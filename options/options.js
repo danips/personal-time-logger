@@ -3,7 +3,9 @@ import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, resetConfigCache } from "../src/config-loader.js";
 import { createOrInitializeSpreadsheet, setSpreadsheetId, testConnection } from "../src/sheets.js";
+import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
+import { nowIso } from "../src/time.js";
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -37,12 +39,15 @@ async function saveSettings() {
   const multiplier = normalizeMultiplierText($("#durationMultiplier").value) || "1";
   await setSpreadsheetId(spreadsheetId);
   await setSetting("sync_interval_seconds", interval);
+  const multiplierUpdatedAt = nowIso();
   await setSetting("duration_multiplier", multiplier);
+  await setSetting("duration_multiplier_updated_at", multiplierUpdatedAt);
   await setSetting("use_mock_sheets", $("#useMockSheets").checked);
   resetConfigCache();
   $("#syncInterval").value = String(interval);
   $("#durationMultiplier").value = String(multiplier);
   setStatus("Settings saved");
+  syncNow({ force: true }).catch(() => {});
   await refresh();
 }
 
