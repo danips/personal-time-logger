@@ -4,7 +4,7 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 
 ## What Is Included
 
-- Popup timer with live elapsed time.
+- Popup timer with live elapsed time; toolbar icon turns green when a timer is running.
 - Project, task, description, billable, and multiply fields in the popup.
 - Start, active-timer Stop, and header Sync controls in the popup.
 - Last 10 non-deleted entries with inline editing.
@@ -83,7 +83,7 @@ git push origin v0.1.2
 
 Firefox periodically checks the deployed `updates.json` and installs a higher signed version. In `about:addons`, **Check for Updates** can trigger an immediate check.
 
-The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. `./xpi_gen.sh https://your-update-host.example/path` can create an unsigned review archive locally, but normal Firefox installations still require the Mozilla-signed XPI.
+The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. `./xpi_gen.sh` can create an unsigned review archive locally, but normal Firefox installations still require the Mozilla-signed XPI.
 
 ## Google Cloud OAuth Setup
 
@@ -227,13 +227,14 @@ The calendar exports the displayed week. Deleted entries and active timers are e
 - No unit tests by design.
 - No external dependencies by design.
 - Manifest V3 support in Firefox can vary by version; if a browser rejects the manifest, use a current Firefox release.
-- Placeholder PNG icons are in `icons/`; replace them before store packaging if you want polished branding.
+- SVG icons are in `icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
 
 ## Files
 
 ```text
 manifest.json
 README.md
+xpi_gen.sh
 popup/
 calendar/
 options/
