@@ -31,12 +31,6 @@
 
       <div id="calendarEditOverlay" class="edit-overlay" hidden>
         <div class="edit-popup">
-          <div class="edit-popup-header">
-            <span id="calendarEditProjectDot" class="project-dot hidden"></span>
-            <span id="calendarEditTitle"></span>
-            <span id="calendarEditDuration"></span>
-            <button id="closeEditPopup" class="edit-popup-close" type="button">✕</button>
-          </div>
           <form id="calendarEditForm" class="edit-popup-form">
             <label>
               Project
@@ -59,14 +53,14 @@
                 <input id="calendarEditMultiply" type="checkbox">
                 Multiply
               </label>
+              <label class="status-inline">
+                Status
+                <select id="calendarEditStatus">
+                  <option value="ok">ok</option>
+                  <option value="needs_review">needs_review</option>
+                </select>
+              </label>
             </div>
-            <label>
-              Status
-              <select id="calendarEditStatus">
-                <option value="ok">ok</option>
-                <option value="needs_review">needs_review</option>
-              </select>
-            </label>
             <label>
               Start
               <input id="calendarEditStart" type="datetime-local" step="1" required>
@@ -80,8 +74,8 @@
                 Merge with
                 <select id="calendarMergeTarget"></select>
               </label>
-              <button id="duplicateEntryButton" type="button">Duplicate</button>
               <button id="calendarMergeButton" type="button">Merge</button>
+              <button id="duplicateEntryButton" type="button">Duplicate</button>
             </div>
             <div class="edit-popup-actions">
               <button type="submit">Save</button>

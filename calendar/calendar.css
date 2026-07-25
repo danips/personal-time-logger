@@ -142,12 +142,6 @@ textarea {
 
 .edit-overlay {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 60px;
   z-index: 100;
 }
 
@@ -156,6 +150,7 @@ textarea {
 }
 
 .edit-popup {
+  position: fixed;
   width: 380px;
   max-width: 90vw;
   max-height: calc(100vh - 80px);
@@ -165,37 +160,16 @@ textarea {
   border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
-.edit-popup-header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 10px;
-  font-weight: 700;
+.edit-popup:active {
+  cursor: grabbing;
 }
 
-.edit-popup-header .project-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--project-color);
-}
 
-.edit-popup-close {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--muted);
-}
 
 .edit-popup-form {
   display: grid;
@@ -207,6 +181,13 @@ textarea {
   gap: 3px;
   color: var(--muted);
   font-size: 12px;
+  user-select: text;
+}
+
+.edit-popup-form input,
+.edit-popup-form textarea,
+.edit-popup-form select {
+  user-select: text;
 }
 
 .edit-popup-form input,
@@ -232,6 +213,18 @@ textarea {
 
 .edit-popup-checkboxes input {
   width: auto;
+}
+
+.edit-popup-checkboxes label.status-inline {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.edit-popup-checkboxes label.status-inline select {
+  width: 120px;
 }
 
 .edit-popup-merge {

@@ -38,6 +38,7 @@ let editingEntryId = "";
 let editingMultiplyValue = "";
 let unsubscribeEntryEvents = null;
 let lastResizeUndo = null;
+let popupDragState = null;
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -441,6 +442,81 @@ function getEntryById(id) {
   return renderedEntries.find((entry) => entry.id === id);
 }
 
+function positionPopupForEntry(entryId) {
+  const block = document.querySelector(`[data-entry-id="${entryId}"]`);
+  if (!block) return;
+  const popup = $(".edit-popup");
+  const blockRect = block.getBoundingClientRect();
+  const popupWidth = 380;
+  const popupHeight = popup.offsetHeight || 400;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const pad = 12;
+  let left = blockRect.right + pad;
+  let top = blockRect.top;
+  if (left + popupWidth > vw - pad) {
+    left = blockRect.left - popupWidth - pad;
+  }
+  if (left < pad) {
+    left = Math.max(pad, (vw - popupWidth) / 2);
+  }
+  if (top + popupHeight > vh - pad) {
+    top = Math.max(pad, vh - popupHeight - pad);
+  }
+  if (top < pad) {
+    top = pad;
+  }
+  popup.style.left = `${left}px`;
+  popup.style.top = `${top}px`;
+}
+
+function refreshSelectedEntryEditor() {
+  const entry = getEntryById(selectedEntryId);
+  if (!entry || !editingEntryId) return;
+  editingEntryId = entry.id;
+  editingMultiplyValue = entry.multiply || "";
+  $("#calendarEditProject").value = entry.project || "";
+  $("#calendarEditTask").value = entry.task || "";
+  $("#calendarEditDescription").value = entry.description || "";
+  $("#calendarEditBillable").checked = Boolean(entry.billable);
+  $("#calendarEditMultiply").checked = hasMultiplier(entry);
+  $("#calendarEditStart").value = toLocalInputValue(entry.start_at);
+  $("#calendarEditEnd").value = toLocalInputValue(entry.end_at);
+  $("#calendarEditStatus").value = entry.status || "ok";
+  positionPopupForEntry(entry.id);
+}
+
+function beginPopupDrag(event) {
+  if (event.button !== 0) return;
+  if (event.target.closest("input") || event.target.closest("button") || event.target.closest("select") || event.target.closest("textarea")) return;
+  event.preventDefault();
+  const popup = $(".edit-popup");
+  const rect = popup.getBoundingClientRect();
+  popupDragState = {
+    startX: event.clientX,
+    startY: event.clientY,
+    origLeft: rect.left,
+    origTop: rect.top
+  };
+  document.addEventListener("pointermove", movePopupDrag);
+  document.addEventListener("pointerup", endPopupDrag, { once: true });
+  document.addEventListener("pointercancel", endPopupDrag, { once: true });
+}
+
+function movePopupDrag(event) {
+  if (!popupDragState) return;
+  const popup = $(".edit-popup");
+  popup.style.left = `${popupDragState.origLeft + event.clientX - popupDragState.startX}px`;
+  popup.style.top = `${popupDragState.origTop + event.clientY - popupDragState.startY}px`;
+}
+
+function endPopupDrag() {
+  popupDragState = null;
+  document.removeEventListener("pointermove", movePopupDrag);
+  document.removeEventListener("pointerup", endPopupDrag);
+  document.removeEventListener("pointercancel", endPopupDrag);
+}
+
 function ensurePreview() {
   if (preview) return preview;
   preview = document.createElement("div");
@@ -652,11 +728,11 @@ async function endResize() {
   };
 
   try {
-    if (editingEntryId === state.entry.id) closeEditor();
     await updateEntry(state.entry.id, changes);
     setResizeUndo(undo);
     setStatus("Entry resized");
     await render();
+    if (editingEntryId === state.entry.id) refreshSelectedEntryEditor();
     await runSync({ force: false });
   } catch (error) {
     setStatus(formatError(error));
@@ -711,10 +787,10 @@ async function endDrag() {
 
   try {
     setResizeUndo(null);
-    if (editingEntryId === state.entry.id) closeEditor();
     await updateEntry(state.entry.id, changes);
     setStatus("Entry moved");
     await render();
+    if (editingEntryId === state.entry.id) refreshSelectedEntryEditor();
     await runSync({ force: false });
   } catch (error) {
     setStatus(formatError(error));
@@ -728,13 +804,13 @@ async function undoResize() {
   setResizeUndo(null);
 
   try {
-    if (editingEntryId === undo.id) closeEditor();
     await updateEntry(undo.id, {
       start_at: undo.start_at,
       end_at: undo.end_at
     });
     setStatus("Resize undone");
     await render();
+    if (editingEntryId === undo.id) refreshSelectedEntryEditor();
     await runSync({ force: false });
   } catch (error) {
     setResizeUndo(undo);
@@ -807,13 +883,7 @@ function openSelectedEntryEditor() {
   $("#calendarEditEnd").value = toLocalInputValue(entry.end_at);
   $("#calendarEditStatus").value = entry.status || "ok";
 
-  const projectDot = $("#calendarEditProjectDot");
-  projectDot.classList.toggle("hidden", !entry.project);
-  projectDot.style.setProperty("--project-color", projectColor(entry));
-  $("#calendarEditTitle").textContent = entryTitle(entry);
-  $("#calendarEditDuration").textContent = entry.end_at
-    ? formatElapsed(entry.duration_seconds || durationSeconds(entry.start_at, entry.end_at))
-    : "Active";
+
 
   const candidates = renderedEntries.filter((e) => canMergeEntries(entry, e));
   const mergeOptions = candidates.map((e) => {
@@ -835,6 +905,7 @@ function openSelectedEntryEditor() {
     ? "Create a copy at the same date and time"
     : "Stop this entry before duplicating it";
 
+  positionPopupForEntry(entry.id);
   $("#calendarEditOverlay").hidden = false;
   $("#calendarEditProject").focus();
 }
@@ -925,11 +996,9 @@ function bindEvents() {
   $("#calendarMergeButton").addEventListener("click", mergeSelectedEntry);
   $("#calendarEditForm").addEventListener("submit", saveCalendarEdit);
   $("#cancelCalendarEditButton").addEventListener("click", clearSelection);
-  $("#closeEditPopup").addEventListener("click", clearSelection);
+
   $("#deleteCalendarEntry").addEventListener("click", deleteCalendarEntry);
-  $("#calendarEditOverlay").addEventListener("click", (event) => {
-    if (event.target === $("#calendarEditOverlay")) clearSelection();
-  });
+  $(".edit-popup").addEventListener("pointerdown", beginPopupDrag);
   $("#weekPicker").addEventListener("change", async (event) => {
     const parsed = weekStartFromInput(event.target.value);
     if (parsed) await changeWeek(parsed);
