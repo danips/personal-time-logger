@@ -53,5 +53,10 @@ export const platform = {
 
   isOnline() {
     return navigator.onLine !== false;
+  },
+
+  async setIcon(details) {
+    if (!rawApi.action || !rawApi.action.setIcon) return;
+    return apiCall(rawApi.action.setIcon, rawApi.action, details);
   }
 };

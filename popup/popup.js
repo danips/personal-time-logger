@@ -23,6 +23,7 @@ import {
   statusFromError
 } from "../src/ui-helpers.js";
 import { platform } from "../src/platform.js";
+import { setActiveIcon } from "../src/icon.js";
 
 let activeEntries = [];
 let editingId = "";
@@ -349,17 +350,19 @@ function renderRecentTimerGroup(group) {
 
 function updateElapsed() {
   const latest = activeEntries[0];
+  const hasActive = Boolean(latest);
   const activePanel = $(".active-panel");
   const dot = $("#activeProjectDot");
   $("#activeTitle").textContent = latest ? entryTitle(latest) : "No active timer";
   $("#elapsed").textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
   $("#stopButton").classList.toggle("hidden", !latest);
-  activePanel.classList.toggle("is-running", Boolean(latest));
+  activePanel.classList.toggle("is-running", hasActive);
   activePanel.tabIndex = latest ? 0 : -1;
   activePanel.setAttribute("role", latest ? "button" : "region");
   activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "No active timer");
   dot.classList.toggle("hidden", !latest);
   if (latest) dot.style.setProperty("--project-color", projectColor(latest));
+  setActiveIcon(hasActive);
 }
 
 function setNewTimerOpen(open) {
