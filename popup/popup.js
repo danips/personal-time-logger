@@ -34,6 +34,34 @@ let unsubscribeEntryEvents = null;
 const expandedRecentGroups = new Set();
 let recentWeekCount = 1;
 
+const $activePanel = $(".active-panel");
+const $activeDot = $("#activeProjectDot");
+const $activeTitle = $("#activeTitle");
+const $elapsed = $("#elapsed");
+const $stopButton = $("#stopButton");
+const $activeWarning = $("#activeWarning");
+const $recentEntries = $("#recentEntries");
+const $loadMoreRecent = $("#loadMoreRecent");
+const $dirtyBadge = $("#dirtyBadge");
+const $syncStatus = $("#syncStatus");
+const $editPanel = $("#editPanel");
+const $editProjectDot = $("#editProjectDot");
+const $editProject = $("#editProject");
+const $editTask = $("#editTask");
+const $editDescription = $("#editDescription");
+const $editBillable = $("#editBillable");
+const $editMultiply = $("#editMultiply");
+const $editStart = $("#editStart");
+const $editEnd = $("#editEnd");
+const $editStatus = $("#editStatus");
+const $mergeTarget = $("#mergeTarget");
+const $mergeEdit = $("#mergeEdit");
+const $newTimerToggle = $("#newTimerToggle");
+const $newTimerPanel = $("#newTimerPanel");
+const $newTimerIcon = $(".new-timer-icon");
+
+let wasActive;
+
 function formFields() {
   return {
     client: "",
@@ -351,40 +379,42 @@ function renderRecentTimerGroup(group) {
 function updateElapsed() {
   const latest = activeEntries[0];
   const hasActive = Boolean(latest);
-  const activePanel = $(".active-panel");
-  const dot = $("#activeProjectDot");
-  $("#activeTitle").textContent = latest ? entryTitle(latest) : "No active timer";
-  $("#elapsed").textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
-  $("#stopButton").classList.toggle("hidden", !latest);
-  activePanel.classList.toggle("is-running", hasActive);
-  activePanel.tabIndex = latest ? 0 : -1;
-  activePanel.setAttribute("role", latest ? "button" : "region");
-  activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "No active timer");
-  dot.classList.toggle("hidden", !latest);
-  if (latest) dot.style.setProperty("--project-color", projectColor(latest));
+  if (hasActive === wasActive) {
+    if (hasActive) $elapsed.textContent = formatElapsed(durationSeconds(latest.start_at));
+    return;
+  }
+  wasActive = hasActive;
+  $activeTitle.textContent = latest ? entryTitle(latest) : "No active timer";
+  $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
+  $stopButton.classList.toggle("hidden", !latest);
+  $activePanel.classList.toggle("is-running", hasActive);
+  $activePanel.tabIndex = latest ? 0 : -1;
+  $activePanel.setAttribute("role", latest ? "button" : "region");
+  $activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "No active timer");
+  $activeDot.classList.toggle("hidden", !latest);
+  if (latest) $activeDot.style.setProperty("--project-color", projectColor(latest));
   setActiveIcon(hasActive);
 }
 
 function setNewTimerOpen(open) {
-  $("#newTimerToggle").setAttribute("aria-expanded", open ? "true" : "false");
-  $("#newTimerPanel").classList.toggle("hidden", !open);
-  $(".new-timer-icon").textContent = open ? "-" : "+";
+  $newTimerToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  $newTimerPanel.classList.toggle("hidden", !open);
+  $newTimerIcon.textContent = open ? "-" : "+";
 }
 
 function toggleNewTimer() {
-  setNewTimerOpen($("#newTimerToggle").getAttribute("aria-expanded") !== "true");
+  setNewTimerOpen($newTimerToggle.getAttribute("aria-expanded") !== "true");
 }
 
 async function renderActive() {
   activeEntries = await getActiveEntries();
   updateElapsed();
 
-  const warning = $("#activeWarning");
   if (activeEntries.length > 1) {
-    warning.textContent = `Warning: ${activeEntries.length} active timers exist. Older active entries are marked needs_review on sync.`;
-    warning.classList.remove("hidden");
+    $activeWarning.textContent = `Warning: ${activeEntries.length} active timers exist. Older active entries are marked needs_review on sync.`;
+    $activeWarning.classList.remove("hidden");
   } else {
-    warning.classList.add("hidden");
+    $activeWarning.classList.add("hidden");
   }
 }
 
@@ -394,15 +424,13 @@ async function renderRecent() {
   const cutoffStr = cutoff.toISOString();
   const entries = allEntries.filter((e) => e.start_at && e.start_at >= cutoffStr);
   const hiddenCount = allEntries.filter((e) => !e.start_at || e.start_at < cutoffStr).length;
-  const container = $("#recentEntries");
-  const loadMore = $("#loadMoreRecent");
 
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "entry-meta";
     empty.textContent = "No entries yet.";
-    container.replaceChildren(empty);
-    loadMore.classList.add("hidden");
+    $recentEntries.replaceChildren(empty);
+    $loadMoreRecent.classList.add("hidden");
     return;
   }
 
@@ -439,21 +467,19 @@ async function renderRecent() {
     section.append(header, days);
     return section;
   });
-  container.replaceChildren(...weekElements);
+  $recentEntries.replaceChildren(...weekElements);
 
-  loadMore.classList.toggle("hidden", hiddenCount === 0);
-  loadMore.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
+  $loadMoreRecent.classList.toggle("hidden", hiddenCount === 0);
+  $loadMoreRecent.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
 }
 
 async function renderDirtyBadge() {
-  const badge = $("#dirtyBadge");
-  if (!badge) return;
-
+  if (!$dirtyBadge) return;
   const count = (await getDirtyEntries()).length;
   const label = count > 99 ? "99+ pending" : `${count} pending`;
-  badge.textContent = label;
-  badge.title = `${count} unsynced local ${count === 1 ? "change" : "changes"}`;
-  badge.classList.toggle("hidden", count === 0);
+  $dirtyBadge.textContent = label;
+  $dirtyBadge.title = `${count} unsynced local ${count === 1 ? "change" : "changes"}`;
+  $dirtyBadge.classList.toggle("hidden", count === 0);
 }
 
 async function render() {
@@ -463,13 +489,12 @@ async function render() {
 }
 
 async function runSync({ force = false } = {}) {
-  const status = $("#syncStatus");
-  setStatus(status, "pending");
+  setStatus($syncStatus, "pending");
   try {
     const result = await syncNow({ interactiveAuth: false, force });
-    setStatus(status, result.status, result.warning);
+    setStatus($syncStatus, result.status, result.warning);
   } catch (error) {
-    setStatus(status, statusFromError(error), formatError(error));
+    setStatus($syncStatus, statusFromError(error), formatError(error));
   }
   await render();
 }
@@ -477,7 +502,6 @@ async function runSync({ force = false } = {}) {
 async function startTimer() {
   await createEntry(formFields());
   setNewTimerOpen(false);
-  await render();
   await runSync({ force: false });
 }
 
@@ -494,7 +518,6 @@ async function restartFromEntry(id) {
     tags: ""
   });
   hideEdit();
-  await render();
   await runSync({ force: false });
 }
 
@@ -502,7 +525,6 @@ async function stopTimer() {
   const active = await getActiveEntries();
   if (!active.length) return;
   await stopEntry(active[0].id);
-  await render();
   await runSync({ force: false });
 }
 
@@ -512,21 +534,20 @@ async function showEdit(id) {
   if (!entry) return;
   editingId = id;
   editingMultiplyValue = entry.multiply || "";
-  const editDot = $("#editProjectDot");
-  editDot.classList.toggle("hidden", !entry.project);
-  editDot.style.setProperty("--project-color", projectColor(entry));
-  $("#editProject").value = entry.project || "";
-  $("#editTask").value = entry.task || "";
-  $("#editDescription").value = entry.description || "";
-  $("#editBillable").checked = Boolean(entry.billable);
-  $("#editMultiply").checked = hasMultiplier(entry);
-  $("#editStart").value = toLocalInputValue(entry.start_at);
-  $("#editEnd").value = toLocalInputValue(entry.end_at);
-  $("#editStatus").value = entry.status || "ok";
+  $editProjectDot.classList.toggle("hidden", !entry.project);
+  $editProjectDot.style.setProperty("--project-color", projectColor(entry));
+  $editProject.value = entry.project || "";
+  $editTask.value = entry.task || "";
+  $editDescription.value = entry.description || "";
+  $editBillable.checked = Boolean(entry.billable);
+  $editMultiply.checked = hasMultiplier(entry);
+  $editStart.value = toLocalInputValue(entry.start_at);
+  $editEnd.value = toLocalInputValue(entry.end_at);
+  $editStatus.value = entry.status || "ok";
   renderMergeTargets(entry, entries);
   setNewTimerOpen(false);
-  $("#editPanel").classList.remove("hidden");
-  $("#editProject").focus();
+  $editPanel.classList.remove("hidden");
+  $editProject.focus();
 }
 
 function editActiveTimer(event) {
@@ -546,15 +567,14 @@ function editActiveTimerFromKeyboard(event) {
 function hideEdit() {
   editingId = "";
   editingMultiplyValue = "";
-  $("#mergeTarget").replaceChildren();
-  $("#mergeEdit").disabled = true;
-  $("#editProjectDot").classList.add("hidden");
-  $("#editPanel").classList.add("hidden");
+  $mergeTarget.replaceChildren();
+  $mergeEdit.disabled = true;
+  $editProjectDot.classList.add("hidden");
+  $editPanel.classList.add("hidden");
 }
 
 function renderMergeTargets(entry, entries) {
   const candidates = entries.filter((candidate) => canMergeEntries(entry, candidate));
-  const select = $("#mergeTarget");
   const options = candidates.map((candidate) => {
     const option = document.createElement("option");
     option.value = candidate.id;
@@ -567,26 +587,25 @@ function renderMergeTargets(entry, entries) {
     option.textContent = "No matching completed entries";
     options.push(option);
   }
-  select.replaceChildren(...options);
-  $("#mergeEdit").disabled = !candidates.length;
+  $mergeTarget.replaceChildren(...options);
+  $mergeEdit.disabled = !candidates.length;
 }
 
 async function saveEdit() {
   if (!editingId) return;
   await updateEntry(editingId, {
     client: "",
-    project: $("#editProject").value.trim(),
-    task: $("#editTask").value.trim(),
-    description: $("#editDescription").value.trim(),
-    billable: $("#editBillable").checked,
-    multiply: $("#editMultiply").checked ? (editingMultiplyValue || true) : false,
+    project: $editProject.value.trim(),
+    task: $editTask.value.trim(),
+    description: $editDescription.value.trim(),
+    billable: $editBillable.checked,
+    multiply: $editMultiply.checked ? (editingMultiplyValue || true) : false,
     tags: "",
-    start_at: fromLocalInputValue($("#editStart").value),
-    end_at: fromLocalInputValue($("#editEnd").value),
-    status: $("#editStatus").value
+    start_at: fromLocalInputValue($editStart.value),
+    end_at: fromLocalInputValue($editEnd.value),
+    status: $editStatus.value
   });
   hideEdit();
-  await render();
   await runSync({ force: false });
 }
 
@@ -600,21 +619,19 @@ async function deleteEdit() {
   if (!editingId) return;
   await softDeleteEntry(editingId);
   hideEdit();
-  await render();
   await runSync({ force: false });
 }
 
 async function mergeEdit() {
   if (!editingId) return;
-  const sourceId = $("#mergeTarget").value;
+  const sourceId = $mergeTarget.value;
   if (!sourceId) return;
   try {
     await mergeEntries(editingId, sourceId);
     hideEdit();
-    await render();
     await runSync({ force: false });
   } catch (error) {
-    setStatus($("#syncStatus"), "error", formatError(error));
+    setStatus($syncStatus, "error", formatError(error));
   }
 }
 
@@ -625,20 +642,20 @@ async function startPolling() {
 }
 
 function bindEvents() {
-  bindMinuteRollover($("#editStart"));
-  bindMinuteRollover($("#editEnd"));
-  $("#editStart").addEventListener("keydown", saveEditOnEnter);
-  $("#editEnd").addEventListener("keydown", saveEditOnEnter);
-  $("#newTimerToggle").addEventListener("click", toggleNewTimer);
+  bindMinuteRollover($editStart);
+  bindMinuteRollover($editEnd);
+  $editStart.addEventListener("keydown", saveEditOnEnter);
+  $editEnd.addEventListener("keydown", saveEditOnEnter);
+  $newTimerToggle.addEventListener("click", toggleNewTimer);
   $("#startButton").addEventListener("click", startTimer);
   $("#stopButton").addEventListener("click", stopTimer);
-  $(".active-panel").addEventListener("click", editActiveTimer);
-  $(".active-panel").addEventListener("keydown", editActiveTimerFromKeyboard);
+  $activePanel.addEventListener("click", editActiveTimer);
+  $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", () => runSync({ force: true }));
-  $("#loadMoreRecent").addEventListener("click", () => {
+  $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
     renderRecent().catch((error) => {
-      setStatus($("#syncStatus"), "error", formatError(error));
+      setStatus($syncStatus, "error", formatError(error));
     });
   });
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html"));
@@ -647,18 +664,21 @@ function bindEvents() {
   $("#mergeEdit").addEventListener("click", mergeEdit);
   $("#cancelEdit").addEventListener("click", hideEdit);
   $("#deleteEdit").addEventListener("click", deleteEdit);
-  $("#recentEntries").addEventListener("click", (event) => {
+  $recentEntries.addEventListener("click", (event) => {
     const groupButton = event.target.closest("[data-toggle-group]");
     if (groupButton) {
       const key = groupButton.dataset.toggleGroup;
-      if (expandedRecentGroups.has(key)) {
+      const expanded = expandedRecentGroups.has(key);
+      if (expanded) {
         expandedRecentGroups.delete(key);
       } else {
         expandedRecentGroups.add(key);
       }
-      renderRecent().catch((error) => {
-        setStatus($("#syncStatus"), "error", formatError(error));
-      });
+      const instances = groupButton.closest(".timer-group")?.querySelector(".timer-instances");
+      if (instances) {
+        instances.classList.toggle("hidden");
+        groupButton.setAttribute("aria-expanded", String(!expanded));
+      }
       return;
     }
 
@@ -673,7 +693,7 @@ function bindEvents() {
       showEdit(row.dataset.editId);
     }
   });
-  $("#recentEntries").addEventListener("keydown", (event) => {
+  $recentEntries.addEventListener("keydown", (event) => {
     if (event.target.closest("button")) return;
     if (event.key !== "Enter" && event.key !== " ") return;
     const row = event.target.closest(".entry-row[data-edit-id]");
@@ -687,7 +707,7 @@ async function init() {
   bindEvents();
   unsubscribeEntryEvents = onEntriesChanged(() => {
     render().catch((error) => {
-      setStatus($("#syncStatus"), "error", formatError(error));
+      setStatus($syncStatus, "error", formatError(error));
     });
   });
   await render();
