@@ -255,25 +255,27 @@ function renderEntryRow(entry, { child = false } = {}) {
     detail.textContent = descriptionLabel;
   }
 
-  const timeRow = document.createElement("div");
-  timeRow.className = "entry-time-row";
-  const time = document.createElement("span");
-  time.className = "entry-meta";
-  time.textContent = `${localTime(entry.start_at)}${entry.end_at ? ` - ${localTime(entry.end_at)}` : " - active"}`;
+  main.append(title, detail);
+  const chips = renderChips(entryChips(entry, { includeMultiply: false }));
+  if (chips) main.append(chips);
+
+  const timeBlock = document.createElement("div");
+  timeBlock.className = "entry-time-block";
+  const timeLine = document.createElement("div");
+  timeLine.className = "entry-time-line";
+  timeLine.textContent = `${localTime(entry.start_at)}${entry.end_at ? ` - ${localTime(entry.end_at)}` : " - active"}`;
+  const durationLine = document.createElement("div");
+  durationLine.className = "entry-duration-line";
   const durationElement = document.createElement("span");
-  durationElement.className = "entry-duration-col entry-time-duration";
   durationElement.textContent = duration;
-  timeRow.append(time, durationElement);
+  durationLine.append(durationElement);
   if (multiplier) {
     const multiplierElement = document.createElement("span");
     multiplierElement.className = "entry-multiplier";
     multiplierElement.textContent = multiplier;
-    timeRow.append(multiplierElement);
+    durationLine.append(multiplierElement);
   }
-
-  main.append(title, detail, timeRow);
-  const chips = renderChips(entryChips(entry, { includeMultiply: false }));
-  if (chips) main.append(chips);
+  timeBlock.append(timeLine, durationLine);
 
   const actions = document.createElement("div");
   actions.className = "entry-actions";
@@ -286,7 +288,7 @@ function renderEntryRow(entry, { child = false } = {}) {
   play.textContent = "▶";
   actions.append(play);
 
-  row.append(main, actions);
+  row.append(main, timeBlock, actions);
   return row;
 }
 

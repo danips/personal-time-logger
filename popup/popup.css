@@ -423,6 +423,11 @@ textarea {
   cursor: pointer;
 }
 
+.entry-row:not(.timer-group-row) {
+  grid-template-columns: 1fr auto auto;
+  align-items: start;
+}
+
 .timer-group-row {
   cursor: default;
 }
@@ -478,19 +483,27 @@ textarea {
   font-size: 12px;
 }
 
-.entry-time-row {
+.entry-time-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.entry-time-line {
+  color: #5f6368;
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-duration-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.entry-time-row .entry-meta {
-  min-width: 0;
-}
-
-.entry-time-duration {
-  min-width: 0;
-  margin-left: auto;
+  gap: 6px;
+  font-weight: 700;
+  color: #202124;
+  font-variant-numeric: tabular-nums;
 }
 
 .entry-multiplier {
@@ -640,6 +653,7 @@ textarea {
   label,
   .label,
   .entry-meta,
+  .entry-time-line,
   .entry-multiplier,
   .entry-duration-col,
   .week-group-header span,
