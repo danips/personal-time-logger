@@ -2,7 +2,7 @@ import { getSetting, setSetting } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, resetConfigCache } from "../src/config-loader.js";
-import { createOrInitializeSpreadsheet, setSpreadsheetId, testConnection } from "../src/sheets.js";
+import { createOrInitializeSpreadsheet, setSpreadsheetId } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
@@ -87,6 +87,7 @@ async function refresh() {
   } else {
     $("#authStatus").textContent = auth.signedIn ? "signed in or refreshable" : "not signed in";
   }
+  $("#signInButton").hidden = auth.signedIn;
 }
 
 async function signInClicked() {
@@ -116,19 +117,6 @@ async function signOutClicked() {
   await refresh();
 }
 
-async function copyOAuthSetup() {
-  const config = await getConfig();
-  const text = [
-    "Time Logger OAuth setup",
-    "OAuth client type: TVs and Limited Input devices",
-    `OAuth client ID: ${config.GOOGLE_CLIENT_ID || "(missing)"}`,
-    "",
-    "Device authorization does not use redirect URIs or JavaScript origins."
-  ].join("\n");
-  await navigator.clipboard.writeText(text);
-  setStatus("OAuth setup copied");
-}
-
 async function initializeClicked() {
   try {
     await saveSettings();
@@ -142,26 +130,12 @@ async function initializeClicked() {
   await refresh();
 }
 
-async function testClicked() {
-  try {
-    await saveSettings();
-    setStatus("Testing connection...");
-    await testConnection({ interactiveAuth: true });
-    setStatus("Connection OK");
-  } catch (error) {
-    setStatus(formatError(error));
-  }
-  await refresh();
-}
-
 function bindEvents() {
   $("#saveSettings").addEventListener("click", saveSettings);
   $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
   $("#signInButton").addEventListener("click", signInClicked);
   $("#signOutButton").addEventListener("click", signOutClicked);
-  $("#copyOAuthSetup").addEventListener("click", copyOAuthSetup);
   $("#initSheet").addEventListener("click", initializeClicked);
-  $("#testConnection").addEventListener("click", testClicked);
 }
 
 async function init() {
