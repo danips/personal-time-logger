@@ -93,10 +93,8 @@ export async function getAllEntries() {
 }
 
 export async function getDirtyEntries() {
-  return store(ENTRY_STORE, "readonly", (s) => {
-    const index = s.index("dirty");
-    return requestToPromise(index.getAll(IDBKeyRange.only(true)));
-  });
+  const entries = await getAllEntries();
+  return entries.filter((entry) => entry.dirty);
 }
 
 export async function getVisibleEntries() {
