@@ -1,5 +1,5 @@
 import { deleteEntry, getAllEntries, getDirtyEntries, putEntry, putEntries, setSetting, getSetting } from "./db.js";
-import { appendRemoteEntry, readRemoteConfig, readRemoteEntries, updateRemoteConfig, updateRemoteEntry } from "./sheets.js";
+import { appendRemoteEntry, deleteRemoteRow, readRemoteConfig, readRemoteEntries, updateRemoteConfig, updateRemoteEntry } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
 import { addDays, nowIso, startOfLocalDay } from "./time.js";
@@ -103,13 +103,24 @@ async function markMultipleActiveTimers() {
   return changed;
 }
 
-async function purgeDeletedEntries() {
-  const entries = await getAllEntries();
+async function purgeDeletedEntries(remoteEntries = null, rowMap = null, { interactiveAuth = false } = {}) {
   const cutoff = addDays(new Date(), -14);
-  const toDelete = entries.filter((entry) => {
+
+  if (remoteEntries && rowMap) {
+    for (const entry of remoteEntries) {
+      if (!entry.deleted_at) continue;
+      if (new Date(entry.deleted_at) >= cutoff) continue;
+      const rowIndex = rowMap.get(entry.id);
+      if (rowIndex) {
+        await deleteRemoteRow(rowIndex, { interactiveAuth }).catch(() => {});
+      }
+    }
+  }
+
+  const localEntries = await getAllEntries();
+  const toDelete = localEntries.filter((entry) => {
     if (!entry.deleted_at) return false;
-    const deletedDate = new Date(entry.deleted_at);
-    return deletedDate < cutoff;
+    return new Date(entry.deleted_at) < cutoff;
   });
   for (const entry of toDelete) {
     await deleteEntry(entry.id);
@@ -175,13 +186,13 @@ export async function syncNow({ interactiveAuth = false, force = false } = {}) {
   }
 
   try {
-    await purgeDeletedEntries();
-    const staleCount = await markStaleActiveTimers();
+    await markStaleActiveTimers();
 
     const firstRead = await readRemoteEntries({ interactiveAuth });
     await pushDirtyEntries(firstRead.entries, firstRead.rowMap, { interactiveAuth });
 
     const secondRead = await readRemoteEntries({ interactiveAuth });
+    await purgeDeletedEntries(secondRead.entries, secondRead.rowMap, { interactiveAuth });
     await pullRemoteEntries(secondRead.entries);
 
     const conflictChanges = await markMultipleActiveTimers();

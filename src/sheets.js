@@ -241,6 +241,31 @@ export async function appendRemoteEntry(entry, { interactiveAuth = false } = {})
   }, { interactiveAuth });
 }
 
+async function getSheetId({ interactiveAuth = false } = {}) {
+  const spreadsheetId = await getSpreadsheetId();
+  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties`, {}, { interactiveAuth });
+  const existing = (metadata.sheets || []).find((s) => s.properties && s.properties.title === SHEET_NAME);
+  if (!existing) throw codedError("SHEET_MISSING", "time_entries sheet not found");
+  return existing.properties.sheetId;
+}
+
+export async function deleteRemoteRow(rowIndex, { interactiveAuth = false } = {}) {
+  const spreadsheetId = await getSpreadsheetId();
+  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  const sheetId = await getSheetId({ interactiveAuth });
+  await apiFetch(`/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [{
+        deleteDimension: {
+          range: { sheetId, dimension: "ROWS", startIndex: rowIndex - 1, endIndex: rowIndex }
+        }
+      }]
+    })
+  }, { interactiveAuth });
+}
+
 export async function updateRemoteEntry(rowIndex, entry, { interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
