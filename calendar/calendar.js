@@ -1,5 +1,5 @@
 import { getVisibleEntries } from "../src/db.js";
-import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, updateEntry } from "../src/entries.js";
+import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { downloadCsv } from "../src/csv.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
@@ -409,45 +409,7 @@ async function render() {
   renderHeader(dailyTotalsFromSegments(segmentsByDay));
   renderCalendar(segmentsByDay);
   syncScrollbarGutter();
-  renderSelectionPanel();
   scrollToWorkingHours();
-}
-
-function renderSelectionPanel() {
-  const panel = $("#mergePanel");
-  const selected = getEntryById(selectedEntryId);
-  if (!selected) {
-    selectedEntryId = "";
-    closeEditor();
-    panel.hidden = true;
-    return;
-  }
-
-  const candidates = renderedEntries.filter((entry) => canMergeEntries(selected, entry));
-  $("#selectedEntryTitle").textContent = entryTitle(selected);
-  $("#selectedEntryMeta").textContent = [
-    `${localTime(new Date(selected.start_at))} - ${selected.end_at ? localTime(new Date(selected.end_at)) : "active"}`,
-    formatElapsed(selected.duration_seconds || durationSeconds(selected.start_at, selected.end_at || undefined))
-  ].join(" · ");
-  const mergeOptions = candidates.map((entry) => {
-    const option = document.createElement("option");
-    option.value = entry.id;
-    option.textContent = `${shortDay(new Date(entry.start_at))} ${localTime(new Date(entry.start_at))} · ${formatElapsed(entry.duration_seconds || durationSeconds(entry.start_at, entry.end_at))}`;
-    return option;
-  });
-  if (!mergeOptions.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No matching completed entries this week";
-    mergeOptions.push(option);
-  }
-  $("#calendarMergeTarget").replaceChildren(...mergeOptions);
-  $("#calendarMergeButton").disabled = !candidates.length;
-  $("#duplicateEntryButton").disabled = !selected.end_at;
-  $("#duplicateEntryButton").title = selected.end_at
-    ? "Create a copy at the same date and time"
-    : "Stop this entry before duplicating it";
-  panel.hidden = false;
 }
 
 async function selectEntryFromBlock(event) {
@@ -827,7 +789,7 @@ function closeEditor() {
   editingEntryId = "";
   editingMultiplyValue = "";
   $("#calendarEditForm").reset();
-  $("#calendarEditPanel").hidden = true;
+  $("#calendarEditOverlay").hidden = true;
 }
 
 function openSelectedEntryEditor() {
@@ -844,11 +806,53 @@ function openSelectedEntryEditor() {
   $("#calendarEditStart").value = toLocalInputValue(entry.start_at);
   $("#calendarEditEnd").value = toLocalInputValue(entry.end_at);
   $("#calendarEditStatus").value = entry.status || "ok";
+
+  const projectDot = $("#calendarEditProjectDot");
+  projectDot.classList.toggle("hidden", !entry.project);
+  projectDot.style.setProperty("--project-color", projectColor(entry));
+  $("#calendarEditTitle").textContent = entryTitle(entry);
   $("#calendarEditDuration").textContent = entry.end_at
     ? formatElapsed(entry.duration_seconds || durationSeconds(entry.start_at, entry.end_at))
-    : "Active time log";
-  $("#calendarEditPanel").hidden = false;
+    : "Active";
+
+  const candidates = renderedEntries.filter((e) => canMergeEntries(entry, e));
+  const mergeOptions = candidates.map((e) => {
+    const option = document.createElement("option");
+    option.value = e.id;
+    option.textContent = `${shortDay(new Date(e.start_at))} ${localTime(new Date(e.start_at))} · ${formatElapsed(e.duration_seconds || durationSeconds(e.start_at, e.end_at))}`;
+    return option;
+  });
+  if (!mergeOptions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No matching completed entries this week";
+    mergeOptions.push(option);
+  }
+  $("#calendarMergeTarget").replaceChildren(...mergeOptions);
+  $("#calendarMergeButton").disabled = !candidates.length;
+  $("#duplicateEntryButton").disabled = !entry.end_at;
+  $("#duplicateEntryButton").title = entry.end_at
+    ? "Create a copy at the same date and time"
+    : "Stop this entry before duplicating it";
+
+  $("#calendarEditOverlay").hidden = false;
   $("#calendarEditProject").focus();
+}
+
+async function deleteCalendarEntry() {
+  if (!editingEntryId) return;
+  if (!confirm("Delete this time log entry?")) return;
+  try {
+    setResizeUndo(null);
+    await softDeleteEntry(editingEntryId);
+    closeEditor();
+    selectedEntryId = "";
+    setStatus("Entry deleted");
+    await render();
+    await runSync({ force: false });
+  } catch (error) {
+    setStatus(formatError(error));
+  }
 }
 
 async function saveCalendarEdit(event) {
@@ -921,6 +925,11 @@ function bindEvents() {
   $("#calendarMergeButton").addEventListener("click", mergeSelectedEntry);
   $("#calendarEditForm").addEventListener("submit", saveCalendarEdit);
   $("#cancelCalendarEditButton").addEventListener("click", clearSelection);
+  $("#closeEditPopup").addEventListener("click", clearSelection);
+  $("#deleteCalendarEntry").addEventListener("click", deleteCalendarEntry);
+  $("#calendarEditOverlay").addEventListener("click", (event) => {
+    if (event.target === $("#calendarEditOverlay")) clearSelection();
+  });
   $("#weekPicker").addEventListener("change", async (event) => {
     const parsed = weekStartFromInput(event.target.value);
     if (parsed) await changeWeek(parsed);

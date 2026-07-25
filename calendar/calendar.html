@@ -29,74 +29,68 @@
         </div>
       </header>
 
-      <section id="mergePanel" class="merge-panel" hidden>
-        <div>
-          <strong id="selectedEntryTitle">No entry selected</strong>
-          <p id="selectedEntryMeta"></p>
-        </div>
-        <label>
-          Merge with
-          <select id="calendarMergeTarget"></select>
-        </label>
-        <div class="merge-actions">
-          <button id="duplicateEntryButton" type="button">Duplicate</button>
-          <button id="calendarMergeButton" type="button">Merge</button>
-        </div>
-      </section>
-
-      <section id="calendarEditPanel" class="calendar-edit-panel" hidden>
-        <div class="edit-panel-heading">
-          <strong>Edit time log</strong>
-          <span id="calendarEditDuration"></span>
-        </div>
-        <form id="calendarEditForm" class="calendar-edit-form">
-          <label>
-            Project
-            <input id="calendarEditProject">
-          </label>
-          <label>
-            Task
-            <input id="calendarEditTask">
-          </label>
-          <label class="description-field">
-            Description
-            <textarea id="calendarEditDescription" rows="2"></textarea>
-          </label>
-          <label>
-            Start
-            <input id="calendarEditStart" type="datetime-local" step="1" required>
-          </label>
-          <label>
-            End
-            <input id="calendarEditEnd" type="datetime-local" step="1">
-          </label>
-          <div class="calendar-status-column">
-            <div class="calendar-status-controls">
+      <div id="calendarEditOverlay" class="edit-overlay" hidden>
+        <div class="edit-popup">
+          <div class="edit-popup-header">
+            <span id="calendarEditProjectDot" class="project-dot hidden"></span>
+            <span id="calendarEditTitle"></span>
+            <span id="calendarEditDuration"></span>
+            <button id="closeEditPopup" class="edit-popup-close" type="button">✕</button>
+          </div>
+          <form id="calendarEditForm" class="edit-popup-form">
+            <label>
+              Project
+              <input id="calendarEditProject">
+            </label>
+            <label>
+              Task
+              <input id="calendarEditTask">
+            </label>
+            <label>
+              Description
+              <textarea id="calendarEditDescription" rows="2"></textarea>
+            </label>
+            <div class="edit-popup-checkboxes">
               <label>
-                Status
-                <select id="calendarEditStatus">
-                  <option value="ok">ok</option>
-                  <option value="needs_review">needs_review</option>
-                </select>
+                <input id="calendarEditBillable" type="checkbox">
+                Billable
               </label>
-              <div class="calendar-checkboxes">
-                <label class="calendar-checkbox-row">
-                  <input id="calendarEditBillable" type="checkbox">
-                  <span>Billable</span>
-                </label>
-                <label class="calendar-checkbox-row">
-                  <input id="calendarEditMultiply" type="checkbox">
-                  <span>Multiply</span>
-                </label>
-              </div>
+              <label>
+                <input id="calendarEditMultiply" type="checkbox">
+                Multiply
+              </label>
             </div>
-            <div class="calendar-edit-actions">
+            <label>
+              Status
+              <select id="calendarEditStatus">
+                <option value="ok">ok</option>
+                <option value="needs_review">needs_review</option>
+              </select>
+            </label>
+            <label>
+              Start
+              <input id="calendarEditStart" type="datetime-local" step="1" required>
+            </label>
+            <label>
+              End
+              <input id="calendarEditEnd" type="datetime-local" step="1">
+            </label>
+            <div class="edit-popup-merge">
+              <label>
+                Merge with
+                <select id="calendarMergeTarget"></select>
+              </label>
+              <button id="duplicateEntryButton" type="button">Duplicate</button>
+              <button id="calendarMergeButton" type="button">Merge</button>
+            </div>
+            <div class="edit-popup-actions">
               <button type="submit">Save</button>
               <button id="cancelCalendarEditButton" type="button">Cancel</button>
+              <button id="deleteCalendarEntry" class="danger" type="button">Delete</button>
             </div>
-          </div>
-        </form>
-      </section>
+          </form>
+        </div>
+      </div>
 
       <section class="calendar-shell" aria-label="Weekly time log calendar">
         <div id="dayHeader" class="day-header"></div>
