@@ -86,7 +86,7 @@ function renderChips(chips) {
 function groupChips(group) {
   const chips = new Set();
   for (const entry of group.entries) {
-    for (const chip of entryChips(entry)) chips.add(chip);
+    for (const chip of entryChips(entry, { includeMultiply: false })) chips.add(chip);
   }
   return [...chips];
 }
