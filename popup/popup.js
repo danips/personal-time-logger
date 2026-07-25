@@ -58,6 +58,7 @@ function projectDot(entry) {
   const dot = document.createElement("span");
   dot.className = "project-dot";
   dot.style.setProperty("--project-color", projectColor(entry));
+  dot.title = entry.project || "Untitled project";
   dot.setAttribute("aria-hidden", "true");
   return dot;
 }
@@ -224,7 +225,8 @@ function groupRecentEntries(entries, totalEntries = entries) {
 
 function renderEntryRow(entry, { child = false } = {}) {
   const duration = formatElapsed(entryDuration(entry));
-  const details = entryDetails(entry);
+  const taskLabel = entry.task || "No task";
+  const descriptionLabel = entry.description || "";
   const multiplier = hasMultiplier(entry) ? `x${entry.multiply}` : "";
 
   const row = document.createElement("article");
@@ -244,13 +246,15 @@ function renderEntryRow(entry, { child = false } = {}) {
   const title = document.createElement("div");
   title.className = "entry-title";
   const titleText = document.createElement("span");
-  titleText.textContent = entry.project || "Untitled project";
+  titleText.textContent = taskLabel;
   title.append(projectDot(entry), titleText);
 
   const detail = document.createElement("div");
   detail.className = "entry-meta";
-  detail.title = details;
-  detail.textContent = details;
+  if (descriptionLabel) {
+    detail.title = descriptionLabel;
+    detail.textContent = descriptionLabel;
+  }
 
   const timeRow = document.createElement("div");
   timeRow.className = "entry-time-row";
@@ -302,11 +306,14 @@ function renderRecentTimerGroup(group) {
   const title = document.createElement("div");
   title.className = "entry-title";
   const titleText = document.createElement("span");
-  titleText.textContent = entry.project || "Untitled project";
+  titleText.textContent = entry.task || "No task";
   title.append(projectDot(entry), titleText);
+  const descriptionLabel = entry.description || "";
   const detail = document.createElement("div");
   detail.className = "entry-meta";
-  detail.textContent = entryDetails(entry);
+  if (descriptionLabel) {
+    detail.textContent = descriptionLabel;
+  }
   main.append(title, detail);
   const chips = renderChips(groupChips(group));
   if (chips) main.append(chips);
