@@ -14,7 +14,6 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
 - Refresh-token-capable Google device OAuth flow for both Chromium and Firefox.
-- Mock Sheets mode for testing without Google OAuth.
 
 ## Load In Chromium
 
@@ -30,8 +29,6 @@ A complete MVP browser extension for local-first time tracking with Google Sheet
 2. Click **Load Temporary Add-on**.
 3. Select `manifest.json` in this folder.
 4. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
-
-For mock testing, enable **Use local mock Sheets data** in Options.
 
 Firefox temporary add-ons are removed when Firefox restarts. The manifest includes a stable Gecko extension ID for installed development builds.
 
@@ -136,16 +133,6 @@ The `time_entries` tab is the canonical remote storage. Do not rename it unless 
 The `multiply` column stores the numeric multiplier value used for that entry, for example `1.5`. Existing rows without this value are treated as not multiplied.
 
 If the popup or options page reports `sheet tab/header missing`, open Options and click **Create/Initialize Spreadsheet**. Sync also tries to repair the `time_entries` tab and header automatically when a spreadsheet ID is configured.
-
-## Mock Mode
-
-Mock mode lets you test the popup, calendar, IndexedDB, CSV export, edit flow, and sync flow without Google OAuth.
-
-1. Open the extension's Options page.
-2. Enable **Use local mock Sheets data (development only)**.
-3. Click **Save Settings**.
-
-Mock remote rows are stored locally in IndexedDB settings. No Google API calls are made.
 
 ## Usage
 
