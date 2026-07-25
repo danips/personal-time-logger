@@ -42,7 +42,6 @@ async function saveSettings() {
   const multiplierUpdatedAt = nowIso();
   await setSetting("duration_multiplier", multiplier);
   await setSetting("duration_multiplier_updated_at", multiplierUpdatedAt);
-  await setSetting("use_mock_sheets", $("#useMockSheets").checked);
   resetConfigCache();
   $("#syncInterval").value = String(interval);
   $("#durationMultiplier").value = String(multiplier);
@@ -77,15 +76,11 @@ async function refresh() {
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
-  $("#oauthClientId").textContent = auth.clientId || "(missing)";
   $("#spreadsheetId").value = await getSetting("spreadsheet_id", "");
   $("#syncInterval").value = String(await getSetting("sync_interval_seconds", 60));
   $("#durationMultiplier").value = String(await getSetting("duration_multiplier", 1));
-  $("#useMockSheets").checked = Boolean(await getSetting("use_mock_sheets", false));
 
-  if (config.USE_MOCK_SHEETS) {
-    $("#authStatus").textContent = "mock mode, no Google sign-in required";
-  } else if (auth.missingClientId) {
+  if (auth.missingClientId) {
     $("#authStatus").textContent = "Google client ID missing";
   } else if (auth.missingClientSecret) {
     $("#authStatus").textContent = "Google client secret missing";
@@ -121,19 +116,12 @@ async function signOutClicked() {
   await refresh();
 }
 
-async function copyClientId() {
-  const clientId = $("#oauthClientId").textContent.trim();
-  if (!clientId || clientId === "(missing)") return;
-  await navigator.clipboard.writeText(clientId);
-  setStatus("OAuth client ID copied");
-}
-
 async function copyOAuthSetup() {
-  const clientId = $("#oauthClientId").textContent.trim();
+  const config = await getConfig();
   const text = [
     "Time Logger OAuth setup",
     "OAuth client type: TVs and Limited Input devices",
-    `OAuth client ID: ${clientId}`,
+    `OAuth client ID: ${config.GOOGLE_CLIENT_ID || "(missing)"}`,
     "",
     "Device authorization does not use redirect URIs or JavaScript origins."
   ].join("\n");
@@ -147,7 +135,7 @@ async function initializeClicked() {
     setStatus("Initializing spreadsheet...");
     const result = await createOrInitializeSpreadsheet({ interactiveAuth: true });
     $("#spreadsheetId").value = result.spreadsheetId;
-    setStatus(result.mock ? "Mock spreadsheet initialized" : "Spreadsheet initialized");
+    setStatus("Spreadsheet initialized");
   } catch (error) {
     setStatus(formatError(error));
   }
@@ -171,7 +159,6 @@ function bindEvents() {
   $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
   $("#signInButton").addEventListener("click", signInClicked);
   $("#signOutButton").addEventListener("click", signOutClicked);
-  $("#copyClientId").addEventListener("click", copyClientId);
   $("#copyOAuthSetup").addEventListener("click", copyOAuthSetup);
   $("#initSheet").addEventListener("click", initializeClicked);
   $("#testConnection").addEventListener("click", testClicked);

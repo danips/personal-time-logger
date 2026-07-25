@@ -8,12 +8,10 @@ const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const SHEET_NAME = "time_entries";
 const FULL_RANGE = `${SHEET_NAME}!A:Q`;
 const HEADER_RANGE = `${SHEET_NAME}!A1:Q1`;
-const MOCK_ROWS_KEY = "mock_remote_rows";
 const CONFIG_SHEET_NAME = "config";
 const CONFIG_FULL_RANGE = `${CONFIG_SHEET_NAME}!A:C`;
 const CONFIG_HEADER_RANGE = `${CONFIG_SHEET_NAME}!A1:C1`;
 const CONFIG_HEADERS = ["key", "value", "updated_at"];
-const MOCK_CONFIG_KEY = "mock_remote_config";
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -27,24 +25,6 @@ function encodeRange(range) {
 
 function headersMatch(row) {
   return SHEET_HEADERS.length === row.length && SHEET_HEADERS.every((header, index) => row[index] === header);
-}
-
-async function mockRows() {
-  const rows = await getSetting(MOCK_ROWS_KEY);
-  if (Array.isArray(rows) && rows.length) {
-    if (!headersMatch(rows[0] || [])) {
-      rows[0] = SHEET_HEADERS;
-      await setSetting(MOCK_ROWS_KEY, rows);
-    }
-    return rows;
-  }
-  const initial = [SHEET_HEADERS];
-  await setSetting(MOCK_ROWS_KEY, initial);
-  return initial;
-}
-
-async function setMockRows(rows) {
-  await setSetting(MOCK_ROWS_KEY, rows);
 }
 
 async function apiFetch(path, options = {}, { interactiveAuth = false } = {}) {
@@ -94,13 +74,6 @@ export async function setSpreadsheetId(spreadsheetId) {
 }
 
 export async function createOrInitializeSpreadsheet({ interactiveAuth = true } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    await setMockRows([SHEET_HEADERS]);
-    await setSpreadsheetId("mock-spreadsheet");
-    return { spreadsheetId: "mock-spreadsheet", mock: true };
-  }
-
   let spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) {
     const created = await apiFetch("", {
@@ -116,7 +89,7 @@ export async function createOrInitializeSpreadsheet({ interactiveAuth = true } =
 
   await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
   await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
-  return { spreadsheetId, mock: false };
+  return { spreadsheetId };
 }
 
 async function ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth = false } = {}) {
@@ -183,20 +156,6 @@ async function ensureConfigSheet(spreadsheetId, { interactiveAuth = false } = {}
   }
 }
 
-async function mockConfigRows() {
-  const rows = await getSetting(MOCK_CONFIG_KEY);
-  if (Array.isArray(rows) && rows.length) {
-    if (JSON.stringify(rows[0] || []) !== JSON.stringify(CONFIG_HEADERS)) {
-      rows[0] = CONFIG_HEADERS;
-      await setSetting(MOCK_CONFIG_KEY, rows);
-    }
-    return rows;
-  }
-  const initial = [CONFIG_HEADERS];
-  await setSetting(MOCK_CONFIG_KEY, initial);
-  return initial;
-}
-
 function rowsToConfig(rows) {
   const config = {};
   (rows || []).slice(1).forEach((row) => {
@@ -208,12 +167,6 @@ function rowsToConfig(rows) {
 }
 
 export async function readRemoteConfig({ interactiveAuth = false } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    const rows = await mockConfigRows();
-    return rowsToConfig(rows);
-  }
-
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) return {};
 
@@ -223,20 +176,6 @@ export async function readRemoteConfig({ interactiveAuth = false } = {}) {
 }
 
 export async function updateRemoteConfig(key, value, updatedAt, { interactiveAuth = false } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    const rows = await mockConfigRows();
-    const existingIndex = rows.findIndex((row, i) => i > 0 && row[0] === key);
-    const row = [key, value, updatedAt];
-    if (existingIndex >= 0) {
-      rows[existingIndex] = row;
-    } else {
-      rows.push(row);
-    }
-    await setSetting(MOCK_CONFIG_KEY, rows);
-    return;
-  }
-
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) return;
 
@@ -261,25 +200,14 @@ export async function updateRemoteConfig(key, value, updatedAt, { interactiveAut
 }
 
 export async function testConnection({ interactiveAuth = false } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    await mockRows();
-    return { ok: true, mock: true };
-  }
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
   await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
   await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
-  return { ok: true, mock: false };
+  return { ok: true };
 }
 
 export async function readRemoteEntries({ interactiveAuth = false } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    const rows = await mockRows();
-    return rowsToEntries(rows);
-  }
-
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
 
@@ -305,14 +233,6 @@ function rowsToEntries(rows) {
 }
 
 export async function appendRemoteEntry(entry, { interactiveAuth = false } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    const rows = await mockRows();
-    rows.push(entryToRow(entry));
-    await setMockRows(rows);
-    return;
-  }
-
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
   await apiFetch(`/${spreadsheetId}/values/${encodeRange(FULL_RANGE)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
@@ -322,14 +242,6 @@ export async function appendRemoteEntry(entry, { interactiveAuth = false } = {})
 }
 
 export async function updateRemoteEntry(rowIndex, entry, { interactiveAuth = false } = {}) {
-  const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) {
-    const rows = await mockRows();
-    rows[rowIndex - 1] = entryToRow(entry);
-    await setMockRows(rows);
-    return;
-  }
-
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
   const range = `${SHEET_NAME}!A${rowIndex}:Q${rowIndex}`;

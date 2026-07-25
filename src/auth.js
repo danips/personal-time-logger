@@ -138,20 +138,9 @@ export async function getAuthStatus() {
   const config = await getConfig();
   const tokenData = await getTokenData();
 
-  if (config.USE_MOCK_SHEETS) {
-    return {
-      signedIn: true,
-      mock: true,
-      clientId: config.GOOGLE_CLIENT_ID || "",
-      hasClientSecret: Boolean(config.GOOGLE_CLIENT_SECRET),
-      message: "mock mode"
-    };
-  }
-
   if (!config.configLoaded || !config.GOOGLE_CLIENT_ID) {
     return {
       signedIn: false,
-      mock: false,
       clientId: config.GOOGLE_CLIENT_ID || "",
       hasClientSecret: Boolean(config.GOOGLE_CLIENT_SECRET),
       missingClientId: true,
@@ -161,7 +150,6 @@ export async function getAuthStatus() {
 
   return {
     signedIn: isUsable(tokenData) || Boolean(tokenData && tokenData.refresh_token),
-    mock: false,
     clientId: config.GOOGLE_CLIENT_ID || "",
     hasClientSecret: Boolean(config.GOOGLE_CLIENT_SECRET),
     missingClientSecret: !config.GOOGLE_CLIENT_SECRET,
@@ -172,7 +160,6 @@ export async function getAuthStatus() {
 
 export async function signIn({ onDeviceCode } = {}) {
   const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) return { access_token: "mock", expires_at: Date.now() + 3600000 };
   const configError = authConfigError(config);
   if (configError) throw configError;
 
@@ -197,7 +184,6 @@ async function signInDevice(config, { onDeviceCode } = {}) {
 export async function refreshToken() {
   const config = await getConfig();
   const tokenData = await getTokenData();
-  if (config.USE_MOCK_SHEETS) return { access_token: "mock", expires_at: Date.now() + 3600000 };
   const configError = authConfigError(config);
   if (configError) throw configError;
   if (!tokenData || !tokenData.refresh_token) throw codedError("AUTH_EXPIRED", "Please sign in again");
@@ -213,7 +199,6 @@ export async function refreshToken() {
 
 export async function getAccessToken({ interactive = false } = {}) {
   const config = await getConfig();
-  if (config.USE_MOCK_SHEETS) return "mock";
   const configError = authConfigError(config);
   if (configError) throw configError;
 
