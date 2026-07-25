@@ -1,22 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 || "$1" != https://* ]]; then
-  echo "Usage: ./xpi_gen.sh https://your-update-host.example/path" >&2
-  exit 2
-fi
+cd "$(dirname "$0")"
 
-script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$script_directory"
+output="${1:-time-logger.xpi}"
 
-node scripts/prepare-firefox-release.mjs \
-  --base-url "$1" \
-  --output web-ext-artifacts/release-source
+# Package all git-tracked files needed for the extension
+git ls-files \
+  | grep -v -e '^\.' -e '^scripts/' -e '\.md$' -e '^xpi_gen.sh$' \
+  | zip -q -@ "$output"
 
-(
-  cd web-ext-artifacts/release-source
-  zip -qr ../time-logger-unsigned.zip .
-)
-
-echo "Created web-ext-artifacts/time-logger-unsigned.zip"
-echo "This archive still needs Mozilla signing before normal Firefox can install it."
+echo "Created $output"
