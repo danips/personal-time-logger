@@ -1,8 +1,8 @@
-import { getAllEntries, getDirtyEntries, putEntry, putEntries, setSetting, getSetting } from "./db.js";
+import { deleteEntry, getAllEntries, getDirtyEntries, putEntry, putEntries, setSetting, getSetting } from "./db.js";
 import { appendRemoteEntry, readRemoteConfig, readRemoteEntries, updateRemoteConfig, updateRemoteEntry } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
-import { nowIso } from "./time.js";
+import { addDays, nowIso, startOfLocalDay } from "./time.js";
 import { platform } from "./platform.js";
 
 const MAX_BACKOFF_SECONDS = 300;
@@ -103,6 +103,46 @@ async function markMultipleActiveTimers() {
   return changed;
 }
 
+async function purgeDeletedEntries() {
+  const entries = await getAllEntries();
+  const cutoff = addDays(new Date(), -14);
+  const toDelete = entries.filter((entry) => {
+    if (!entry.deleted_at) return false;
+    const deletedDate = new Date(entry.deleted_at);
+    return deletedDate < cutoff;
+  });
+  for (const entry of toDelete) {
+    await deleteEntry(entry.id);
+  }
+  return toDelete.length;
+}
+
+async function markStaleActiveTimers() {
+  const todayStart = startOfLocalDay(new Date());
+  const entries = await getAllEntries();
+  const stale = entries.filter((entry) => {
+    if (entry.deleted_at) return false;
+    if (entry.end_at) return false;
+    if (entry.status === "needs_review") return false;
+    return new Date(entry.start_at) < todayStart;
+  });
+  if (!stale.length) return 0;
+  const timestamp = nowIso();
+  const changed = stale.map((entry) =>
+    normalizeEntry({
+      ...entry,
+      end_at: timestamp,
+      status: "needs_review",
+      updated_at: timestamp,
+      revision: Number(entry.revision || 0) + 1,
+      dirty: true,
+      sync_error: "Stale timer detected"
+    })
+  );
+  await putEntries(changed);
+  return changed.length;
+}
+
 async function pushLocalConfig({ interactiveAuth }) {
   const localValue = await getSetting("duration_multiplier", "1");
   const localUpdatedAt = await getSetting("duration_multiplier_updated_at", "");
@@ -135,6 +175,9 @@ export async function syncNow({ interactiveAuth = false, force = false } = {}) {
   }
 
   try {
+    await purgeDeletedEntries();
+    const staleCount = await markStaleActiveTimers();
+
     const firstRead = await readRemoteEntries({ interactiveAuth });
     await pushDirtyEntries(firstRead.entries, firstRead.rowMap, { interactiveAuth });
 

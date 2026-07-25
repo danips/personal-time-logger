@@ -64,6 +64,10 @@ export async function setSetting(key, value) {
   return value;
 }
 
+export async function deleteEntry(id) {
+  await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.delete(id)));
+}
+
 export async function removeSetting(key) {
   await store(SETTINGS_STORE, "readwrite", (s) => requestToPromise(s.delete(key)));
 }
