@@ -485,7 +485,7 @@ async function restartFromEntry(id) {
     task: entry.task || "",
     description: entry.description || "",
     billable: Boolean(entry.billable),
-    multiply: entry.multiply || false,
+    multiply: entry.multiply ? true : false,
     tags: ""
   });
   hideEdit();
