@@ -31,8 +31,7 @@ let ticker = null;
 let poller = null;
 let unsubscribeEntryEvents = null;
 const expandedRecentGroups = new Set();
-const RECENT_PAGE_SIZE = 10;
-let recentLimit = RECENT_PAGE_SIZE;
+let recentWeekCount = 1;
 
 function formFields() {
   return {
@@ -386,7 +385,10 @@ async function renderActive() {
 
 async function renderRecent() {
   const allEntries = await getVisibleEntries();
-  const entries = allEntries.slice(0, recentLimit);
+  const cutoff = addDays(startOfLocalWeek(new Date()), -7 * (recentWeekCount - 1));
+  const cutoffStr = cutoff.toISOString();
+  const entries = allEntries.filter((e) => e.start_at && e.start_at >= cutoffStr);
+  const hiddenCount = allEntries.filter((e) => !e.start_at || e.start_at < cutoffStr).length;
   const container = $("#recentEntries");
   const loadMore = $("#loadMoreRecent");
 
@@ -399,7 +401,7 @@ async function renderRecent() {
     return;
   }
 
-  const weekElements = groupRecentEntries(entries, allEntries).map((week) => {
+  const weekElements = groupRecentEntries(entries, entries).map((week) => {
     const section = document.createElement("section");
     section.className = "week-group";
     const header = document.createElement("header");
@@ -434,8 +436,8 @@ async function renderRecent() {
   });
   container.replaceChildren(...weekElements);
 
-  loadMore.classList.toggle("hidden", allEntries.length <= recentLimit);
-  loadMore.textContent = `Load more (${Math.max(0, allEntries.length - recentLimit)} left)`;
+  loadMore.classList.toggle("hidden", hiddenCount === 0);
+  loadMore.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
 }
 
 async function renderDirtyBadge() {
@@ -629,7 +631,7 @@ function bindEvents() {
   $(".active-panel").addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", () => runSync({ force: true }));
   $("#loadMoreRecent").addEventListener("click", () => {
-    recentLimit += RECENT_PAGE_SIZE;
+    recentWeekCount += 1;
     renderRecent().catch((error) => {
       setStatus($("#syncStatus"), "error", formatError(error));
     });
