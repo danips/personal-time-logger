@@ -99,6 +99,7 @@ async function refresh() {
     $("#authStatus").textContent = auth.signedIn ? "signed in or refreshable" : "not signed in";
   }
   $("#signInButton").hidden = auth.signedIn;
+  $("#signOutButton").hidden = !auth.signedIn;
 }
 
 async function signInClicked() {
