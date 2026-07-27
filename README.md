@@ -1,19 +1,22 @@
 # Personal Time Logger Extension
 
-A complete MVP browser extension for local-first time tracking with Google Sheets sync. It is intentionally plain: vanilla JavaScript modules, no npm, no bundler, no React, no TypeScript, no external runtime libraries.
+A browser extension for local-first time tracking with Google Sheets sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
 ## What Is Included
 
 - Popup timer with live elapsed time; toolbar icon turns green when a timer is running.
-- Project, task, description, billable, and multiply fields in the popup.
-- Start, active-timer Stop, and header Sync controls in the popup.
-- Last 10 non-deleted entries with inline editing.
+- Project, task, description, and multiply fields in the popup.
+- Start, active-timer Stop, and header Sync controls in the popup. Starting a timer stops the running one.
+- Recent entries grouped by week and day, with totals, repeated entries collapsed into expandable groups, and **Load more** for earlier weeks.
 - Weekly calendar view with movable and resizable time logs and displayed-week CSV export.
+- Reconcile screen comparing this device with the spreadsheet, including duplicate-row detection.
 - Multiple-active-timer warning.
-- Options page for Google auth, spreadsheet setup, sync interval, and device ID.
+- Options page for Google auth, sync interval, duration multiplier, and device ID. The spreadsheet is found or created automatically.
+- Background sync that runs while the browser is open, with no page needed.
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
 - Refresh-token-capable Google device OAuth flow for both Chromium and Firefox.
+- Unit tests over the pure logic, run with `npm test`.
 
 ## Load In Chromium
 
@@ -66,7 +69,7 @@ git tag v0.1.1
 git push origin v0.1.1
 ```
 
-Watch **Actions > Release Firefox extension**. It lints the allow-listed extension files, asks Mozilla to sign an unlisted XPI, creates `updates.json`, and deploys both to GitHub Pages.
+Watch **Actions > Release Firefox extension**. It runs the unit tests, lints the allow-listed extension files, asks Mozilla to sign an unlisted XPI, creates `updates.json`, and deploys both to GitHub Pages.
 
 On every device, open `https://OWNER.github.io/REPOSITORY/` in Firefox and install the XPI. If Firefox downloads it instead, open `about:addons`, use the gear menu, choose **Install Add-on From File**, and select the downloaded XPI. Then open the extension's Options, save the Google OAuth credentials, and sign in.
 
@@ -89,13 +92,16 @@ The release package is generated from an explicit allow-list. The local `config.
 
 1. Go to Google Cloud Console.
 2. Create or select a project.
-3. Configure the OAuth consent screen.
-4. If the app is in **Testing**, add your Google account under **Test users**.
-5. Create an OAuth client ID.
-6. Choose **TVs and Limited Input devices**.
-7. Copy the OAuth client ID and client secret.
-8. Open the installed extension's Options page.
-9. Enter the client ID and secret, click **Save Credentials**, and then click **Sign In**.
+3. Under **APIs & Services > Library**, enable both the **Google Sheets API** and the **Google Drive API**. Drive is used only to list the extension's own spreadsheets and to read the file's modification time.
+4. Configure the OAuth consent screen.
+5. If the app is in **Testing**, add your Google account under **Test users**.
+6. Create an OAuth client ID.
+7. Choose **TVs and Limited Input devices**.
+8. Copy the OAuth client ID and client secret.
+9. Open the installed extension's Options page.
+10. Enter the client ID and secret, click **Save Credentials**, and then click **Sign In**.
+
+The extension requests two scopes: `spreadsheets`, and `drive.file` for per-file Drive access. `drive.file` covers only files this extension created, which is what lets it find its own spreadsheet and check whether the file changed before downloading it. Google's device flow accepts a fixed list of scopes; `drive.file` is on it and the broader `drive.metadata.readonly` is not.
 
 When you click **Sign In**, the extension shows a Google device code and opens Google's device authorization page. Leave the options page open while Google authorizes the device. This path is the same in Chromium and Firefox, avoids extension redirect URI mismatch issues, and stores a refresh token locally so the extension can refresh access tokens after the usual one-hour access token expires.
 
@@ -117,36 +123,49 @@ Google's device flow returns a refresh token. The extension stores that token in
 
 ## Spreadsheet Setup
 
-The options page has a **Create/Initialize Spreadsheet** button.
+There is nothing to configure. After you sign in, the first sync finds or creates the spreadsheet:
 
-- If the spreadsheet ID field is empty, the extension creates a spreadsheet named `Personal Time Logger`.
-- If the spreadsheet ID field has a value, the extension initializes that spreadsheet.
-- It creates or uses the tab named `time_entries`.
-- It ensures row 1 has exactly these headers:
+- Drive is asked which spreadsheets this extension created. Under the `drive.file` scope that list contains only its own files, never the rest of your Drive.
+- The most recently modified candidate whose `time_entries` header matches is adopted.
+- If there are none, a spreadsheet named `Personal Time Logger` is created.
+- If the listing fails, for example because the Drive API is not enabled or the token predates the `drive.file` scope, an error is reported and nothing is created. A failed listing is never mistaken for "no spreadsheet exists".
+
+Options shows the spreadsheet as a link that opens it in Google Sheets, with its ID beside a **Copy ID** button. The ID is not editable, because detection and repair handle the cases that editing it used to cover.
+
+If the spreadsheet is deleted or moved to the trash, the next sync confirms with Drive that it is really gone, then sets up a replacement and refills it from the entries held on this device. A spreadsheet that is merely unreachable reports an error instead, so a permission problem cannot silently strand you on a second copy.
+
+The `time_entries` tab is created if missing and row 1 is kept as exactly these headers:
 
 ```text
-id, client, project, task, description, start_at, end_at, duration_seconds, billable, tags, status, created_at, updated_at, deleted_at, device_id, revision, multiply
+id, project, task, description, start_at, end_at, duration_seconds, status, created_at, updated_at, deleted_at, device_id, revision, multiply
 ```
 
 The `time_entries` tab is the canonical remote storage. Do not rename it unless you also update the code.
 
+A second tab named `config` holds settings shared between devices, currently the duration multiplier, plus a marker identifying the spreadsheet as this extension's.
+
 The `multiply` column stores the numeric multiplier value used for that entry, for example `1.5`. Existing rows without this value are treated as not multiplied.
 
-If the popup or options page reports `sheet tab/header missing`, open Options and click **Create/Initialize Spreadsheet**. Sync also tries to repair the `time_entries` tab and header automatically when a spreadsheet ID is configured.
+Layout problems repair themselves. Sync reads first and only inspects the layout when a read fails, at which point a missing tab is added and the header row is rewritten before the read is retried.
+
+### Migration from the original layout
+
+Spreadsheets created before the columns `client`, `billable`, and `tags` were dropped are migrated automatically on the first sync after updating. Those three columns are deleted so every row stays aligned with the header; rewriting only the header would leave the data shifted, so `project` would be read out of the old `client` column. None of the three was ever populated by the interface, so nothing is lost. Column deletion cannot be undone by the extension, so take a copy of the spreadsheet in Google Drive first if you want a fallback.
 
 ## Usage
 
 1. Open the popup.
-2. Fill in any timer fields.
-3. Click **Start**.
+2. Expand **New timer** and fill in any fields.
+3. Click **Start**. Any running timer is stopped first.
 4. Click **Stop** when finished.
    Click the active timer card to open it in the edit panel when you need to change its details or start time.
 5. Use the header sync button to push/pull immediately.
-6. Click a recent entry row to edit it.
+6. Click a recent entry row to edit it. Deleting asks for confirmation.
 7. Use the play button on a recent entry to start a new timer with the same details.
-8. Use the calendar button to open the weekly calendar view.
-9. Use **Export CSV** in the calendar to download entries for its displayed week.
-10. Use the merge controls in a recent entry edit panel or selected calendar entry to combine matching completed logs.
+8. Use **Load more** to reach earlier weeks in the recent list.
+9. Use the calendar button to open the weekly calendar view, and the ⇄ button to open Reconcile.
+10. Use **Export CSV** in the calendar to download entries for its displayed week.
+11. Use the merge controls in a recent entry edit panel or selected calendar entry to combine matching completed logs.
 
 Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when Google auth is not ready.
 
@@ -166,7 +185,9 @@ Select a completed time log, then drag its top or bottom edge to change its star
 
 Click a time log in the calendar to select it and open its edit panel. Click the selected time log again to clear the selection. If another completed log in the week has the exact same project, task, and description, the merge panel lets you combine them into one entry with the total duration of both logs. The same merge action is available from the popup edit panel for recent entries.
 
-Use the edit panel that opens with a selected time log to change its project, task, description, flags, start and end times, or review status. Saving recalculates the duration and syncs the updated entry.
+Use the edit panel that opens with a selected time log to change its project, task, description, multiply flag, start and end times, or review status. Saving recalculates the duration and syncs the updated entry. Entries are also reachable from the keyboard: focus a time log and press Enter or Space to open it.
+
+Dates and times follow your browser's locale throughout.
 
 Select a completed time log and click **Duplicate** to create a new entry with the same details, start time, end time, and duration. The copy is saved as a separate entry and synced normally.
 
@@ -174,24 +195,37 @@ Select a completed time log and click **Duplicate** to create a new entry with t
 
 Sync happens when:
 
-- the popup opens;
-- a timer is started, stopped, edited, or deleted;
+- the popup or calendar opens;
+- a timer is started, stopped, edited, deleted, moved, resized, merged, or duplicated;
 - the header sync button is clicked;
-- the popup is open and the configured interval elapses.
+- a background alarm fires while the browser is open, with or without any page open.
 
-The sync interval defaults to 60 seconds and is clamped to a minimum of 30 seconds.
+The sync interval defaults to 60 seconds and is clamped to a minimum of 30 seconds. When nothing is changing, the background poller stretches its interval out to 2x, 5x, then 10x that value, capped at 15 minutes, and snaps back to the configured interval as soon as a cycle moves data or you act in the interface. A second device's edits can therefore take up to 15 minutes to appear on an idle machine; opening the popup or calendar syncs immediately.
+
+Only one sync runs at a time. The popup, the calendar, and the background all sync independently, so a lock held in local storage keeps them from each appending the same entry twice.
 
 On sync, the extension:
 
-1. Reads the whole `time_entries` sheet.
-2. Builds an `id -> row index` map.
-3. Pushes dirty local entries.
-4. Reads the sheet again.
-5. Pulls remote rows into IndexedDB.
-6. Uses last `updated_at` wins for normal edits.
-7. Marks older active timers as `needs_review` if multiple active timers exist.
+1. Flags competing active timers as `needs_review` if more than one is running.
+2. Asks Drive when the spreadsheet last changed, and skips the whole exchange when nothing changed remotely and nothing is pending locally.
+3. Reads entries and config in a single request.
+4. Pushes local changes: all row rewrites in one request, all new rows in another.
+5. Pulls remote rows into IndexedDB, using last `updated_at` wins for normal edits.
+6. Deletes rows for entries deleted more than 14 days ago.
 
-Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the matching spreadsheet row is updated with the same `deleted_at` tombstone instead of being removed. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote rows.
+An idle cycle costs a single request. A timer left running overnight keeps running; it is never closed automatically.
+
+Where the same id appears in several rows, the row with the newest `updated_at` wins regardless of its position, so a stale duplicate cannot overwrite newer data. The surplus rows are reported on the Reconcile screen.
+
+Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the matching spreadsheet row is updated with the same `deleted_at` tombstone instead of being removed. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote rows. Tombstones older than 14 days are removed from both the sheet and local storage.
+
+## Reconcile Screen
+
+The ⇄ button in the popup header opens a page comparing this device with the spreadsheet. It sorts every entry into identical, differing, device-only, spreadsheet-only, and duplicated rows, and summarises the totals so the two sides visibly account for each other.
+
+Differing entries list each field with the device value beside the spreadsheet value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
+
+Resolutions only write locally and then trigger a sync, so every remote write still goes through the normal sync path. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Deleting duplicate rows is the one action that writes to the spreadsheet directly, because a duplicate row has no local counterpart, and it asks for confirmation naming the rows it will remove.
 
 ## CSV Export
 
@@ -207,10 +241,13 @@ The CSV export includes:
 - Duration (hours)
 - Multiplied duration (hours)
 - Multiply
+- Status
 
 `Duration (hours)` is the original elapsed time. `Multiplied duration (hours)` is the effective duration after applying the value in `Multiply`.
 
-The calendar exports the displayed week. Deleted entries and active timers are excluded from the CSV.
+`Status` is `completed`, `needs_review`, or `running`. A running timer is exported with empty end columns, its elapsed time so far in `Duration (hours)`, and no multiplied duration, since that is not settled until the timer stops.
+
+The calendar exports the displayed week. Deleted entries are excluded.
 
 ## Known Limitations
 
@@ -219,35 +256,59 @@ The calendar exports the displayed week. Deleted entries and active timers are e
 - Conflict handling is intentionally simple.
 - Calendar moving snaps to 15-minute intervals and preserves completed-entry duration; resizing a selected entry snaps to one-minute intervals.
 - Merging keeps one entry, marks the other deleted locally, and requires matching project, task, and description.
-- Deleted entries remain in the sheet as tombstones so multiple devices can converge during sync.
-- The extension reads the whole `time_entries` sheet on every sync.
+- Deleted entries remain in the sheet as tombstones for 14 days so multiple devices can converge during sync.
+- When it does read, the extension reads the whole `time_entries` sheet; the Drive check avoids the read entirely rather than making it smaller.
+- Skipping reads only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
+- A forgotten timer runs indefinitely. Nothing prompts about it.
 - OAuth uses Google device flow so setup is the same in Chromium and Firefox.
-- The cross-browser refresh-token path uses Google device flow and stores personal OAuth credentials in the local extension profile.
+- The cross-browser refresh-token path uses Google device flow and stores personal OAuth credentials in the local extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
-- No unit tests by design.
-- No external dependencies by design.
+- Tests cover the pure logic only. Sync against the live Sheets and Drive APIs is not covered.
+- No external runtime dependencies. The only development dependency is Node for the tests and packaging scripts.
 - Manifest V3 support in Firefox can vary by version; if a browser rejects the manifest, use a current Firefox release.
 - SVG icons are in `icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs the Node test runner over `test/`. There is nothing to install: the tests use only the standard library, and the extension itself has no dependencies.
+
+They cover the pure logic, which is where the bugs have actually been: date and week boundaries, entry normalization and multiplier handling, row serialization round-trips, merge eligibility, conflict comparison, duplicate-row resolution, the reconcile classification, and CSV formatting. Anything needing IndexedDB, the network, or a DOM is out of scope.
+
+GitHub Actions runs them on every push and pull request, and the release workflow runs them before signing, so a failing test blocks a release.
 
 ## Files
 
 ```text
 manifest.json
+package.json
 README.md
+PRIVACY.md
 xpi_gen.sh
-popup/
+background/
 calendar/
-options/
-src/
 icons/
+options/
+popup/
+reconcile/
+scripts/
+src/
+test/
 ```
+
+`background/` holds the sync alarm, `reconcile/` the comparison screen, `scripts/` the release packaging, and `test/` the unit tests. Only the extension directories are copied into a release; `test/`, `package.json`, `scripts/`, and documentation are excluded from the package.
 
 OAuth credentials are stored in IndexedDB through the Options page and are not part of the extension package.
 
 ## Next Improvements
 
-- Add entry search and filters.
 - Add project/task autocomplete from recent entries.
+- Add a keyboard shortcut to start and stop the timer.
+- Show elapsed time as badge text on the toolbar icon.
+- Add a summary report of time by project and task for a chosen period.
+- Add entry search across all history.
+- Add local backup and restore of the entry database.
 - Add import from CSV.
-- Add optional background sync for dirty entries.
-- Add packaging notes for store submission.

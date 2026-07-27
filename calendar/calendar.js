@@ -12,7 +12,8 @@ import {
   localDateKey,
   localTime,
   startOfLocalDay as startOfDay,
-  startOfLocalWeek as startOfWeek
+  startOfLocalWeek as startOfWeek,
+  weekdayDayMonth
 } from "../src/time.js";
 import { $, entryTitle, formatError, projectColor, statusFromError } from "../src/ui-helpers.js";
 
@@ -74,7 +75,7 @@ function shortDay(date) {
 }
 
 function calendarHeaderDate(date) {
-  return date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  return weekdayDayMonth(date);
 }
 
 function formatTotalHours(seconds) {
@@ -480,7 +481,6 @@ function editFields() {
     project: $("#calendarEditProject"),
     task: $("#calendarEditTask"),
     description: $("#calendarEditDescription"),
-    billable: $("#calendarEditBillable"),
     multiply: $("#calendarEditMultiply"),
     start: $("#calendarEditStart"),
     end: $("#calendarEditEnd"),

@@ -43,6 +43,9 @@ jobs:
           echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
           echo "UPDATE_BASE_URL=${update_base_url%/}" >> "$GITHUB_ENV"
 
+      - name: Run unit tests
+        run: npm test
+
       - name: Prepare release source
         run: >-
           node scripts/prepare-firefox-release.mjs

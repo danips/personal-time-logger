@@ -47,6 +47,20 @@ export function startOfLocalWeek(date) {
   return day;
 }
 
+// Date formatting follows the browser locale everywhere. Passing [] rather than a
+// fixed locale keeps these consistent with localTime and shortDateTime.
+export function weekdayDayMonth(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+}
+
+export function dayMonth(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
 export function localTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";

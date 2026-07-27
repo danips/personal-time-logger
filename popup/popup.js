@@ -6,12 +6,14 @@ import { syncNow } from "../src/sync.js";
 import {
   addDays,
   bindMinuteRollover,
+  dayMonth,
   durationSeconds,
   formatElapsed,
   localDateKey,
   localTime,
   shortDateTime,
-  startOfLocalWeek
+  startOfLocalWeek,
+  weekdayDayMonth
 } from "../src/time.js";
 import {
   $,
@@ -47,7 +49,7 @@ const $editProjectDot = $("#editProjectDot");
 const $editProject = $("#editProject");
 const $editTask = $("#editTask");
 const $editDescription = $("#editDescription");
-const $editBillable = $("#editBillable");
+
 const $editMultiply = $("#editMultiply");
 const $editStart = $("#editStart");
 const $editEnd = $("#editEnd");
@@ -62,13 +64,10 @@ let renderedActiveId;
 
 function formFields() {
   return {
-    client: "",
     project: $("#project").value.trim(),
     task: $("#task").value.trim(),
     description: $("#description").value.trim(),
-    billable: $("#billable").checked,
-    multiply: $("#multiply").checked,
-    tags: ""
+    multiply: $("#multiply").checked
   };
 }
 
@@ -77,7 +76,6 @@ function editFields() {
     project: $editProject,
     task: $editTask,
     description: $editDescription,
-    billable: $editBillable,
     multiply: $editMultiply,
     start: $editStart,
     end: $editEnd,
@@ -100,7 +98,6 @@ function projectDot(entry) {
 
 function entryChips(entry) {
   const chips = [];
-  if (entry.billable) chips.push("Billable");
   if (entry.status === "needs_review") chips.push("Review");
   if (entry.dirty) chips.push("Pending");
   return chips;
@@ -133,13 +130,7 @@ function localDayKey(iso) {
 }
 
 function localDayLabel(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "Unknown day";
-  return date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-}
-
-function shortMonthDay(date) {
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return weekdayDayMonth(iso) || "Unknown day";
 }
 
 function weekInfo(iso) {
@@ -159,7 +150,7 @@ function weekInfo(iso) {
   const end = addDays(start, 6);
   const currentWeek = startOfLocalWeek(new Date());
   const previousWeek = addDays(currentWeek, -7);
-  let label = `${shortMonthDay(start)} - ${shortMonthDay(end)}`;
+  let label = `${dayMonth(start)} - ${dayMonth(end)}`;
   if (start.getTime() === currentWeek.getTime()) label = "This week";
   if (start.getTime() === previousWeek.getTime()) label = "Last week";
 
@@ -179,7 +170,6 @@ function recentGroupKey(entry) {
     entry.project || "",
     entry.task || "",
     entry.description || "",
-    entry.billable ? "1" : "0",
     entry.multiply || ""
   ].map((part) => encodeURIComponent(part)).join("|");
 }
@@ -538,13 +528,10 @@ async function restartFromEntry(id) {
   if (!entry) return;
   await stopRunningTimers();
   await createEntry({
-    client: "",
     project: entry.project || "",
     task: entry.task || "",
     description: entry.description || "",
-    billable: Boolean(entry.billable),
-    multiply: entry.multiply ? true : false,
-    tags: ""
+    multiply: entry.multiply ? true : false
   });
   hideEdit();
   await runSync({ force: false });

@@ -13,7 +13,7 @@ import {
 } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
-import { addDays, nowIso, startOfLocalDay, uuid } from "./time.js";
+import { addDays, nowIso, uuid } from "./time.js";
 
 import { platform } from "./platform.js";
 
@@ -213,39 +213,6 @@ async function purgeDeletedEntries(local, remoteEntries, rowMap, { interactiveAu
   return toDelete.length;
 }
 
-async function markStaleActiveTimers(local) {
-  const todayStartMs = startOfLocalDay(new Date()).getTime();
-  const stale = local.all().filter((entry) => {
-    if (entry.deleted_at) return false;
-    if (entry.end_at) return false;
-    // Entries already flagged needs_review are still open timers and must be
-    // closed too, otherwise they stay active forever.
-    const startMs = new Date(entry.start_at).getTime();
-    if (!Number.isFinite(startMs)) return true;
-    return startMs < todayStartMs;
-  });
-  if (!stale.length) return [];
-  const timestamp = nowIso();
-  const changed = stale.map((entry) =>
-    normalizeEntry({
-      ...entry,
-      end_at: timestamp,
-      status: "needs_review",
-      updated_at: timestamp,
-      revision: Number(entry.revision || 0) + 1,
-      dirty: true,
-      sync_error: "Stale timer detected"
-    })
-  );
-  await putEntries(changed);
-  return local.apply(changed);
-}
-
-/**
- * True when the local multiplier has moved since it was last exchanged with the
- * sheet. Needed so a config change is still pushed on a cycle where the remote
- * file is otherwise unchanged and the read is skipped.
- */
 /**
  * Flags every live entry for push and forgets the read marker.
  *
@@ -294,6 +261,11 @@ async function reprovisionIfSpreadsheetGone(error, local, { interactiveAuth }) {
   return provisioned;
 }
 
+/**
+ * True when the local multiplier has moved since it was last exchanged with the
+ * sheet. Needed so a config change is still pushed on a cycle where the remote
+ * file is otherwise unchanged and the read is skipped.
+ */
 async function hasPendingConfig() {
   const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
   if (!localUpdatedAt) return false;
@@ -354,8 +326,9 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
   try {
     const local = localState(await getAllEntries());
-    const staleChanges = await markStaleActiveTimers(local);
-    // Flagged before the push so the conflict markers travel in the same pass.
+    // A timer left running overnight stays running. Only genuinely competing
+    // timers are flagged, and that is done before the push so the markers travel
+    // in the same pass.
     const conflictChanges = await markMultipleActiveTimers(local);
     // Under the sync lock, so two contexts cannot both decide none exists and
     // each create one.
@@ -411,7 +384,6 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
     const changed = wroteRemotely
       || pulled > 0
-      || staleChanges.length > 0
       || conflictChanges.length > 0
       || Boolean(provisioned);
     const timestamp = nowIso();

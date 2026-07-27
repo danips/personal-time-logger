@@ -1,0 +1,9 @@
+{
+  "name": "personal-time-logger",
+  "private": true,
+  "type": "module",
+  "description": "Local-first time tracking with Google Sheets sync. Packaging and tests only; the extension itself has no dependencies.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

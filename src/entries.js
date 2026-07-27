@@ -4,6 +4,26 @@ import { durationSeconds, nowIso, uuid } from "./time.js";
 
 export const SHEET_HEADERS = [
   "id",
+  "project",
+  "task",
+  "description",
+  "start_at",
+  "end_at",
+  "duration_seconds",
+  "status",
+  "created_at",
+  "updated_at",
+  "deleted_at",
+  "device_id",
+  "revision",
+  "multiply"
+];
+
+// The original layout, carrying client in column B, billable in column I and tags
+// in column J. client and tags were never populated by any UI and billable was
+// never used. Kept only so an existing spreadsheet can be recognised and migrated.
+export const LEGACY_SHEET_HEADERS = [
+  "id",
   "client",
   "project",
   "task",
@@ -22,6 +42,10 @@ export const SHEET_HEADERS = [
   "multiply"
 ];
 
+// Zero-based positions of the dropped columns, highest first so deleting one does
+// not shift the others: tags, billable, client.
+export const LEGACY_DROPPED_COLUMNS = [9, 8, 1];
+
 export async function getDeviceId() {
   let deviceId = await getSetting("device_id");
   if (!deviceId) {
@@ -33,10 +57,6 @@ export async function getDeviceId() {
 
 async function getDurationMultiplier() {
   return normalizeMultiplierText(await getSetting("duration_multiplier", "1")) || "1";
-}
-
-function boolValue(value) {
-  return value === true || value === "true" || value === "TRUE";
 }
 
 export function normalizeMultiplierText(value) {
@@ -103,15 +123,12 @@ export function normalizeEntry(entry) {
   const duration = Number(entry.duration_seconds) || 0;
   const normalized = {
     id: entry.id || uuid(),
-    client: entry.client || "",
     project: entry.project || "",
     task: entry.task || "",
     description: entry.description || "",
     start_at: entry.start_at || nowIso(),
     end_at: entry.end_at || "",
     duration_seconds: duration,
-    billable: boolValue(entry.billable),
-    tags: entry.tags || "",
     status: entry.status === "needs_review" ? "needs_review" : "ok",
     created_at: entry.created_at || nowIso(),
     updated_at: entry.updated_at || nowIso(),
@@ -243,16 +260,14 @@ export async function mergeEntries(targetId, sourceId) {
   const actualMs = actualDurationMs(target) + actualDurationMs(source);
   const mergedEnd = new Date(new Date(mergedStart).getTime() + actualMs).toISOString();
   const sameMultiply = target.multiply === source.multiply;
-  const sameBillable = target.billable === source.billable;
 
   const merged = normalizeEntry({
     ...target,
     start_at: mergedStart,
     end_at: mergedEnd,
     duration_seconds: storedDuration(target) + storedDuration(source),
-    billable: target.billable || source.billable,
     multiply: sameMultiply ? target.multiply : "",
-    status: target.status === "needs_review" || source.status === "needs_review" || !sameMultiply || !sameBillable
+    status: target.status === "needs_review" || source.status === "needs_review" || !sameMultiply
       ? "needs_review"
       : "ok",
     updated_at: timestamp,
@@ -280,15 +295,12 @@ export function entryToRow(entry) {
   const normalized = normalizeEntry(entry);
   return [
     normalized.id,
-    normalized.client,
     normalized.project,
     normalized.task,
     normalized.description,
     normalized.start_at,
     normalized.end_at,
     String(normalized.duration_seconds || 0),
-    normalized.billable ? "TRUE" : "FALSE",
-    normalized.tags,
     normalized.status,
     normalized.created_at,
     normalized.updated_at,

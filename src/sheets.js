@@ -1,14 +1,21 @@
 import { getSetting, setSetting } from "./db.js";
 import { getAccessToken } from "./auth.js";
-import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
+import {
+  LEGACY_DROPPED_COLUMNS,
+  LEGACY_SHEET_HEADERS,
+  SHEET_HEADERS,
+  entryToRow,
+  rowToEntry
+} from "./entries.js";
 import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 const SHEET_NAME = "time_entries";
-const FULL_RANGE = `${SHEET_NAME}!A:Q`;
-const HEADER_RANGE = `${SHEET_NAME}!A1:Q1`;
+const LAST_COLUMN = "N";
+const FULL_RANGE = `${SHEET_NAME}!A:${LAST_COLUMN}`;
+const HEADER_RANGE = `${SHEET_NAME}!A1:${LAST_COLUMN}1`;
 const CONFIG_SHEET_NAME = "config";
 const CONFIG_FULL_RANGE = `${CONFIG_SHEET_NAME}!A:C`;
 const CONFIG_HEADER_RANGE = `${CONFIG_SHEET_NAME}!A1:C1`;
@@ -279,6 +286,12 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
     }
   }
 
+  const sheetId = sheetIdsByTitle.get(SHEET_NAME);
+  if (sheetId != null) {
+    await rememberSheetId(spreadsheetId, sheetId);
+    await migrateLegacyColumns(spreadsheetId, sheetId, { interactiveAuth });
+  }
+
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({
@@ -287,9 +300,42 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
     })
   }, { interactiveAuth });
 
-  const sheetId = sheetIdsByTitle.get(SHEET_NAME);
-  if (sheetId != null) await rememberSheetId(spreadsheetId, sheetId);
   return sheetId;
+}
+
+/**
+ * Removes the unused client and tags columns from a spreadsheet still on the
+ * original 17-column layout.
+ *
+ * Deleting the columns rather than leaving them in place keeps every row aligned
+ * with the header. Rewriting only the header would leave the existing data shifted
+ * by one or two columns, so project would be read from the old client column and
+ * so on. Neither column was ever written to by any UI, so nothing is lost.
+ */
+async function migrateLegacyColumns(spreadsheetId, sheetId, { interactiveAuth = false } = {}) {
+  const legacyHeaderRange = `${SHEET_NAME}!A1:Q1`;
+  const data = await apiFetch(
+    `/${spreadsheetId}/values/${encodeRange(legacyHeaderRange)}?fields=values`,
+    {},
+    { interactiveAuth }
+  ).catch(() => ({}));
+
+  const [header] = rowsAsText(data.values || []);
+  if (!header || header.length !== LEGACY_SHEET_HEADERS.length) return false;
+  if (!LEGACY_SHEET_HEADERS.every((name, index) => header[index] === name)) return false;
+
+  await apiFetch(`/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      requests: LEGACY_DROPPED_COLUMNS.map((columnIndex) => ({
+        deleteDimension: {
+          range: { sheetId, dimension: "COLUMNS", startIndex: columnIndex, endIndex: columnIndex + 1 }
+        }
+      }))
+    })
+  }, { interactiveAuth });
+
+  return true;
 }
 
 function rowsToConfig(rows) {
@@ -415,7 +461,7 @@ export async function readRemoteSnapshot({ interactiveAuth = false } = {}) {
  * overwrite newer data. The losing rows are reported as duplicates so they can be
  * cleaned up deliberately.
  */
-function rowsToEntries(rows) {
+export function rowsToEntries(rows) {
   const cells = rowsAsText(rows);
   if (!headersMatch(cells[0] || [])) {
     throw codedError("SHEET_MISSING", "The time_entries tab header row is missing or invalid.");
@@ -550,7 +596,7 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
     body: JSON.stringify({
       valueInputOption: "RAW",
       data: updates.map(({ rowIndex, entry }) => ({
-        range: `${SHEET_NAME}!A${rowIndex}:Q${rowIndex}`,
+        range: `${SHEET_NAME}!A${rowIndex}:${LAST_COLUMN}${rowIndex}`,
         values: [entryToRow(entry)]
       }))
     })
