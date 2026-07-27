@@ -28,14 +28,10 @@ function openDb() {
 
     request.onupgradeneeded = () => {
       const db = request.result;
+      // Both stores are keyed lookups only; every query filters in JS, so there
+      // are no indexes to maintain.
       if (!db.objectStoreNames.contains(ENTRY_STORE)) {
         db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
-      } else {
-        // Every query filters in JS, so the v1 indexes were never read.
-        const entries = request.transaction.objectStore(ENTRY_STORE);
-        for (const name of ["updated_at", "dirty"]) {
-          if (entries.indexNames.contains(name)) entries.deleteIndex(name);
-        }
       }
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });

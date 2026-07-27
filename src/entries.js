@@ -19,33 +19,6 @@ export const SHEET_HEADERS = [
   "multiply"
 ];
 
-// The original layout, carrying client in column B, billable in column I and tags
-// in column J. client and tags were never populated by any UI and billable was
-// never used. Kept only so an existing spreadsheet can be recognised and migrated.
-export const LEGACY_SHEET_HEADERS = [
-  "id",
-  "client",
-  "project",
-  "task",
-  "description",
-  "start_at",
-  "end_at",
-  "duration_seconds",
-  "billable",
-  "tags",
-  "status",
-  "created_at",
-  "updated_at",
-  "deleted_at",
-  "device_id",
-  "revision",
-  "multiply"
-];
-
-// Zero-based positions of the dropped columns, highest first so deleting one does
-// not shift the others: tags, billable, client.
-export const LEGACY_DROPPED_COLUMNS = [9, 8, 1];
-
 export async function getDeviceId() {
   let deviceId = await getSetting("device_id");
   if (!deviceId) {

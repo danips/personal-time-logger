@@ -148,9 +148,7 @@ The `multiply` column stores the numeric multiplier value used for that entry, f
 
 Layout problems repair themselves. Sync reads first and only inspects the layout when a read fails, at which point a missing tab is added and the header row is rewritten before the read is retried.
 
-### Migration from the original layout
-
-Spreadsheets created before the columns `client`, `billable`, and `tags` were dropped are migrated automatically on the first sync after updating. Those three columns are deleted so every row stays aligned with the header; rewriting only the header would leave the data shifted, so `project` would be read out of the old `client` column. None of the three was ever populated by the interface, so nothing is lost. Column deletion cannot be undone by the extension, so take a copy of the spreadsheet in Google Drive first if you want a fallback.
+Header repair assumes the rows below are still aligned with the header, which holds for a renamed or cleared header row. If the tab is a different width than the layout above, the extension reports the mismatch instead of rewriting the header over rows that do not line up with it. Fix the columns in the spreadsheet, or let the extension create a new one.
 
 ## Usage
 

@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  LEGACY_DROPPED_COLUMNS,
-  LEGACY_SHEET_HEADERS,
   SHEET_HEADERS,
   canMergeEntries,
   entryToRow,
@@ -36,22 +34,8 @@ describe("sheet schema", () => {
     assert.equal(SHEET_HEADERS.length, 14);
   });
 
-  it("keeps the legacy layout for migration, three columns wider", () => {
-    assert.equal(LEGACY_SHEET_HEADERS.length, SHEET_HEADERS.length + 3);
-    assert.deepEqual(
-      LEGACY_DROPPED_COLUMNS.map((index) => LEGACY_SHEET_HEADERS[index]),
-      ["tags", "billable", "client"]
-    );
-  });
-
-  it("lists the dropped columns highest first, so deletions do not shift each other", () => {
-    const descending = [...LEGACY_DROPPED_COLUMNS].sort((a, b) => b - a);
-    assert.deepEqual(LEGACY_DROPPED_COLUMNS, descending);
-  });
-
-  it("leaves the legacy header matching the new one once the dropped columns are removed", () => {
-    const remaining = LEGACY_SHEET_HEADERS.filter((_, index) => !LEGACY_DROPPED_COLUMNS.includes(index));
-    assert.deepEqual(remaining, SHEET_HEADERS);
+  it("starts with the id, which joins local entries to sheet rows", () => {
+    assert.equal(SHEET_HEADERS[0], "id");
   });
 });
 

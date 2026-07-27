@@ -1,12 +1,6 @@
 import { getSetting, setSetting } from "./db.js";
 import { getAccessToken } from "./auth.js";
-import {
-  LEGACY_DROPPED_COLUMNS,
-  LEGACY_SHEET_HEADERS,
-  SHEET_HEADERS,
-  entryToRow,
-  rowToEntry
-} from "./entries.js";
+import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
 import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
 
@@ -149,15 +143,19 @@ async function listOwnedSpreadsheets({ interactiveAuth = false } = {}) {
  * config tab would create a duplicate and orphan real data. The regular sync path
  * repairs the layout and backfills the marker once the sheet is adopted.
  */
+async function readHeaderRow(spreadsheetId, range, { interactiveAuth = false } = {}) {
+  const data = await apiFetch(
+    `/${spreadsheetId}/values/${encodeRange(range)}?fields=values`,
+    {},
+    { interactiveAuth }
+  );
+  const [header = []] = rowsAsText(data.values || []);
+  return header;
+}
+
 async function hasTimeEntriesHeader(spreadsheetId, { interactiveAuth = false } = {}) {
   try {
-    const data = await apiFetch(
-      `/${spreadsheetId}/values/${encodeRange(HEADER_RANGE)}?fields=values`,
-      {},
-      { interactiveAuth }
-    );
-    const [header] = rowsAsText(data.values || []);
-    return headersMatch(header || []);
+    return headersMatch(await readHeaderRow(spreadsheetId, HEADER_RANGE, { interactiveAuth }));
   } catch (error) {
     if (error.code === "AUTH_EXPIRED" || error.code === "OFFLINE" || error.code === "RATE_LIMIT") throw error;
     return false;
@@ -287,10 +285,9 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
   }
 
   const sheetId = sheetIdsByTitle.get(SHEET_NAME);
-  if (sheetId != null) {
-    await rememberSheetId(spreadsheetId, sheetId);
-    await migrateLegacyColumns(spreadsheetId, sheetId, { interactiveAuth });
-  }
+  if (sheetId != null) await rememberSheetId(spreadsheetId, sheetId);
+
+  await assertHeaderIsSafeToWrite(spreadsheetId, { interactiveAuth });
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
@@ -304,38 +301,26 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
 }
 
 /**
- * Removes the unused client and tags columns from a spreadsheet still on the
- * original 17-column layout.
+ * Refuses to rewrite the header when the existing one is a different width.
  *
- * Deleting the columns rather than leaving them in place keeps every row aligned
- * with the header. Rewriting only the header would leave the existing data shifted
- * by one or two columns, so project would be read from the old client column and
- * so on. Neither column was ever written to by any UI, so nothing is lost.
+ * Repairing a header assumes the data below it is still aligned, which holds for a
+ * renamed or cleared header row but not for a layout with extra columns, such as a
+ * pre-migration backup restored from Drive. Rewriting in that case would silently
+ * misalign every row, so it reports the problem instead.
+ *
+ * Reads past the current range on purpose: within A:N a wider sheet looks the
+ * right width.
  */
-async function migrateLegacyColumns(spreadsheetId, sheetId, { interactiveAuth = false } = {}) {
-  const legacyHeaderRange = `${SHEET_NAME}!A1:Q1`;
-  const data = await apiFetch(
-    `/${spreadsheetId}/values/${encodeRange(legacyHeaderRange)}?fields=values`,
-    {},
-    { interactiveAuth }
-  ).catch(() => ({}));
+async function assertHeaderIsSafeToWrite(spreadsheetId, { interactiveAuth = false } = {}) {
+  const header = await readHeaderRow(spreadsheetId, `${SHEET_NAME}!A1:Z1`, { interactiveAuth })
+    .catch(() => []);
+  const width = header.filter((cell) => cell !== "").length;
+  if (width === 0 || width === SHEET_HEADERS.length) return;
 
-  const [header] = rowsAsText(data.values || []);
-  if (!header || header.length !== LEGACY_SHEET_HEADERS.length) return false;
-  if (!LEGACY_SHEET_HEADERS.every((name, index) => header[index] === name)) return false;
-
-  await apiFetch(`/${spreadsheetId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({
-      requests: LEGACY_DROPPED_COLUMNS.map((columnIndex) => ({
-        deleteDimension: {
-          range: { sheetId, dimension: "COLUMNS", startIndex: columnIndex, endIndex: columnIndex + 1 }
-        }
-      }))
-    })
-  }, { interactiveAuth });
-
-  return true;
+  throw codedError(
+    "SHEET_MISSING",
+    `The time_entries tab has ${width} columns where ${SHEET_HEADERS.length} are expected, so its rows are not aligned with the current layout. Fix the columns in the spreadsheet, or let the extension create a new one.`
+  );
 }
 
 function rowsToConfig(rows) {
