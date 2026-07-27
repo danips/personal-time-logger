@@ -2,11 +2,20 @@
   "manifest_version": 3,
   "name": "Personal Time Logger",
   "description": "Local-first time tracking with Google Sheets sync.",
-  "version": "0.1.11",
+  "version": "0.1.12",
+  "permissions": [
+    "alarms"
+  ],
   "host_permissions": [
     "https://www.googleapis.com/*",
     "https://oauth2.googleapis.com/*"
   ],
+  "background": {
+    "scripts": [
+      "background/background.js"
+    ],
+    "type": "module"
+  },
   "action": {
     "default_title": "Time Logger",
     "default_popup": "popup/popup.html",

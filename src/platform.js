@@ -58,5 +58,16 @@ export const platform = {
   async setIcon(details) {
     if (!rawApi.action || !rawApi.action.setIcon) return;
     return apiCall(rawApi.action.setIcon, rawApi.action, details);
+  },
+
+  scheduleAlarm(name, periodInMinutes) {
+    if (!rawApi.alarms || !rawApi.alarms.create) return false;
+    rawApi.alarms.create(name, { periodInMinutes, delayInMinutes: periodInMinutes });
+    return true;
+  },
+
+  onAlarm(listener) {
+    if (!rawApi.alarms || !rawApi.alarms.onAlarm) return;
+    rawApi.alarms.onAlarm.addListener(listener);
   }
 };
