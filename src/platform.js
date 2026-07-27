@@ -69,5 +69,10 @@ export const platform = {
   onAlarm(listener) {
     if (!rawApi.alarms || !rawApi.alarms.onAlarm) return;
     rawApi.alarms.onAlarm.addListener(listener);
+  },
+
+  onInstalled(listener) {
+    if (!rawApi.runtime || !rawApi.runtime.onInstalled) return;
+    rawApi.runtime.onInstalled.addListener(listener);
   }
 };

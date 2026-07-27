@@ -1,5 +1,5 @@
 import { getSetting, setSetting } from "../src/db.js";
-import { nextSyncDelayMinutes, syncNow } from "../src/sync.js";
+import { clearRemoteReadMarker, nextSyncDelayMinutes, syncNow } from "../src/sync.js";
 import { platform } from "../src/platform.js";
 
 const SYNC_ALARM = "timelogger-sync";
@@ -45,6 +45,15 @@ async function scheduleHeartbeat() {
 platform.onAlarm((alarm) => {
   if (alarm.name !== SYNC_ALARM) return;
   runBackgroundSync().then(scheduleHeartbeat);
+});
+
+// A new version may need to see the spreadsheet to migrate or repair it, so the
+// read gate is cleared and the next sync brought forward.
+platform.onInstalled(({ reason }) => {
+  if (reason !== "install" && reason !== "update") return;
+  clearRemoteReadMarker()
+    .then(() => setSetting(NEXT_DUE_KEY, 0))
+    .catch(() => {});
 });
 
 scheduleHeartbeat();

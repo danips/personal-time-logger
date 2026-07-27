@@ -344,8 +344,12 @@ async function runSyncCycle({ interactiveAuth, force }) {
     // to push the read happens regardless, so asking first would just burn a
     // request. An empty modifiedTime means Drive cannot answer, so the read
     // happens unconditionally.
+    //
+    // A forced sync always reads. Skipping on a user's explicit request hides
+    // anything that can only be noticed by reading, such as a layout that needs
+    // migrating, and leaves the sync button reporting success without looking.
     let modifiedTime = "";
-    if (!hasLocalWork) {
+    if (!hasLocalWork && !force) {
       modifiedTime = await getRemoteModifiedTime({ interactiveAuth });
       const lastSeenModified = String(await getSetting(REMOTE_MODIFIED_KEY, "") || "");
       if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
@@ -402,6 +406,15 @@ async function runSyncCycle({ interactiveAuth, force }) {
   } finally {
     await releaseLock(SYNC_LOCK_KEY, CONTEXT_ID);
   }
+}
+
+/**
+ * Forgets the last seen remote modification time, so the next sync reads the
+ * spreadsheet instead of trusting the gate. Called after an extension update,
+ * where a new version may need to see the sheet to migrate or repair it.
+ */
+export async function clearRemoteReadMarker() {
+  await setSetting(REMOTE_MODIFIED_KEY, "");
 }
 
 /**
