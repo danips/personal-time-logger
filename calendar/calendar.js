@@ -1,5 +1,6 @@
 import { getVisibleEntries } from "../src/db.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
+import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { downloadCsv } from "../src/csv.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
@@ -8,11 +9,10 @@ import {
   bindMinuteRollover,
   durationSeconds,
   formatElapsed,
-  fromLocalInputValue,
+  localDateKey,
   localTime,
   startOfLocalDay as startOfDay,
-  startOfLocalWeek as startOfWeek,
-  toLocalInputValue
+  startOfLocalWeek as startOfWeek
 } from "../src/time.js";
 import { $, entryTitle, formatError, projectColor, statusFromError } from "../src/ui-helpers.js";
 
@@ -75,14 +75,6 @@ function shortDay(date) {
 
 function calendarHeaderDate(date) {
   return date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-}
-
-function localDateKey(date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0")
-  ].join("-");
 }
 
 function formatTotalHours(seconds) {
@@ -150,7 +142,7 @@ function actualDurationSeconds(rawStart, rawEnd) {
 }
 
 function effectiveDurationSeconds(entry, rawStart, rawEnd) {
-  const actualSeconds = Math.max(0, (rawEnd.getTime() - rawStart.getTime()) / 1000);
+  const actualSeconds = actualDurationSeconds(rawStart, rawEnd);
   if (!actualSeconds) return 0;
   const stored = Number(entry.duration_seconds) || 0;
   return entry.end_at && stored ? stored : actualSeconds;
@@ -315,6 +307,8 @@ function renderEntryBlock(column, segment) {
   block.style.width = `calc(${laneWidth}% - 6px)`;
   block.style.setProperty("--project-color", projectColor(entry));
   block.tabIndex = 0;
+  block.setAttribute("role", "button");
+  block.setAttribute("aria-label", `Edit ${entryTitle(entry)}`);
   const projectLabel = entry.project || "Untitled project";
   const detailsLabel = [entry.task, entry.description].filter(Boolean).join(" - ") || "No task or description";
   const durationLabel = formatElapsed(Math.round(segment.totalSeconds || 0));
@@ -357,6 +351,7 @@ function renderEntryBlock(column, segment) {
   }
   block.addEventListener("pointerdown", beginDrag);
   block.addEventListener("click", selectEntryFromBlock);
+  block.addEventListener("keydown", selectEntryFromKeyboard);
   column.append(block);
 }
 
@@ -431,6 +426,16 @@ async function selectEntryFromBlock(event) {
   openSelectedEntryEditor();
 }
 
+// Blocks are focusable, so Enter and Space must open the editor the same way a
+// click does. Dragging and resizing stay pointer-only; the editor form covers
+// changing start and end times from the keyboard.
+function selectEntryFromKeyboard(event) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  selectEntryFromBlock(event);
+}
+
 function scrollToWorkingHours() {
   if (initialScrollDone) return;
   initialScrollDone = true;
@@ -470,19 +475,29 @@ function positionPopupForEntry(entryId) {
   popup.style.top = `${top}px`;
 }
 
+function editFields() {
+  return {
+    project: $("#calendarEditProject"),
+    task: $("#calendarEditTask"),
+    description: $("#calendarEditDescription"),
+    billable: $("#calendarEditBillable"),
+    multiply: $("#calendarEditMultiply"),
+    start: $("#calendarEditStart"),
+    end: $("#calendarEditEnd"),
+    status: $("#calendarEditStatus")
+  };
+}
+
+function loadEditor(entry) {
+  editingEntryId = entry.id;
+  editingMultiplyValue = entry.multiply || "";
+  writeEntryForm(editFields(), entry);
+}
+
 function refreshSelectedEntryEditor() {
   const entry = getEntryById(selectedEntryId);
   if (!entry || !editingEntryId) return;
-  editingEntryId = entry.id;
-  editingMultiplyValue = entry.multiply || "";
-  $("#calendarEditProject").value = entry.project || "";
-  $("#calendarEditTask").value = entry.task || "";
-  $("#calendarEditDescription").value = entry.description || "";
-  $("#calendarEditBillable").checked = Boolean(entry.billable);
-  $("#calendarEditMultiply").checked = hasMultiplier(entry);
-  $("#calendarEditStart").value = toLocalInputValue(entry.start_at);
-  $("#calendarEditEnd").value = toLocalInputValue(entry.end_at);
-  $("#calendarEditStatus").value = entry.status || "ok";
+  loadEditor(entry);
   positionPopupForEntry(entry.id);
 }
 
@@ -525,13 +540,12 @@ function ensurePreview() {
   return preview;
 }
 
-function dragTargetFromPointer(clientX, clientY) {
-  const columns = [...document.querySelectorAll(".day-column")];
-  if (!columns.length) return null;
-
+// Nearest day column to a pointer position, so dragging outside the grid still
+// resolves to the closest day instead of cancelling.
+function columnFromPointer(clientX) {
   let best = null;
   let bestDistance = Infinity;
-  for (const column of columns) {
+  for (const column of document.querySelectorAll(".day-column")) {
     const rect = column.getBoundingClientRect();
     const center = rect.left + rect.width / 2;
     const distance = clientX >= rect.left && clientX <= rect.right ? 0 : Math.abs(clientX - center);
@@ -540,7 +554,11 @@ function dragTargetFromPointer(clientX, clientY) {
       best = { column, rect };
     }
   }
+  return best;
+}
 
+function dragTargetFromPointer(clientX, clientY) {
+  const best = columnFromPointer(clientX);
   if (!best) return null;
 
   const rawTop = clientY - best.rect.top - dragState.offsetY;
@@ -595,22 +613,9 @@ function beginDrag(event) {
 }
 
 function resizeTargetFromPointer(clientX, clientY) {
-  const columns = [...document.querySelectorAll(".day-column")];
-  if (!columns.length) return null;
-
-  let best = null;
-  let bestDistance = Infinity;
-  for (const column of columns) {
-    const rect = column.getBoundingClientRect();
-    const center = rect.left + rect.width / 2;
-    const distance = clientX >= rect.left && clientX <= rect.right ? 0 : Math.abs(clientX - center);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = { column, rect };
-    }
-  }
-
+  const best = columnFromPointer(clientX);
   if (!best) return null;
+
   const rawMinute = (clientY - best.rect.top) / PX_PER_MINUTE;
   const minute = clamp(
     Math.round(rawMinute / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES,
@@ -872,18 +877,7 @@ function openSelectedEntryEditor() {
   const entry = getEntryById(selectedEntryId);
   if (!entry) return;
 
-  editingEntryId = entry.id;
-  editingMultiplyValue = entry.multiply || "";
-  $("#calendarEditProject").value = entry.project || "";
-  $("#calendarEditTask").value = entry.task || "";
-  $("#calendarEditDescription").value = entry.description || "";
-  $("#calendarEditBillable").checked = Boolean(entry.billable);
-  $("#calendarEditMultiply").checked = hasMultiplier(entry);
-  $("#calendarEditStart").value = toLocalInputValue(entry.start_at);
-  $("#calendarEditEnd").value = toLocalInputValue(entry.end_at);
-  $("#calendarEditStatus").value = entry.status || "ok";
-
-
+  loadEditor(entry);
 
   const candidates = renderedEntries.filter((e) => canMergeEntries(entry, e));
   const mergeOptions = candidates.map((e) => {
@@ -943,16 +937,7 @@ async function saveCalendarEdit(event) {
 
   try {
     setResizeUndo(null);
-    await updateEntry(editingEntryId, {
-      project: $("#calendarEditProject").value.trim(),
-      task: $("#calendarEditTask").value.trim(),
-      description: $("#calendarEditDescription").value.trim(),
-      billable: $("#calendarEditBillable").checked,
-      multiply: $("#calendarEditMultiply").checked ? (editingMultiplyValue || true) : false,
-      start_at: startAt,
-      end_at: endAt,
-      status: $("#calendarEditStatus").value
-    });
+    await updateEntry(editingEntryId, readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }));
     closeEditor();
     setStatus("Entry updated");
     await render();

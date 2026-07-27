@@ -27,6 +27,18 @@ function headersMatch(row) {
   return SHEET_HEADERS.length === row.length && SHEET_HEADERS.every((header, index) => row[index] === header);
 }
 
+// Sheet layout rarely changes, so the tab check and its numeric id are cached
+// per spreadsheet instead of costing a metadata request on every read or delete.
+let ensuredSpreadsheetId = "";
+let cachedSheetIdSpreadsheet = "";
+let cachedSheetId = null;
+
+function resetSheetCache() {
+  ensuredSpreadsheetId = "";
+  cachedSheetIdSpreadsheet = "";
+  cachedSheetId = null;
+}
+
 async function apiFetch(path, options = {}, { interactiveAuth = false } = {}) {
   if (!platform.isOnline()) throw codedError("OFFLINE", "Network is offline");
   const token = await getAccessToken({ interactive: interactiveAuth });
@@ -70,6 +82,7 @@ export async function getSpreadsheetId() {
 }
 
 export async function setSpreadsheetId(spreadsheetId) {
+  resetSheetCache();
   return setSetting("spreadsheet_id", String(spreadsheetId || "").trim());
 }
 
@@ -94,6 +107,7 @@ export async function createOrInitializeSpreadsheet({ interactiveAuth = true } =
 
 async function ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth = false } = {}) {
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  if (ensuredSpreadsheetId === spreadsheetId) return;
 
   const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`, {}, { interactiveAuth });
   const existingSheet = (metadata.sheets || []).find((sheet) => sheet.properties && sheet.properties.title === SHEET_NAME);
@@ -124,6 +138,12 @@ async function ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth = false }
       body: JSON.stringify({ values: [SHEET_HEADERS] })
     }, { interactiveAuth });
   }
+
+  if (sheetId != null) {
+    cachedSheetIdSpreadsheet = spreadsheetId;
+    cachedSheetId = sheetId;
+  }
+  ensuredSpreadsheetId = spreadsheetId;
 }
 
 async function ensureConfigSheet(spreadsheetId, { interactiveAuth = false } = {}) {
@@ -213,7 +233,13 @@ export async function readRemoteEntries({ interactiveAuth = false } = {}) {
 
   await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
   const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(FULL_RANGE)}`, {}, { interactiveAuth });
-  return rowsToEntries(data.values || []);
+  try {
+    return rowsToEntries(data.values || []);
+  } catch (error) {
+    // The cached tab check is no longer trustworthy if the header went missing.
+    resetSheetCache();
+    throw error;
+  }
 }
 
 function rowsToEntries(rows) {
@@ -232,22 +258,37 @@ function rowsToEntries(rows) {
   return { entries, rowMap };
 }
 
+function appendedRowIndex(data) {
+  const range = data && data.updates ? data.updates.updatedRange : "";
+  const match = /![A-Z]+(\d+)/.exec(String(range || ""));
+  return match ? Number(match[1]) : 0;
+}
+
+/**
+ * Appends an entry and returns the 1-based sheet row it landed on, or 0 when
+ * the response carried no usable range. Callers must not guess the row.
+ */
 export async function appendRemoteEntry(entry, { interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-  await apiFetch(`/${spreadsheetId}/values/${encodeRange(FULL_RANGE)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+  const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(FULL_RANGE)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
     method: "POST",
     body: JSON.stringify({ values: [entryToRow(entry)] })
   }, { interactiveAuth });
+  return appendedRowIndex(data);
 }
 
 async function getSheetId({ interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  if (cachedSheetIdSpreadsheet === spreadsheetId && cachedSheetId != null) return cachedSheetId;
+
   const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties`, {}, { interactiveAuth });
   const existing = (metadata.sheets || []).find((s) => s.properties && s.properties.title === SHEET_NAME);
   if (!existing) throw codedError("SHEET_MISSING", "time_entries sheet not found");
-  return existing.properties.sheetId;
+  cachedSheetIdSpreadsheet = spreadsheetId;
+  cachedSheetId = existing.properties.sheetId;
+  return cachedSheetId;
 }
 
 export async function deleteRemoteRow(rowIndex, { interactiveAuth = false } = {}) {

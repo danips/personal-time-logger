@@ -1,11 +1,18 @@
-import { deleteEntry, getAllEntries, getDirtyEntries, putEntry, putEntries, setSetting, getSetting } from "./db.js";
+import { claimLock, deleteEntry, getAllEntries, getDirtyEntries, getEntry, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
 import { appendRemoteEntry, deleteRemoteRow, readRemoteConfig, readRemoteEntries, updateRemoteConfig, updateRemoteEntry } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
-import { addDays, nowIso, startOfLocalDay } from "./time.js";
+import { addDays, nowIso, startOfLocalDay, uuid } from "./time.js";
 import { platform } from "./platform.js";
 
 const MAX_BACKOFF_SECONDS = 300;
+const SYNC_LOCK_KEY = "sync_lock";
+const SYNC_LOCK_TTL_MS = 120000;
+
+// Identifies this module instance, which is one per extension context (popup,
+// calendar page, background). Used as the sync lock holder.
+const CONTEXT_ID = uuid();
+let inFlightSync = null;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -13,7 +20,18 @@ function codedError(code, message) {
   return error;
 }
 
+/**
+ * Clears the dirty flag for an entry that was just pushed. The push snapshot can
+ * be stale by the time the request returns, so an entry edited mid-flight is
+ * left dirty for the next cycle rather than being overwritten.
+ */
 async function markSynced(entry) {
+  const current = await getEntry(entry.id);
+  if (current && (current.updated_at !== entry.updated_at
+    || Number(current.revision || 0) !== Number(entry.revision || 0))) {
+    return current;
+  }
+
   const timestamp = nowIso();
   const clean = normalizeEntry({
     ...entry,
@@ -38,9 +56,14 @@ async function clearBackoff() {
   await setSetting("sync_backoff_until", 0);
 }
 
+/**
+ * Writes local changes to the sheet and returns the ids that were pushed, so the
+ * pull step can skip them: the snapshot it works from predates these writes.
+ */
 async function pushDirtyEntries(remoteEntries, rowMap, { interactiveAuth }) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const dirtyEntries = await getDirtyEntries();
+  const pushedIds = new Set();
 
   for (const local of dirtyEntries) {
     const remote = remoteById.get(local.id);
@@ -50,20 +73,25 @@ async function pushDirtyEntries(remoteEntries, rowMap, { interactiveAuth }) {
     if (rowMap.has(local.id)) {
       await updateRemoteEntry(rowMap.get(local.id), local, { interactiveAuth });
     } else {
-      await appendRemoteEntry(local, { interactiveAuth });
-      const nextRow = rowMap.size + 2;
-      rowMap.set(local.id, nextRow);
+      const appendedRow = await appendRemoteEntry(local, { interactiveAuth });
+      // Without a row from the API the entry stays unmapped and is matched by id
+      // on the next read, which is safer than writing to a guessed row.
+      if (appendedRow) rowMap.set(local.id, appendedRow);
     }
+    pushedIds.add(local.id);
     await markSynced(local);
   }
+
+  return pushedIds;
 }
 
-async function pullRemoteEntries(remoteEntries) {
+async function pullRemoteEntries(remoteEntries, pushedIds = new Set()) {
   const localEntries = await getAllEntries();
   const localById = new Map(localEntries.map((entry) => [entry.id, entry]));
   const toSave = [];
 
   for (const remote of remoteEntries) {
+    if (pushedIds.has(remote.id)) continue;
     const local = localById.get(remote.id);
     if (!local || !local.dirty || isRemoteNewer(remote, local)) {
       toSave.push(normalizeEntry({
@@ -188,7 +216,7 @@ async function pullRemoteConfig({ interactiveAuth }) {
   }
 }
 
-export async function syncNow({ interactiveAuth = false, force = false } = {}) {
+async function runSyncCycle({ interactiveAuth, force }) {
   if (!platform.isOnline()) {
     const error = codedError("OFFLINE", "offline");
     await recordBackoff(error);
@@ -200,23 +228,24 @@ export async function syncNow({ interactiveAuth = false, force = false } = {}) {
     throw codedError("BACKOFF", `retry after ${Math.ceil((backoffUntil - Date.now()) / 1000)}s`);
   }
 
+  // The popup, the calendar page, and the background alarm all sync
+  // independently. Without this lock two cycles can each miss the other's rows
+  // and append the same entry twice.
+  if (!(await claimLock(SYNC_LOCK_KEY, CONTEXT_ID, SYNC_LOCK_TTL_MS))) {
+    throw codedError("SYNC_BUSY", "another sync is already running");
+  }
+
   try {
     await markStaleActiveTimers();
-
-    const firstRead = await readRemoteEntries({ interactiveAuth });
-    await pushDirtyEntries(firstRead.entries, firstRead.rowMap, { interactiveAuth });
-
-    const secondRead = await readRemoteEntries({ interactiveAuth });
-    // Pull before purging: purge works from this same snapshot, so purging
-    // first would let the pull re-insert the rows it just removed.
-    await pullRemoteEntries(secondRead.entries);
-    await purgeDeletedEntries(secondRead.entries, secondRead.rowMap, { interactiveAuth });
-
+    // Flagged before the push so the conflict markers travel in the same pass.
     const conflictChanges = await markMultipleActiveTimers();
-    if (conflictChanges.length) {
-      const thirdRead = await readRemoteEntries({ interactiveAuth });
-      await pushDirtyEntries(thirdRead.entries, thirdRead.rowMap, { interactiveAuth });
-    }
+
+    const snapshot = await readRemoteEntries({ interactiveAuth });
+    const pushedIds = await pushDirtyEntries(snapshot.entries, snapshot.rowMap, { interactiveAuth });
+    await pullRemoteEntries(snapshot.entries, pushedIds);
+    // Purge last: it consumes the same snapshot, and deleting rows first would
+    // let the pull re-insert what it removed.
+    await purgeDeletedEntries(snapshot.entries, snapshot.rowMap, { interactiveAuth });
 
     await pullRemoteConfig({ interactiveAuth });
     await pushLocalConfig({ interactiveAuth });
@@ -225,12 +254,25 @@ export async function syncNow({ interactiveAuth = false, force = false } = {}) {
     await clearBackoff();
     notifyEntriesChanged({ action: "sync" });
     return {
-      status: conflictChanges.length ? "error" : "synced",
-      warning: conflictChanges.length ? "sync conflict / multiple active timers" : "",
+      status: conflictChanges.length ? "needs review" : "synced",
+      warning: conflictChanges.length ? "multiple active timers flagged" : "",
       syncedAt: timestamp
     };
   } catch (error) {
     await recordBackoff(error);
     throw error;
+  } finally {
+    await releaseLock(SYNC_LOCK_KEY, CONTEXT_ID);
   }
+}
+
+export async function syncNow({ interactiveAuth = false, force = false } = {}) {
+  // Collapse overlapping calls from the same context, such as the poller firing
+  // while a user action is still syncing.
+  if (inFlightSync) return inFlightSync;
+
+  inFlightSync = runSyncCycle({ interactiveAuth, force }).finally(() => {
+    inFlightSync = null;
+  });
+  return inFlightSync;
 }

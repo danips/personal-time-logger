@@ -1,7 +1,7 @@
 import { getSetting, setSetting } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
-import { getConfig, resetConfigCache } from "../src/config-loader.js";
+import { getConfig } from "../src/config-loader.js";
 import { createOrInitializeSpreadsheet, setSpreadsheetId } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -42,7 +42,6 @@ async function saveSettings() {
   const multiplierUpdatedAt = nowIso();
   await setSetting("duration_multiplier", multiplier);
   await setSetting("duration_multiplier_updated_at", multiplierUpdatedAt);
-  resetConfigCache();
   $("#syncInterval").value = String(interval);
   $("#durationMultiplier").value = String(multiplier);
   setStatus("Settings saved");
@@ -57,7 +56,6 @@ async function saveGoogleCredentials() {
 
   await setSetting("google_oauth_client_id", clientId);
   await setSetting("google_oauth_client_secret", clientSecret);
-  resetConfigCache();
 
   if (
     clientId !== previousConfig.GOOGLE_CLIENT_ID

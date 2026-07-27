@@ -2,24 +2,19 @@ import { getSetting } from "./db.js";
 
 const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
-let cachedConfig = null;
-
+/**
+ * Reads the OAuth config on every call. It is two IndexedDB reads, and caching
+ * it per context left long-lived contexts such as the background page holding
+ * credentials the user had already replaced.
+ */
 export async function getConfig() {
-  if (cachedConfig) return cachedConfig;
+  const clientId = String(await getSetting("google_oauth_client_id", "") || "").trim();
+  const clientSecret = String(await getSetting("google_oauth_client_secret", "") || "").trim();
 
-  const storedClientId = String(await getSetting("google_oauth_client_id", "") || "").trim();
-  const storedClientSecret = String(await getSetting("google_oauth_client_secret", "") || "").trim();
-
-  cachedConfig = {
-    GOOGLE_CLIENT_ID: storedClientId,
-    GOOGLE_CLIENT_SECRET: storedClientSecret,
+  return {
+    GOOGLE_CLIENT_ID: clientId,
+    GOOGLE_CLIENT_SECRET: clientSecret,
     GOOGLE_SCOPES,
-    configLoaded: Boolean(storedClientId || storedClientSecret)
+    configLoaded: Boolean(clientId || clientSecret)
   };
-
-  return cachedConfig;
-}
-
-export function resetConfigCache() {
-  cachedConfig = null;
 }

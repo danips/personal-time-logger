@@ -27,6 +27,7 @@ export function formatError(error) {
   if (code === "RATE_LIMIT") return "API quota/rate limit";
   if (code === "OFFLINE") return "offline";
   if (code === "BACKOFF") return message || "waiting after API error";
+  if (code === "SYNC_BUSY") return "another sync is already running";
   if (code === "AUTH_FAILED") return message ? `auth failure: ${message}` : "auth failure";
   return message || "error";
 }
@@ -36,6 +37,7 @@ export function statusFromError(error) {
   if (code === "AUTH_REQUIRED" || code === "AUTH_EXPIRED" || code === "CONFIG_MISSING") return "not signed in";
   if (code === "SPREADSHEET_MISSING") return "spreadsheet missing";
   if (code === "OFFLINE") return "offline";
+  if (code === "SYNC_BUSY" || code === "BACKOFF") return "pending";
   return "error";
 }
 

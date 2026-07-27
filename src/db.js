@@ -1,5 +1,5 @@
 const DB_NAME = "timelogger_db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ENTRY_STORE = "time_entries";
 const SETTINGS_STORE = "settings";
 
@@ -29,9 +29,13 @@ function openDb() {
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(ENTRY_STORE)) {
-        const entries = db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
-        entries.createIndex("updated_at", "updated_at", { unique: false });
-        entries.createIndex("dirty", "dirty", { unique: false });
+        db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
+      } else {
+        // Every query filters in JS, so the v1 indexes were never read.
+        const entries = request.transaction.objectStore(ENTRY_STORE);
+        for (const name of ["updated_at", "dirty"]) {
+          if (entries.indexNames.contains(name)) entries.deleteIndex(name);
+        }
       }
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
@@ -62,6 +66,32 @@ export async function getSetting(key, fallback = null) {
 export async function setSetting(key, value) {
   await store(SETTINGS_STORE, "readwrite", (s) => requestToPromise(s.put({ key, value })));
   return value;
+}
+
+/**
+ * Claims a named lock, held in the settings store so it is visible to every
+ * extension context. The get and the put share one readwrite transaction, and
+ * IndexedDB serializes transactions across contexts, so two callers cannot both
+ * observe the lock as free. Returns false when someone else holds it.
+ */
+export async function claimLock(key, holder, ttlMs) {
+  return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
+    const record = await requestToPromise(objectStore.get(key));
+    const lock = record ? record.value : null;
+    const heldUntil = lock ? Number(lock.acquired_at || 0) + ttlMs : 0;
+    if (lock && lock.holder !== holder && heldUntil > Date.now()) return false;
+    await requestToPromise(objectStore.put({ key, value: { holder, acquired_at: Date.now() } }));
+    return true;
+  });
+}
+
+export async function releaseLock(key, holder) {
+  await store(SETTINGS_STORE, "readwrite", async (objectStore) => {
+    const record = await requestToPromise(objectStore.get(key));
+    const lock = record ? record.value : null;
+    if (lock && lock.holder !== holder) return;
+    await requestToPromise(objectStore.delete(key));
+  });
 }
 
 export async function deleteEntry(id) {

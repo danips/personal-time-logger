@@ -32,6 +32,14 @@ export function addDays(date, days) {
   return next;
 }
 
+export function localDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
 export function startOfLocalWeek(date) {
   const day = startOfLocalDay(date);
   const offset = (day.getDay() + 6) % 7;

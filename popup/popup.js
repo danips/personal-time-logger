@@ -1,5 +1,6 @@
-import { getActiveEntries, getDirtyEntries, getSetting, getVisibleEntries } from "../src/db.js";
+import { getActiveEntries, getDirtyEntries, getVisibleEntries } from "../src/db.js";
 import { canMergeEntries, createEntry, hasMultiplier, mergeEntries, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
+import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
 import {
@@ -7,11 +8,10 @@ import {
   bindMinuteRollover,
   durationSeconds,
   formatElapsed,
-  fromLocalInputValue,
+  localDateKey,
   localTime,
   shortDateTime,
-  startOfLocalWeek,
-  toLocalInputValue
+  startOfLocalWeek
 } from "../src/time.js";
 import {
   $,
@@ -28,7 +28,6 @@ let activeEntries = [];
 let editingId = "";
 let editingMultiplyValue = "";
 let ticker = null;
-let poller = null;
 let unsubscribeEntryEvents = null;
 const expandedRecentGroups = new Set();
 let recentWeekCount = 1;
@@ -73,6 +72,19 @@ function formFields() {
   };
 }
 
+function editFields() {
+  return {
+    project: $editProject,
+    task: $editTask,
+    description: $editDescription,
+    billable: $editBillable,
+    multiply: $editMultiply,
+    start: $editStart,
+    end: $editEnd,
+    status: $editStatus
+  };
+}
+
 function entryDuration(entry) {
   return Number(entry.duration_seconds) || durationSeconds(entry.start_at, entry.end_at || undefined);
 }
@@ -112,14 +124,6 @@ function groupChips(group) {
     for (const chip of entryChips(entry)) chips.add(chip);
   }
   return [...chips];
-}
-
-function localDateKey(date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0")
-  ].join("-");
 }
 
 function localDayKey(iso) {
@@ -514,7 +518,16 @@ async function runSync({ force = false } = {}) {
   await render();
 }
 
+async function stopRunningTimers() {
+  // Starting a timer replaces the running one instead of leaving two active
+  // entries for sync to flag as needing review.
+  for (const entry of await getActiveEntries()) {
+    await stopEntry(entry.id);
+  }
+}
+
 async function startTimer() {
+  await stopRunningTimers();
   await createEntry(formFields());
   setNewTimerOpen(false);
   await runSync({ force: false });
@@ -523,6 +536,7 @@ async function startTimer() {
 async function restartFromEntry(id) {
   const entry = (await getVisibleEntries()).find((item) => item.id === id);
   if (!entry) return;
+  await stopRunningTimers();
   await createEntry({
     client: "",
     project: entry.project || "",
@@ -551,14 +565,7 @@ async function showEdit(id) {
   editingMultiplyValue = entry.multiply || "";
   $editProjectDot.classList.toggle("hidden", !entry.project);
   $editProjectDot.style.setProperty("--project-color", projectColor(entry));
-  $editProject.value = entry.project || "";
-  $editTask.value = entry.task || "";
-  $editDescription.value = entry.description || "";
-  $editBillable.checked = Boolean(entry.billable);
-  $editMultiply.checked = hasMultiplier(entry);
-  $editStart.value = toLocalInputValue(entry.start_at);
-  $editEnd.value = toLocalInputValue(entry.end_at);
-  $editStatus.value = entry.status || "ok";
+  writeEntryForm(editFields(), entry);
   renderMergeTargets(entry, entries);
   setNewTimerOpen(false);
   $editPanel.classList.remove("hidden");
@@ -608,18 +615,7 @@ function renderMergeTargets(entry, entries) {
 
 async function saveEdit() {
   if (!editingId) return;
-  await updateEntry(editingId, {
-    client: "",
-    project: $editProject.value.trim(),
-    task: $editTask.value.trim(),
-    description: $editDescription.value.trim(),
-    billable: $editBillable.checked,
-    multiply: $editMultiply.checked ? (editingMultiplyValue || true) : false,
-    tags: "",
-    start_at: fromLocalInputValue($editStart.value),
-    end_at: fromLocalInputValue($editEnd.value),
-    status: $editStatus.value
-  });
+  await updateEntry(editingId, readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }));
   hideEdit();
   await runSync({ force: false });
 }
@@ -632,6 +628,7 @@ function saveEditOnEnter(event) {
 
 async function deleteEdit() {
   if (!editingId) return;
+  if (!confirm("Delete this time log entry?")) return;
   await softDeleteEntry(editingId);
   hideEdit();
   await runSync({ force: false });
@@ -648,12 +645,6 @@ async function mergeEdit() {
   } catch (error) {
     setStatus($syncStatus, "error", formatError(error));
   }
-}
-
-async function startPolling() {
-  const configured = Number(await getSetting("sync_interval_seconds", 60)) || 60;
-  const interval = Math.max(30, configured) * 1000;
-  poller = setInterval(() => runSync({ force: false }), interval);
 }
 
 function bindEvents() {
@@ -726,14 +717,14 @@ async function init() {
     });
   });
   await render();
+  // Periodic syncing belongs to the background alarm; its notifyEntriesChanged
+  // broadcast re-renders this popup, so no local poller is needed.
   await runSync({ force: false });
-  await startPolling();
   ticker = setInterval(updateElapsed, 1000);
 }
 
 window.addEventListener("pagehide", () => {
   if (ticker) clearInterval(ticker);
-  if (poller) clearInterval(poller);
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
 });
 

@@ -47,9 +47,14 @@ export function normalizeMultiplierText(value) {
   return text;
 }
 
+/**
+ * Stored multiply values are always a numeric string or "". Checkbox booleans
+ * are resolved to the configured multiplier by selectedMultiplyValue before they
+ * reach storage, so they are treated as "no multiplier" here.
+ */
 function normalizeMultiplyValue(value) {
-  if (value === true || value === "true" || value === "TRUE") return "1.0";
-  if (value === false || value === "false" || value === "FALSE" || value == null || value === "") return "";
+  if (typeof value === "boolean" || value == null || value === "") return "";
+  if (value === "true" || value === "TRUE" || value === "false" || value === "FALSE") return "";
   return normalizeMultiplierText(value);
 }
 
@@ -174,6 +179,8 @@ export async function duplicateEntry(id) {
 export async function stopEntry(id) {
   const existing = await getEntry(id);
   if (!existing) throw new Error("Entry not found");
+  // Idempotent: a second stop (stale UI, double click) must not rewrite end_at.
+  if (existing.end_at) return normalizeEntry(existing);
   const timestamp = nowIso();
   const multiply = await selectedMultiplyValue(existing.multiply);
   const entry = normalizeEntry({
