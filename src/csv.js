@@ -10,8 +10,14 @@ const CSV_COLUMNS = [
   "End Time",
   "Duration (hours)",
   "Multiplied duration (hours)",
-  "Multiply"
+  "Multiply",
+  "Status"
 ];
+
+function entryStatus(entry) {
+  if (!entry.end_at) return "running";
+  return entry.status === "needs_review" ? "needs_review" : "completed";
+}
 
 function csvEscape(value) {
   const text = value == null ? "" : String(value);
@@ -34,7 +40,10 @@ function localTime(iso) {
 export function entriesToCsv(entries) {
   const rows = [CSV_COLUMNS];
   for (const entry of entries) {
-    if (entry.deleted_at || !entry.end_at) continue;
+    if (entry.deleted_at) continue;
+    // Running entries are exported with empty end columns and elapsed-so-far
+    // hours instead of being dropped silently.
+    const running = !entry.end_at;
     rows.push([
       entry.project,
       entry.task,
@@ -43,9 +52,10 @@ export function entriesToCsv(entries) {
       localTime(entry.start_at),
       localDate(entry.end_at),
       localTime(entry.end_at),
-      formatHours(durationSeconds(entry.start_at, entry.end_at)),
-      formatHours(entry.duration_seconds),
-      entry.multiply
+      formatHours(durationSeconds(entry.start_at, entry.end_at || undefined)),
+      running ? "" : formatHours(entry.duration_seconds),
+      entry.multiply,
+      entryStatus(entry)
     ]);
   }
   return rows.map((row) => row.map(csvEscape).join(",")).join("\n");

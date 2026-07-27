@@ -10,7 +10,6 @@ import {
   fromLocalInputValue,
   localTime,
   shortDateTime,
-  startOfLocalDay,
   startOfLocalWeek,
   toLocalInputValue
 } from "../src/time.js";
@@ -60,7 +59,7 @@ const $newTimerToggle = $("#newTimerToggle");
 const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
 
-let wasActive;
+let renderedActiveId;
 
 function formFields() {
   return {
@@ -72,10 +71,6 @@ function formFields() {
     multiply: $("#multiply").checked,
     tags: ""
   };
-}
-
-function entryDetails(entry) {
-  return [entry.task, entry.description].filter(Boolean).join(" - ") || "No task or description";
 }
 
 function entryDuration(entry) {
@@ -91,10 +86,9 @@ function projectDot(entry) {
   return dot;
 }
 
-function entryChips(entry, { includeMultiply = true } = {}) {
+function entryChips(entry) {
   const chips = [];
   if (entry.billable) chips.push("Billable");
-  if (includeMultiply && hasMultiplier(entry)) chips.push(`x${entry.multiply}`);
   if (entry.status === "needs_review") chips.push("Review");
   if (entry.dirty) chips.push("Pending");
   return chips;
@@ -115,7 +109,7 @@ function renderChips(chips) {
 function groupChips(group) {
   const chips = new Set();
   for (const entry of group.entries) {
-    for (const chip of entryChips(entry, { includeMultiply: false })) chips.add(chip);
+    for (const chip of entryChips(entry)) chips.add(chip);
   }
   return [...chips];
 }
@@ -186,13 +180,13 @@ function recentGroupKey(entry) {
   ].map((part) => encodeURIComponent(part)).join("|");
 }
 
-function groupRecentEntries(entries, totalEntries = entries) {
+function groupRecentEntries(entries) {
   const weeks = [];
   const weekMap = new Map();
   const weekTotals = new Map();
   const dayTotals = new Map();
 
-  for (const entry of totalEntries) {
+  for (const entry of entries) {
     const seconds = entryDuration(entry);
     const weekKey = weekInfo(entry.start_at).key;
     const dayKey = localDayKey(entry.start_at);
@@ -285,7 +279,7 @@ function renderEntryRow(entry, { child = false } = {}) {
   }
 
   main.append(title, detail);
-  const chips = renderChips(entryChips(entry, { includeMultiply: false }));
+  const chips = renderChips(entryChips(entry));
   if (chips) main.append(chips);
 
   const timeBlock = document.createElement("div");
@@ -379,11 +373,14 @@ function renderRecentTimerGroup(group) {
 function updateElapsed() {
   const latest = activeEntries[0];
   const hasActive = Boolean(latest);
-  if (hasActive === wasActive) {
+  const activeId = latest ? latest.id : "";
+  // Compare ids, not just presence: starting a timer while one is already
+  // running swaps the active entry without changing `hasActive`.
+  if (activeId === renderedActiveId) {
     if (hasActive) $elapsed.textContent = formatElapsed(durationSeconds(latest.start_at));
     return;
   }
-  wasActive = hasActive;
+  renderedActiveId = activeId;
   $activeTitle.textContent = latest ? entryTitle(latest) : "No active timer";
   $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
   $stopButton.classList.toggle("hidden", !latest);
@@ -418,23 +415,41 @@ async function renderActive() {
   }
 }
 
+function weeksBefore(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 0;
+  const entryWeek = startOfLocalWeek(date);
+  const currentWeek = startOfLocalWeek(new Date());
+  const weeks = (currentWeek.getTime() - entryWeek.getTime()) / (7 * 24 * 60 * 60 * 1000);
+  return Math.max(0, Math.round(weeks));
+}
+
 async function renderRecent() {
   const allEntries = await getVisibleEntries();
+  const newest = allEntries.find((entry) => entry.start_at);
+  if (newest) {
+    // Entries are sorted newest first, so expand the window far enough back to
+    // always show something when the current week is empty.
+    recentWeekCount = Math.max(recentWeekCount, weeksBefore(newest.start_at) + 1);
+  }
   const cutoff = addDays(startOfLocalWeek(new Date()), -7 * (recentWeekCount - 1));
   const cutoffStr = cutoff.toISOString();
   const entries = allEntries.filter((e) => e.start_at && e.start_at >= cutoffStr);
-  const hiddenCount = allEntries.filter((e) => !e.start_at || e.start_at < cutoffStr).length;
+  // Undated entries can never come into view by widening the window, so they
+  // must not keep the load-more button alive.
+  const hiddenCount = allEntries.filter((e) => e.start_at && e.start_at < cutoffStr).length;
 
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "entry-meta";
     empty.textContent = "No entries yet.";
     $recentEntries.replaceChildren(empty);
-    $loadMoreRecent.classList.add("hidden");
+    $loadMoreRecent.classList.toggle("hidden", hiddenCount === 0);
+    $loadMoreRecent.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
     return;
   }
 
-  const weekElements = groupRecentEntries(entries, entries).map((week) => {
+  const weekElements = groupRecentEntries(entries).map((week) => {
     const section = document.createElement("section");
     section.className = "week-group";
     const header = document.createElement("header");

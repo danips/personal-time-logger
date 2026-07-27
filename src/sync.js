@@ -104,24 +104,36 @@ async function markMultipleActiveTimers() {
 }
 
 async function purgeDeletedEntries(remoteEntries = null, rowMap = null, { interactiveAuth = false } = {}) {
-  const cutoff = addDays(new Date(), -14);
+  const cutoffMs = addDays(new Date(), -14).getTime();
+  const isExpired = (deletedAt) => {
+    const time = new Date(deletedAt).getTime();
+    return Number.isFinite(time) && time < cutoffMs;
+  };
+  const failedRemoteIds = new Set();
 
   if (remoteEntries && rowMap) {
-    for (const entry of remoteEntries) {
-      if (!entry.deleted_at) continue;
-      if (new Date(entry.deleted_at) >= cutoff) continue;
-      const rowIndex = rowMap.get(entry.id);
-      if (rowIndex) {
-        await deleteRemoteRow(rowIndex, { interactiveAuth }).catch(() => {});
+    // deleteRemoteRow shifts every row below it up by one, so the indices in
+    // rowMap only stay valid while deleting from the bottom of the sheet up.
+    const expiredRows = remoteEntries
+      .filter((entry) => entry.deleted_at && isExpired(entry.deleted_at) && rowMap.has(entry.id))
+      .map((entry) => ({ id: entry.id, rowIndex: rowMap.get(entry.id) }))
+      .sort((first, second) => second.rowIndex - first.rowIndex);
+
+    for (const { id, rowIndex } of expiredRows) {
+      try {
+        await deleteRemoteRow(rowIndex, { interactiveAuth });
+        rowMap.delete(id);
+      } catch {
+        // Keep the local copy so the row is retried on the next sync.
+        failedRemoteIds.add(id);
       }
     }
   }
 
   const localEntries = await getAllEntries();
-  const toDelete = localEntries.filter((entry) => {
-    if (!entry.deleted_at) return false;
-    return new Date(entry.deleted_at) < cutoff;
-  });
+  const toDelete = localEntries.filter((entry) => entry.deleted_at
+    && isExpired(entry.deleted_at)
+    && !failedRemoteIds.has(entry.id));
   for (const entry of toDelete) {
     await deleteEntry(entry.id);
   }
@@ -129,13 +141,16 @@ async function purgeDeletedEntries(remoteEntries = null, rowMap = null, { intera
 }
 
 async function markStaleActiveTimers() {
-  const todayStart = startOfLocalDay(new Date());
+  const todayStartMs = startOfLocalDay(new Date()).getTime();
   const entries = await getAllEntries();
   const stale = entries.filter((entry) => {
     if (entry.deleted_at) return false;
     if (entry.end_at) return false;
-    if (entry.status === "needs_review") return false;
-    return new Date(entry.start_at) < todayStart;
+    // Entries already flagged needs_review are still open timers and must be
+    // closed too, otherwise they stay active forever.
+    const startMs = new Date(entry.start_at).getTime();
+    if (!Number.isFinite(startMs)) return true;
+    return startMs < todayStartMs;
   });
   if (!stale.length) return 0;
   const timestamp = nowIso();
@@ -192,8 +207,10 @@ export async function syncNow({ interactiveAuth = false, force = false } = {}) {
     await pushDirtyEntries(firstRead.entries, firstRead.rowMap, { interactiveAuth });
 
     const secondRead = await readRemoteEntries({ interactiveAuth });
-    await purgeDeletedEntries(secondRead.entries, secondRead.rowMap, { interactiveAuth });
+    // Pull before purging: purge works from this same snapshot, so purging
+    // first would let the pull re-insert the rows it just removed.
     await pullRemoteEntries(secondRead.entries);
+    await purgeDeletedEntries(secondRead.entries, secondRead.rowMap, { interactiveAuth });
 
     const conflictChanges = await markMultipleActiveTimers();
     if (conflictChanges.length) {
