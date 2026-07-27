@@ -58,10 +58,27 @@
 
       <section class="panel">
         <h2>Spreadsheet</h2>
-        <label>
-          Google Spreadsheet ID
-          <input id="spreadsheetId" autocomplete="off" spellcheck="false">
-        </label>
+        <dl>
+          <div>
+            <dt>Spreadsheet</dt>
+            <dd>
+              <a id="spreadsheetLink" href="#" target="_blank" rel="noreferrer">Not set up yet</a>
+            </dd>
+          </div>
+          <div>
+            <dt>Spreadsheet ID</dt>
+            <dd><code id="spreadsheetId">not set</code></dd>
+          </div>
+        </dl>
+        <p class="note">
+          The spreadsheet is found or created automatically after you sign in. Detach
+          only if you want a different one: trash or rename the current spreadsheet
+          first, otherwise it is simply picked up again.
+        </p>
+        <div class="actions">
+          <button id="copySpreadsheetId" type="button">Copy ID</button>
+          <button id="detachSpreadsheet" type="button">Detach Spreadsheet</button>
+        </div>
         <label>
           Sync interval seconds
           <input id="syncInterval" type="number" min="30" step="1">
@@ -74,17 +91,7 @@
         <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
         <div class="actions">
           <button id="saveSettings" type="button">Save Settings</button>
-          <button id="initSheet" type="button">Create/Initialize Spreadsheet</button>
-          <button id="copyToOwnedSheet" type="button">Copy To Extension-Owned Spreadsheet</button>
         </div>
-        <p class="note">
-          Copying creates a new spreadsheet owned by this extension, moves every row
-          into it, and switches to it. The current spreadsheet is left untouched as a
-          backup, and its ID is shown afterwards. Only a spreadsheet the extension
-          created can be checked for changes before syncing, which lets an unchanged
-          sheet be skipped instead of downloaded. Note that the new spreadsheet has a
-          different URL.
-        </p>
       </section>
     </main>
     <script type="module" src="options.js"></script>

@@ -181,7 +181,7 @@ async function signInDevice(config, { onDeviceCode } = {}) {
   }));
 }
 
-export async function refreshToken() {
+async function refreshToken() {
   const config = await getConfig();
   const tokenData = await getTokenData();
   const configError = authConfigError(config);

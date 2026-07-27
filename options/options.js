@@ -2,8 +2,8 @@ import { getSetting, setSetting } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig } from "../src/config-loader.js";
-import { copyToOwnedSpreadsheet, createOrInitializeSpreadsheet, setSpreadsheetId } from "../src/sheets.js";
-import { clearRemoteReadMarker, syncNow } from "../src/sync.js";
+import { spreadsheetUrl } from "../src/sheets.js";
+import { detachSpreadsheet, syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 
@@ -34,10 +34,8 @@ function setDeviceAuthPanel(details = null) {
 }
 
 async function saveSettings() {
-  const spreadsheetId = $("#spreadsheetId").value.trim();
   const interval = Math.max(30, Number($("#syncInterval").value) || 60);
   const multiplier = normalizeMultiplierText($("#durationMultiplier").value) || "1";
-  await setSpreadsheetId(spreadsheetId);
   await setSetting("sync_interval_seconds", interval);
   const multiplierUpdatedAt = nowIso();
   await setSetting("duration_multiplier", multiplier);
@@ -68,13 +66,28 @@ async function saveGoogleCredentials() {
   await refresh();
 }
 
+function renderSpreadsheet(spreadsheetId) {
+  const link = $("#spreadsheetLink");
+  $("#spreadsheetId").textContent = spreadsheetId || "not set";
+  $("#copySpreadsheetId").disabled = !spreadsheetId;
+  $("#detachSpreadsheet").disabled = !spreadsheetId;
+
+  if (!spreadsheetId) {
+    link.textContent = "Not set up yet";
+    link.removeAttribute("href");
+    return;
+  }
+  link.textContent = "Open spreadsheet in Google Sheets";
+  link.href = spreadsheetUrl(spreadsheetId);
+}
+
 async function refresh() {
   const config = await getConfig();
   const auth = await getAuthStatus();
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
-  $("#spreadsheetId").value = await getSetting("spreadsheet_id", "");
+  renderSpreadsheet(await getSetting("spreadsheet_id", ""));
   $("#syncInterval").value = String(await getSetting("sync_interval_seconds", 60));
   $("#durationMultiplier").value = String(await getSetting("duration_multiplier", 1));
 
@@ -100,7 +113,13 @@ async function signInClicked() {
       }
     });
     setDeviceAuthPanel(null);
-    setStatus("Signed in");
+    // Provisioning lives in the sync cycle, so this both finds or creates the
+    // spreadsheet and shows its ID without a separate code path.
+    setStatus("Signed in. Looking for your spreadsheet...");
+    await syncNow({ force: true }).catch((error) => {
+      setStatus(formatError(error));
+    });
+    if (await getSetting("spreadsheet_id", "")) setStatus("Signed in and spreadsheet ready");
   } catch (error) {
     setStatus(formatError(error));
   } finally {
@@ -115,53 +134,38 @@ async function signOutClicked() {
   await refresh();
 }
 
-async function initializeClicked() {
+async function copySpreadsheetIdClicked() {
+  const spreadsheetId = await getSetting("spreadsheet_id", "");
+  if (!spreadsheetId) return;
   try {
-    await saveSettings();
-    setStatus("Initializing spreadsheet...");
-    const result = await createOrInitializeSpreadsheet({ interactiveAuth: true });
-    $("#spreadsheetId").value = result.spreadsheetId;
-    setStatus("Spreadsheet initialized");
+    await navigator.clipboard.writeText(spreadsheetId);
+    setStatus("Spreadsheet ID copied to the clipboard");
   } catch (error) {
-    setStatus(formatError(error));
+    setStatus(`Could not copy: ${formatError(error)}`);
   }
-  await refresh();
 }
 
-async function copyToOwnedSheetClicked() {
-  const button = $("#copyToOwnedSheet");
+async function detachSpreadsheetClicked() {
   const confirmed = confirm(
-    "Create a new spreadsheet owned by this extension, copy every row into it, and switch to it?\n\n"
-    + "The current spreadsheet is left untouched as a backup, and its ID is shown when the copy finishes. "
-    + "The new spreadsheet has a different URL."
+    "Forget the current spreadsheet?\n\n"
+    + "The spreadsheet itself is not deleted. The next sync detects a spreadsheet again, "
+    + "and will pick up this same one unless you trash or rename it first."
   );
   if (!confirmed) return;
 
-  try {
-    button.disabled = true;
-    setStatus("Copying to a new spreadsheet...");
-    const result = await copyToOwnedSpreadsheet({ interactiveAuth: true });
-    $("#spreadsheetId").value = result.spreadsheetId;
-    // The new file has its own modification history, so the skip-read marker
-    // from the old one must not be trusted.
-    await clearRemoteReadMarker();
-    setStatus(`Copied ${result.rowCount} entry rows. Now using ${result.spreadsheetId}. Backup: ${result.previousSpreadsheetId}`);
-    syncNow({ force: true }).catch(() => {});
-  } catch (error) {
-    setStatus(formatError(error));
-  } finally {
-    button.disabled = false;
-  }
+  await detachSpreadsheet();
+  setStatus("Spreadsheet detached. The next sync will detect or create one.");
   await refresh();
 }
 
 function bindEvents() {
   $("#saveSettings").addEventListener("click", saveSettings);
-  $("#copyToOwnedSheet").addEventListener("click", copyToOwnedSheetClicked);
+  $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
+  $("#detachSpreadsheet").addEventListener("click", detachSpreadsheetClicked);
   $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
   $("#signInButton").addEventListener("click", signInClicked);
   $("#signOutButton").addEventListener("click", signOutClicked);
-  $("#initSheet").addEventListener("click", initializeClicked);
+
 }
 
 async function init() {

@@ -2,14 +2,19 @@ import { claimLock, deleteEntry, getAllEntries, getEntry, putEntry, putEntries, 
 import {
   appendRemoteEntries,
   deleteRemoteRows,
+  ensureAppMarker,
   getRemoteModifiedTime,
+  getSpreadsheetId,
+  provisionSpreadsheet,
   readRemoteSnapshot,
+  setSpreadsheetId,
   updateRemoteConfig,
   updateRemoteEntries
 } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
 import { addDays, nowIso, startOfLocalDay, uuid } from "./time.js";
+
 import { platform } from "./platform.js";
 
 const MAX_BACKOFF_SECONDS = 300;
@@ -19,6 +24,10 @@ const REMOTE_MODIFIED_KEY = "remote_modified_time";
 const MULTIPLIER_KEY = "duration_multiplier";
 const MULTIPLIER_UPDATED_KEY = "duration_multiplier_updated_at";
 const MULTIPLIER_SYNCED_KEY = "duration_multiplier_synced_at";
+const IDLE_STREAK_KEY = "sync_idle_streak";
+// Multipliers applied to the configured interval as idle cycles accumulate.
+const IDLE_BACKOFF_STEPS = [1, 2, 5, 10];
+const MAX_IDLE_INTERVAL_MINUTES = 15;
 
 // Identifies this module instance, which is one per extension context (popup,
 // calendar page, background). Used as the sync lock holder.
@@ -237,6 +246,38 @@ async function markStaleActiveTimers(local) {
  * sheet. Needed so a config change is still pushed on a cycle where the remote
  * file is otherwise unchanged and the read is skipped.
  */
+/**
+ * Flags every live entry for push and forgets the read marker.
+ *
+ * Required whenever the spreadsheet changes. Local entries are clean after their
+ * last sync, so without this the newly adopted or created sheet would receive
+ * nothing and sit empty while the UI looked perfectly healthy. updated_at and
+ * revision are deliberately untouched, so reconciling against a sheet that
+ * already holds rows still resolves by age rather than by which side is newer.
+ */
+async function reseedForNewSpreadsheet(local) {
+  const reseeded = local.all()
+    .filter((entry) => !entry.deleted_at && !entry.dirty)
+    .map((entry) => ({ ...entry, dirty: true, sync_error: "" }));
+
+  await putEntries(reseeded);
+  local.apply(reseeded);
+  await setSetting(REMOTE_MODIFIED_KEY, "");
+  return reseeded.length;
+}
+
+/**
+ * Makes sure a spreadsheet is selected, adopting the most recently modified one
+ * this extension created or creating one when there are none.
+ */
+async function ensureSpreadsheet(local, { interactiveAuth }) {
+  if (await getSpreadsheetId()) return null;
+
+  const provisioned = await provisionSpreadsheet({ interactiveAuth });
+  await reseedForNewSpreadsheet(local);
+  return provisioned;
+}
+
 async function hasPendingConfig() {
   const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
   if (!localUpdatedAt) return false;
@@ -300,49 +341,63 @@ async function runSyncCycle({ interactiveAuth, force }) {
     const staleChanges = await markStaleActiveTimers(local);
     // Flagged before the push so the conflict markers travel in the same pass.
     const conflictChanges = await markMultipleActiveTimers(local);
+    // Under the sync lock, so two contexts cannot both decide none exists and
+    // each create one.
+    const provisioned = await ensureSpreadsheet(local, { interactiveAuth });
 
+    // Both marking passes set dirty, so either of them producing changes makes
+    // hasLocalWork true and forces the read below.
     const hasLocalWork = local.all().some((entry) => entry.dirty || isExpiredDeletion(entry.deleted_at))
       || await hasPendingConfig();
 
     // Drive reports when the file last changed for a fraction of the cost of
-    // downloading it. With nothing to push and no remote change since the last
-    // read, the whole exchange is skipped. An empty modifiedTime means Drive is
-    // unavailable or the scope was never granted, so the read always happens.
-    const modifiedTime = await getRemoteModifiedTime({ interactiveAuth });
-    const lastSeenModified = String(await getSetting(REMOTE_MODIFIED_KEY, "") || "");
-    if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified && !hasLocalWork) {
-      await clearBackoff();
-      if (staleChanges.length || conflictChanges.length) notifyEntriesChanged({ action: "sync" });
-      return {
-        status: conflictChanges.length ? "needs review" : "synced",
-        warning: conflictChanges.length ? "multiple active timers flagged" : "",
-        syncedAt: nowIso(),
-        remoteRead: false
-      };
+    // downloading it, but only when the answer can change the outcome. With work
+    // to push the read happens regardless, so asking first would just burn a
+    // request. An empty modifiedTime means Drive cannot answer, so the read
+    // happens unconditionally.
+    let modifiedTime = "";
+    if (!hasLocalWork) {
+      modifiedTime = await getRemoteModifiedTime({ interactiveAuth });
+      const lastSeenModified = String(await getSetting(REMOTE_MODIFIED_KEY, "") || "");
+      if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
+        await clearBackoff();
+        await recordCycleActivity({ changed: false, force });
+        return { status: "synced", warning: "", syncedAt: nowIso(), changed: false };
+      }
     }
 
     const snapshot = await readRemoteSnapshot({ interactiveAuth });
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
-    await pullRemoteEntries(local, snapshot.entries, pushedIds);
+    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds);
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
     const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
     const configPushed = await syncConfig(snapshot.config, snapshot.configRows, { interactiveAuth });
+    // Backfills spreadsheets created before the marker existed, once.
+    const markerWritten = await ensureAppMarker(snapshot.config, snapshot.configRows, { interactiveAuth });
 
     // Our own writes bump modifiedTime, so it is re-read to avoid a needless
     // download next cycle. If Drive lags, the gate simply opens once more.
-    const wroteRemotely = pushedIds.size > 0 || purged > 0 || configPushed;
-    const nextModified = wroteRemotely ? await getRemoteModifiedTime({ interactiveAuth }) : modifiedTime;
+    const wroteRemotely = pushedIds.size > 0 || purged > 0 || configPushed || markerWritten;
+    const nextModified = wroteRemotely || !modifiedTime
+      ? await getRemoteModifiedTime({ interactiveAuth })
+      : modifiedTime;
     await setSetting(REMOTE_MODIFIED_KEY, nextModified || "");
 
+    const changed = wroteRemotely
+      || pulled > 0
+      || staleChanges.length > 0
+      || conflictChanges.length > 0
+      || Boolean(provisioned);
     const timestamp = nowIso();
     await clearBackoff();
+    await recordCycleActivity({ changed, force });
     notifyEntriesChanged({ action: "sync" });
     return {
       status: conflictChanges.length ? "needs review" : "synced",
       warning: conflictChanges.length ? "multiple active timers flagged" : "",
       syncedAt: timestamp,
-      remoteRead: true
+      changed
     };
   } catch (error) {
     await recordBackoff(error);
@@ -353,10 +408,38 @@ async function runSyncCycle({ interactiveAuth, force }) {
 }
 
 /**
- * Forgets the last seen remote modification time so the next sync reads the sheet
- * unconditionally. Call after switching to a different spreadsheet.
+ * Tracks how many cycles in a row found nothing to do. A cycle that moved data,
+ * or any user-initiated sync, resets the count.
  */
-export async function clearRemoteReadMarker() {
+async function recordCycleActivity({ changed, force }) {
+  if (changed || force) {
+    await setSetting(IDLE_STREAK_KEY, 0);
+    return;
+  }
+  const streak = Number(await getSetting(IDLE_STREAK_KEY, 0)) || 0;
+  await setSetting(IDLE_STREAK_KEY, Math.min(streak + 1, IDLE_BACKOFF_STEPS.length));
+}
+
+/**
+ * How long the background poller should wait before its next sync. An idle
+ * profile stretches the interval out to at most MAX_IDLE_INTERVAL_MINUTES, and it
+ * snaps back to the configured interval as soon as anything happens.
+ */
+export async function nextSyncDelayMinutes() {
+  const configured = Number(await getSetting("sync_interval_seconds", 60)) || 60;
+  const baseMinutes = Math.max(1, Math.round(Math.max(30, configured) / 60));
+  const streak = Number(await getSetting(IDLE_STREAK_KEY, 0)) || 0;
+  const factor = IDLE_BACKOFF_STEPS[Math.min(streak, IDLE_BACKOFF_STEPS.length - 1)];
+  return Math.min(baseMinutes * factor, MAX_IDLE_INTERVAL_MINUTES);
+}
+
+/**
+ * Forgets the current spreadsheet so the next sync detects or creates one again.
+ * The spreadsheet itself is untouched; to pick a different one, trash or rename
+ * the current one first, otherwise it is simply adopted again.
+ */
+export async function detachSpreadsheet() {
+  await setSpreadsheetId("");
   await setSetting(REMOTE_MODIFIED_KEY, "");
 }
 

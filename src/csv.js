@@ -37,7 +37,7 @@ function localTime(iso) {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
 }
 
-export function entriesToCsv(entries) {
+function entriesToCsv(entries) {
   const rows = [CSV_COLUMNS];
   for (const entry of entries) {
     if (entry.deleted_at) continue;

@@ -1,7 +1,7 @@
 import { getSetting, setSetting } from "./db.js";
 import { getAccessToken } from "./auth.js";
-import { getConfig } from "./config-loader.js";
 import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
+import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -13,6 +13,13 @@ const CONFIG_SHEET_NAME = "config";
 const CONFIG_FULL_RANGE = `${CONFIG_SHEET_NAME}!A:C`;
 const CONFIG_HEADER_RANGE = `${CONFIG_SHEET_NAME}!A1:C1`;
 const CONFIG_HEADERS = ["key", "value", "updated_at"];
+const SPREADSHEET_TITLE = "Personal Time Logger";
+const SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
+const APP_MARKER_KEY = "app";
+const APP_MARKER_VALUE = "personal-time-logger";
+// Validating a candidate costs one read each, so a Drive full of app-created
+// files cannot turn setup into a long serial crawl.
+const MAX_CANDIDATES = 5;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -28,10 +35,22 @@ function headersMatch(row) {
   return SHEET_HEADERS.length === row.length && SHEET_HEADERS.every((header, index) => row[index] === header);
 }
 
-// Sheet layout rarely changes, so the tab check and its numeric id are cached
-// per spreadsheet instead of costing a metadata request on every read or delete.
-let ensuredSpreadsheetId = "";
-let ensuredConfigSpreadsheetId = "";
+const SHEET_ID_SETTING = "time_entries_sheet_id";
+
+const TABS = [
+  { title: SHEET_NAME, headers: SHEET_HEADERS, headerRange: HEADER_RANGE },
+  { title: CONFIG_SHEET_NAME, headers: CONFIG_HEADERS, headerRange: CONFIG_HEADER_RANGE }
+];
+
+// Cells come back unformatted, so a hand-edited numeric or boolean cell has to be
+// coerced back to the string form entries and config expect.
+function rowsAsText(rows) {
+  return (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
+}
+
+// The numeric sheet id is needed to delete rows. It is cached in memory and in
+// settings, so it costs one metadata request per spreadsheet rather than one per
+// extension context.
 let cachedSheetIdSpreadsheet = "";
 let cachedSheetId = null;
 // Set once Drive refuses the metadata lookup. Without it a permanent refusal
@@ -40,8 +59,6 @@ let cachedSheetId = null;
 let driveGateUnavailable = false;
 
 function resetSheetCache() {
-  ensuredSpreadsheetId = "";
-  ensuredConfigSpreadsheetId = "";
   cachedSheetIdSpreadsheet = "";
   cachedSheetId = null;
   driveGateUnavailable = false;
@@ -77,8 +94,10 @@ async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl =
       if (/insufficient|scope/i.test(message)) throw codedError("SCOPE_MISSING", message);
       throw codedError("API_ERROR", `Google Sheets permission error: ${message}`);
     }
-    if (/Unable to parse range|not found/i.test(message) && /time_entries/i.test(message)) {
-      throw codedError("SHEET_MISSING", "Sheet tab time_entries is missing");
+    // Either tab going missing is repairable, and a read is how we find out.
+    if (/Unable to parse range|not found/i.test(message)
+      && new RegExp(`${SHEET_NAME}|${CONFIG_SHEET_NAME}`, "i").test(message)) {
+      throw codedError("SHEET_MISSING", `A required sheet tab is missing: ${message}`);
     }
     throw codedError("API_ERROR", message);
   }
@@ -95,97 +114,156 @@ export async function setSpreadsheetId(spreadsheetId) {
   return setSetting("spreadsheet_id", String(spreadsheetId || "").trim());
 }
 
-export async function createOrInitializeSpreadsheet({ interactiveAuth = true } = {}) {
-  let spreadsheetId = await getSpreadsheetId();
-  if (!spreadsheetId) {
-    const created = await apiFetch("", {
-      method: "POST",
-      body: JSON.stringify({
-        properties: { title: "Personal Time Logger" },
-        sheets: [{ properties: { title: SHEET_NAME } }]
-      })
-    }, { interactiveAuth });
-    spreadsheetId = created.spreadsheetId;
-    await setSpreadsheetId(spreadsheetId);
-  }
-
-  await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
-  await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
-  return { spreadsheetId };
+/**
+ * Lists the spreadsheets this extension created. Under drive.file, Drive only
+ * reports files the app created or opened, so the result is already scoped to our
+ * own files and no filtering by name is needed.
+ *
+ * Errors propagate on purpose. A failed listing must never be mistaken for "no
+ * spreadsheet exists", because that would create a duplicate alongside a
+ * perfectly good sheet the caller simply could not see.
+ */
+async function listOwnedSpreadsheets({ interactiveAuth = false } = {}) {
+  const query = [
+    `q=${encodeURIComponent(`mimeType='${SPREADSHEET_MIME}' and trashed=false`)}`,
+    "fields=files(id,name,modifiedTime)",
+    `orderBy=${encodeURIComponent("modifiedTime desc")}`,
+    "pageSize=25"
+  ].join("&");
+  const data = await apiFetch(`/files?${query}`, {}, { interactiveAuth, baseUrl: DRIVE_API_BASE });
+  return (data.files || []).filter((file) => file && file.id);
 }
 
-async function ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth = false } = {}) {
+/**
+ * Cheapest possible identity check for a candidate: one header row.
+ *
+ * Only the entries header is required. A spreadsheet from an earlier version may
+ * predate both the marker and the config tab, and rejecting it over a missing
+ * config tab would create a duplicate and orphan real data. The regular sync path
+ * repairs the layout and backfills the marker once the sheet is adopted.
+ */
+async function hasTimeEntriesHeader(spreadsheetId, { interactiveAuth = false } = {}) {
+  try {
+    const data = await apiFetch(
+      `/${spreadsheetId}/values/${encodeRange(HEADER_RANGE)}?fields=values`,
+      {},
+      { interactiveAuth }
+    );
+    const [header] = rowsAsText(data.values || []);
+    return headersMatch(header || []);
+  } catch (error) {
+    if (error.code === "AUTH_EXPIRED" || error.code === "OFFLINE" || error.code === "RATE_LIMIT") throw error;
+    return false;
+  }
+}
+
+async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
+  const created = await apiFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      properties: { title: SPREADSHEET_TITLE },
+      sheets: TABS.map((tab) => ({ properties: { title: tab.title } }))
+    })
+  }, { interactiveAuth });
+
+  const spreadsheetId = created.spreadsheetId;
+  if (!spreadsheetId) throw codedError("API_ERROR", "Google did not return an ID for the new spreadsheet");
+
+  await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueInputOption: "RAW",
+      data: [
+        ...TABS.map((tab) => ({ range: tab.headerRange, values: [tab.headers] })),
+        { range: `${CONFIG_SHEET_NAME}!A2:C2`, values: [[APP_MARKER_KEY, APP_MARKER_VALUE, nowIso()]] }
+      ]
+    })
+  }, { interactiveAuth });
+
+  return spreadsheetId;
+}
+
+/**
+ * Finds the spreadsheet to use, or creates one, and stores its ID.
+ *
+ * Candidates are tried newest first and the first readable one wins. A successful
+ * read means the time_entries header is intact, which is the signal that a
+ * spreadsheet from an earlier version, created before the marker existed, is still
+ * recognised as ours.
+ */
+export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
+  const candidates = await listOwnedSpreadsheets({ interactiveAuth });
+
+  for (const candidate of candidates.slice(0, MAX_CANDIDATES)) {
+    if (!await hasTimeEntriesHeader(candidate.id, { interactiveAuth })) continue;
+    await setSpreadsheetId(candidate.id);
+    return { spreadsheetId: candidate.id, name: candidate.name || "", adopted: true };
+  }
+
+  const spreadsheetId = await createOwnedSpreadsheet({ interactiveAuth });
+  await setSpreadsheetId(spreadsheetId);
+  return { spreadsheetId, name: SPREADSHEET_TITLE, adopted: false };
+}
+
+/**
+ * Writes the marker identifying this spreadsheet as ours, if it is not already
+ * there. Backfills spreadsheets created before the marker existed, once.
+ */
+export async function ensureAppMarker(config, configRows, { interactiveAuth = false } = {}) {
+  const existing = config[APP_MARKER_KEY];
+  if (existing && String(existing.value) === APP_MARKER_VALUE) return false;
+
+  await updateRemoteConfig(APP_MARKER_KEY, APP_MARKER_VALUE, nowIso(), {
+    rowIndex: configRows.get(APP_MARKER_KEY) || 0,
+    interactiveAuth
+  });
+  return true;
+}
+
+export function spreadsheetUrl(spreadsheetId) {
+  return spreadsheetId ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit` : "";
+}
+
+/**
+ * Adds any missing tab and rewrites both header rows, in three requests at most.
+ *
+ * This is the repair path, not a precondition. A read proves the layout is sound
+ * far more cheaply than checking it first does, so this only runs once a read has
+ * actually failed, or when the user asks to initialize the spreadsheet.
+ */
+async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}) {
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-  if (ensuredSpreadsheetId === spreadsheetId) return;
 
   const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`, {}, { interactiveAuth });
-  const existingSheet = (metadata.sheets || []).find((sheet) => sheet.properties && sheet.properties.title === SHEET_NAME);
-  let sheetId = existingSheet && existingSheet.properties ? existingSheet.properties.sheetId : null;
+  const sheetIdsByTitle = new Map((metadata.sheets || [])
+    .filter((sheet) => sheet.properties)
+    .map((sheet) => [sheet.properties.title, sheet.properties.sheetId]));
 
-  if (sheetId == null) {
+  const missing = TABS.filter((tab) => !sheetIdsByTitle.has(tab.title));
+  if (missing.length) {
     const added = await apiFetch(`/${spreadsheetId}:batchUpdate`, {
       method: "POST",
       body: JSON.stringify({
-        requests: [{ addSheet: { properties: { title: SHEET_NAME } } }]
+        requests: missing.map((tab) => ({ addSheet: { properties: { title: tab.title } } }))
       })
     }, { interactiveAuth });
-    sheetId = added.replies && added.replies[0] && added.replies[0].addSheet
-      ? added.replies[0].addSheet.properties.sheetId
-      : null;
+    for (const reply of added.replies || []) {
+      const properties = reply && reply.addSheet ? reply.addSheet.properties : null;
+      if (properties) sheetIdsByTitle.set(properties.title, properties.sheetId);
+    }
   }
 
-  const headerData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(HEADER_RANGE)}`, {}, { interactiveAuth })
-    .catch((error) => {
-      if (error.code === "SHEET_MISSING") return { values: [] };
-      throw error;
-    });
-  const headerRow = headerData.values && headerData.values[0] ? headerData.values[0] : [];
+  await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueInputOption: "RAW",
+      data: TABS.map((tab) => ({ range: tab.headerRange, values: [tab.headers] }))
+    })
+  }, { interactiveAuth });
 
-  if (!headersMatch(headerRow)) {
-    await apiFetch(`/${spreadsheetId}/values/${encodeRange(HEADER_RANGE)}?valueInputOption=RAW`, {
-      method: "PUT",
-      body: JSON.stringify({ values: [SHEET_HEADERS] })
-    }, { interactiveAuth });
-  }
-
-  if (sheetId != null) {
-    cachedSheetIdSpreadsheet = spreadsheetId;
-    cachedSheetId = sheetId;
-  }
-  ensuredSpreadsheetId = spreadsheetId;
-}
-
-async function ensureConfigSheet(spreadsheetId, { interactiveAuth = false } = {}) {
-  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-  if (ensuredConfigSpreadsheetId === spreadsheetId) return;
-
-  const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`, {}, { interactiveAuth });
-  const existingSheet = (metadata.sheets || []).find((sheet) => sheet.properties && sheet.properties.title === CONFIG_SHEET_NAME);
-
-  if (!existingSheet) {
-    await apiFetch(`/${spreadsheetId}:batchUpdate`, {
-      method: "POST",
-      body: JSON.stringify({
-        requests: [{ addSheet: { properties: { title: CONFIG_SHEET_NAME } } }]
-      })
-    }, { interactiveAuth });
-  }
-
-  const headerData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_HEADER_RANGE)}`, {}, { interactiveAuth })
-    .catch((error) => {
-      if (error.code === "SHEET_MISSING") return { values: [] };
-      throw error;
-    });
-  const headerRow = headerData.values && headerData.values[0] ? headerData.values[0] : [];
-
-  if (JSON.stringify(headerRow) !== JSON.stringify(CONFIG_HEADERS)) {
-    await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_HEADER_RANGE)}?valueInputOption=RAW`, {
-      method: "PUT",
-      body: JSON.stringify({ values: [CONFIG_HEADERS] })
-    }, { interactiveAuth });
-  }
-
-  ensuredConfigSpreadsheetId = spreadsheetId;
+  const sheetId = sheetIdsByTitle.get(SHEET_NAME);
+  if (sheetId != null) await rememberSheetId(spreadsheetId, sheetId);
+  return sheetId;
 }
 
 function rowsToConfig(rows) {
@@ -211,8 +289,8 @@ export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, 
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) return;
 
-  await ensureConfigSheet(spreadsheetId, { interactiveAuth });
-
+  // No layout check: this only runs after a successful snapshot read, which
+  // already proved the config tab exists.
   if (rowIndex > 0) {
     await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A${rowIndex}:C${rowIndex}`)}?valueInputOption=RAW`, {
       method: "PUT",
@@ -256,114 +334,6 @@ export async function getRemoteModifiedTime({ interactiveAuth = false } = {}) {
   }
 }
 
-const MAX_COPY_ROWS_PER_REQUEST = 2000;
-
-/**
- * Appends rows in chunks and returns how many rows Google reports writing.
- * Append is used rather than a plain update because it grows the grid, which a
- * freshly created spreadsheet (1000 rows by default) needs for a long history.
- */
-async function appendRows(spreadsheetId, range, rows, { interactiveAuth }) {
-  let written = 0;
-  for (let index = 0; index < rows.length; index += MAX_COPY_ROWS_PER_REQUEST) {
-    const chunk = rows.slice(index, index + MAX_COPY_ROWS_PER_REQUEST);
-    const data = await apiFetch(
-      `/${spreadsheetId}/values/${encodeRange(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
-      { method: "POST", body: JSON.stringify({ values: chunk }) },
-      { interactiveAuth }
-    );
-    written += data && data.updates ? Number(data.updates.updatedRows || 0) : 0;
-  }
-  return written;
-}
-
-/**
- * Copies the current spreadsheet's contents into a brand new spreadsheet created
- * by this extension, then points the stored ID at the copy.
- *
- * The point is ownership: drive.file only covers files the extension created, and
- * there is no way to claim an existing file, so a spreadsheet whose ID was pasted
- * in by hand can never answer the modifiedTime check used to skip reads.
- *
- * The source spreadsheet is never modified, and the stored ID is switched only
- * after Google confirms every row was written, so a failure part way through
- * leaves the existing setup working.
- */
-export async function copyToOwnedSpreadsheet({ interactiveAuth = true } = {}) {
-  const sourceId = await getSpreadsheetId();
-  if (!sourceId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-
-  const readSource = async (ranges) => {
-    const query = [
-      ...ranges.map((range) => `ranges=${encodeRange(range)}`),
-      "valueRenderOption=UNFORMATTED_VALUE",
-      "fields=valueRanges(range,values)"
-    ].join("&");
-    return apiFetch(`/${sourceId}/values:batchGet?${query}`, {}, { interactiveAuth });
-  };
-
-  // A spreadsheet set up before the config tab existed has no config range, and
-  // batchGet rejects the whole request for an unknown range.
-  const source = await readSource([FULL_RANGE, CONFIG_FULL_RANGE])
-    .catch(() => readSource([FULL_RANGE]));
-
-  const asText = (rows) => (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
-  const entryRows = asText(valuesForRange(source.valueRanges, SHEET_NAME));
-  const configRows = asText(valuesForRange(source.valueRanges, CONFIG_SHEET_NAME));
-  if (!headersMatch(entryRows[0] || [])) {
-    throw codedError("SHEET_MISSING", "The current time_entries tab header row is missing or invalid, so it cannot be copied.");
-  }
-
-  const entryBody = entryRows.slice(1).filter((row) => row[0]);
-  const configBody = configRows.slice(1).filter((row) => row[0]);
-
-  const created = await apiFetch("", {
-    method: "POST",
-    body: JSON.stringify({
-      properties: { title: `Personal Time Logger (${new Date().toISOString().slice(0, 10)})` },
-      sheets: [
-        { properties: { title: SHEET_NAME } },
-        { properties: { title: CONFIG_SHEET_NAME } }
-      ]
-    })
-  }, { interactiveAuth });
-
-  const targetId = created.spreadsheetId;
-  if (!targetId) throw codedError("API_ERROR", "Google did not return an ID for the new spreadsheet");
-
-  await apiFetch(`/${targetId}/values:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({
-      valueInputOption: "RAW",
-      data: [
-        { range: HEADER_RANGE, values: [SHEET_HEADERS] },
-        { range: CONFIG_HEADER_RANGE, values: [CONFIG_HEADERS] }
-      ]
-    })
-  }, { interactiveAuth });
-
-  const copiedEntries = await appendRows(targetId, FULL_RANGE, entryBody, { interactiveAuth });
-  const copiedConfig = await appendRows(targetId, CONFIG_FULL_RANGE, configBody, { interactiveAuth });
-
-  if (copiedEntries !== entryBody.length || copiedConfig !== configBody.length) {
-    throw codedError(
-      "API_ERROR",
-      `Copy incomplete: ${copiedEntries} of ${entryBody.length} entry rows written to spreadsheet ${targetId}. The current spreadsheet is unchanged and still in use.`
-    );
-  }
-
-  await setSpreadsheetId(targetId);
-  return { spreadsheetId: targetId, previousSpreadsheetId: sourceId, rowCount: copiedEntries };
-}
-
-export async function testConnection({ interactiveAuth = false } = {}) {
-  const spreadsheetId = await getSpreadsheetId();
-  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-  await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
-  await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
-  return { ok: true };
-}
-
 function valuesForRange(valueRanges, sheetName) {
   const match = (valueRanges || []).find((valueRange) => String(valueRange.range || "").startsWith(`${sheetName}!`)
     || String(valueRange.range || "").startsWith(`'${sheetName}'!`));
@@ -374,13 +344,7 @@ function valuesForRange(valueRanges, sheetName) {
  * Reads entries and config in one batchGet: two ranges, one request. Returns the
  * entries, their sheet rows, the config map, and the config row of each key.
  */
-export async function readRemoteSnapshot({ interactiveAuth = false } = {}) {
-  const spreadsheetId = await getSpreadsheetId();
-  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-
-  await ensureTimeEntriesSheet(spreadsheetId, { interactiveAuth });
-  await ensureConfigSheet(spreadsheetId, { interactiveAuth }).catch(() => {});
-
+async function readSnapshotOnce(spreadsheetId, { interactiveAuth }) {
   const query = [
     `ranges=${encodeRange(FULL_RANGE)}`,
     `ranges=${encodeRange(CONFIG_FULL_RANGE)}`,
@@ -389,30 +353,44 @@ export async function readRemoteSnapshot({ interactiveAuth = false } = {}) {
   ].join("&");
   const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
 
+  const { entries, rowMap } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
+  const { config, configRows } = rowsToConfig(valuesForRange(data.valueRanges, CONFIG_SHEET_NAME));
+  return { entries, rowMap, config, configRows };
+}
+
+/**
+ * Reads entries and config in one batchGet: two ranges, one request.
+ *
+ * No layout check runs first. The response carries the header row and
+ * rowsToEntries validates it, so the read proves what a precheck would have, for
+ * one request instead of five. A missing tab or broken header surfaces as
+ * SHEET_MISSING, which triggers a repair and a single retry.
+ */
+export async function readRemoteSnapshot({ interactiveAuth = false } = {}) {
+  const spreadsheetId = await getSpreadsheetId();
+  if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+
   try {
-    const { entries, rowMap } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
-    const { config, configRows } = rowsToConfig(valuesForRange(data.valueRanges, CONFIG_SHEET_NAME));
-    return { entries, rowMap, config, configRows };
+    return await readSnapshotOnce(spreadsheetId, { interactiveAuth });
   } catch (error) {
-    // The cached tab check is no longer trustworthy if the header went missing.
+    if (error.code !== "SHEET_MISSING") throw error;
     resetSheetCache();
-    throw error;
+    await repairSheetLayout(spreadsheetId, { interactiveAuth });
+    return readSnapshotOnce(spreadsheetId, { interactiveAuth });
   }
 }
 
 function rowsToEntries(rows) {
-  // UNFORMATTED_VALUE can hand back numbers or booleans for cells a user edited
-  // by hand, so every cell is coerced back to the string form entries expect.
-  const asText = (row) => (row || []).map((cell) => (cell == null ? "" : String(cell)));
-  const header = asText(rows[0] || []);
-  if (!headersMatch(header)) throw codedError("SHEET_MISSING", "The time_entries tab header row is missing or invalid. Use Create/Initialize Spreadsheet.");
+  const cells = rowsAsText(rows);
+  if (!headersMatch(cells[0] || [])) {
+    throw codedError("SHEET_MISSING", "The time_entries tab header row is missing or invalid.");
+  }
 
   const entries = [];
   const rowMap = new Map();
-  rows.slice(1).forEach((row, index) => {
-    const cells = asText(row);
-    if (!cells[0]) return;
-    const entry = rowToEntry(cells);
+  cells.slice(1).forEach((row, index) => {
+    if (!row[0]) return;
+    const entry = rowToEntry(row);
     entries.push(entry);
     rowMap.set(entry.id, index + 2);
   });
@@ -446,16 +424,30 @@ export async function appendRemoteEntries(entries, { interactiveAuth = false } =
   return entries.map((entry, index) => ({ id: entry.id, rowIndex: firstRow + index }));
 }
 
+async function rememberSheetId(spreadsheetId, sheetId) {
+  cachedSheetIdSpreadsheet = spreadsheetId;
+  cachedSheetId = sheetId;
+  await setSetting(SHEET_ID_SETTING, { spreadsheetId, sheetId });
+}
+
 async function getSheetId({ interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
   if (cachedSheetIdSpreadsheet === spreadsheetId && cachedSheetId != null) return cachedSheetId;
 
+  // Stored alongside its spreadsheet id, so a stale entry from a previous
+  // spreadsheet is ignored rather than trusted.
+  const stored = await getSetting(SHEET_ID_SETTING, null);
+  if (stored && stored.spreadsheetId === spreadsheetId && Number.isFinite(stored.sheetId)) {
+    cachedSheetIdSpreadsheet = spreadsheetId;
+    cachedSheetId = stored.sheetId;
+    return cachedSheetId;
+  }
+
   const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties`, {}, { interactiveAuth });
   const existing = (metadata.sheets || []).find((s) => s.properties && s.properties.title === SHEET_NAME);
   if (!existing) throw codedError("SHEET_MISSING", "time_entries sheet not found");
-  cachedSheetIdSpreadsheet = spreadsheetId;
-  cachedSheetId = existing.properties.sheetId;
+  await rememberSheetId(spreadsheetId, existing.properties.sheetId);
   return cachedSheetId;
 }
 
