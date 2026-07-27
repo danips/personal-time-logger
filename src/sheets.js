@@ -34,12 +34,17 @@ let ensuredSpreadsheetId = "";
 let ensuredConfigSpreadsheetId = "";
 let cachedSheetIdSpreadsheet = "";
 let cachedSheetId = null;
+// Set once Drive refuses the metadata lookup. Without it a permanent refusal
+// would cost a wasted request on every cycle on top of the read it fails to
+// avoid. Cleared when the spreadsheet changes, and on the next context load.
+let driveGateUnavailable = false;
 
 function resetSheetCache() {
   ensuredSpreadsheetId = "";
   ensuredConfigSpreadsheetId = "";
   cachedSheetIdSpreadsheet = "";
   cachedSheetId = null;
+  driveGateUnavailable = false;
 }
 
 async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl = API_BASE } = {}) {
@@ -224,10 +229,13 @@ export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, 
 
 /**
  * Last modification time of the spreadsheet file, used to skip reads when
- * nothing changed remotely. Returns "" when Drive is unavailable or the granted
- * token predates the Drive scope, in which case callers must read unconditionally.
+ * nothing changed remotely. Returns "" whenever Drive cannot answer: token
+ * issued before the drive.file scope (403), a spreadsheet the extension did not
+ * create so drive.file does not cover it (404), or the Drive API not enabled on
+ * the project. Callers must then read unconditionally.
  */
 export async function getRemoteModifiedTime({ interactiveAuth = false } = {}) {
+  if (driveGateUnavailable) return "";
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
 
@@ -240,8 +248,10 @@ export async function getRemoteModifiedTime({ interactiveAuth = false } = {}) {
     return data && data.modifiedTime ? String(data.modifiedTime) : "";
   } catch (error) {
     if (error.code === "AUTH_EXPIRED" || error.code === "OFFLINE" || error.code === "RATE_LIMIT") throw error;
-    // Missing scope, disabled Drive API, or an unexpected shape: fall back to
-    // always reading rather than failing the sync.
+    // Missing scope, a spreadsheet drive.file does not cover, a disabled Drive
+    // API, or an unexpected shape. Stop asking and read unconditionally instead
+    // of failing the sync.
+    driveGateUnavailable = true;
     return "";
   }
 }

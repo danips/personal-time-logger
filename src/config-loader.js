@@ -2,10 +2,13 @@ import { getSetting } from "./db.js";
 
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
-  // Read-only file metadata, used only to check the spreadsheet's modifiedTime so
-  // an unchanged sheet is not downloaded on every sync. Sync degrades to
-  // unconditional reads if this scope is not granted.
-  "https://www.googleapis.com/auth/drive.metadata.readonly"
+  // Per-file Drive access, used only to read the spreadsheet's modifiedTime so an
+  // unchanged sheet is not downloaded on every sync. The device authorization
+  // flow accepts a fixed scope list that includes drive.file but not the broader
+  // drive.metadata.readonly, which it rejects with invalid_scope. Access applies
+  // to spreadsheets this extension created; for a spreadsheet ID pasted in by
+  // hand Drive answers 404 and sync falls back to reading every cycle.
+  "https://www.googleapis.com/auth/drive.file"
 ];
 
 /**
