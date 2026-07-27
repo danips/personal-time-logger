@@ -665,6 +665,7 @@ function bindEvents() {
     });
   });
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html"));
+  $("#openReconcile").addEventListener("click", () => platform.openExtensionPage("reconcile/reconcile.html"));
   $("#openOptions").addEventListener("click", () => platform.openOptionsPage());
   $("#saveEdit").addEventListener("click", saveEdit);
   $("#mergeEdit").addEventListener("click", mergeEdit);

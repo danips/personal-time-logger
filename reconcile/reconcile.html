@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Time Logger Reconcile</title>
+    <link rel="stylesheet" href="reconcile.css">
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Reconcile Local And Remote</h1>
+        <p id="statusLine" class="status" role="status">Loading...</p>
+        <div class="actions">
+          <button id="rescanButton" type="button">Rescan</button>
+          <button id="syncButton" type="button">Sync Now</button>
+        </div>
+      </header>
+
+      <section class="panel" aria-labelledby="summaryHeading">
+        <h2 id="summaryHeading">Summary</h2>
+        <dl id="summary">
+          <div>
+            <dt>Entries on this device</dt>
+            <dd id="localCount">-</dd>
+          </div>
+          <div>
+            <dt>Rows in the spreadsheet</dt>
+            <dd id="remoteCount">-</dd>
+          </div>
+          <div>
+            <dt>Identical on both sides</dt>
+            <dd id="inSyncCount">-</dd>
+          </div>
+          <div>
+            <dt>Divergences</dt>
+            <dd id="divergenceCount">-</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section id="differentSection" class="panel" aria-labelledby="differentHeading">
+        <div class="panel-heading">
+          <h2 id="differentHeading">Different on each side</h2>
+          <div class="actions">
+            <button id="keepAllLocal" type="button">Keep all local</button>
+            <button id="keepAllRemote" type="button">Keep all remote</button>
+            <button id="keepAllNewest" type="button">Keep newest of each</button>
+          </div>
+        </div>
+        <div id="differentList" class="group-list"></div>
+      </section>
+
+      <section id="localOnlySection" class="panel" aria-labelledby="localOnlyHeading">
+        <div class="panel-heading">
+          <h2 id="localOnlyHeading">Only on this device</h2>
+          <div class="actions">
+            <button id="pushAllLocal" type="button">Upload all</button>
+          </div>
+        </div>
+        <div id="localOnlyList" class="group-list"></div>
+      </section>
+
+      <section id="remoteOnlySection" class="panel" aria-labelledby="remoteOnlyHeading">
+        <div class="panel-heading">
+          <h2 id="remoteOnlyHeading">Only in the spreadsheet</h2>
+          <div class="actions">
+            <button id="importAllRemote" type="button">Import all</button>
+          </div>
+        </div>
+        <div id="remoteOnlyList" class="group-list"></div>
+      </section>
+    </main>
+    <script type="module" src="reconcile.js"></script>
+  </body>
+</html>
