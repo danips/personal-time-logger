@@ -1,5 +1,12 @@
-import { claimLock, deleteEntry, getAllEntries, getDirtyEntries, getEntry, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
-import { appendRemoteEntry, deleteRemoteRow, readRemoteConfig, readRemoteEntries, updateRemoteConfig, updateRemoteEntry } from "./sheets.js";
+import { claimLock, deleteEntry, getAllEntries, getEntry, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
+import {
+  appendRemoteEntries,
+  deleteRemoteRows,
+  getRemoteModifiedTime,
+  readRemoteSnapshot,
+  updateRemoteConfig,
+  updateRemoteEntries
+} from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
 import { addDays, nowIso, startOfLocalDay, uuid } from "./time.js";
@@ -8,6 +15,10 @@ import { platform } from "./platform.js";
 const MAX_BACKOFF_SECONDS = 300;
 const SYNC_LOCK_KEY = "sync_lock";
 const SYNC_LOCK_TTL_MS = 120000;
+const REMOTE_MODIFIED_KEY = "remote_modified_time";
+const MULTIPLIER_KEY = "duration_multiplier";
+const MULTIPLIER_UPDATED_KEY = "duration_multiplier_updated_at";
+const MULTIPLIER_SYNCED_KEY = "duration_multiplier_synced_at";
 
 // Identifies this module instance, which is one per extension context (popup,
 // calendar page, background). Used as the sync lock holder.
@@ -57,43 +68,73 @@ async function clearBackoff() {
 }
 
 /**
+ * One in-memory view of the entry table, loaded once per cycle and updated as
+ * steps write to it, so a sync no longer scans the whole store five times.
+ */
+function localState(entries) {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return {
+    all() {
+      return [...byId.values()];
+    },
+    apply(changed) {
+      for (const entry of changed) byId.set(entry.id, entry);
+      return changed;
+    },
+    forget(id) {
+      byId.delete(id);
+    }
+  };
+}
+
+/**
  * Writes local changes to the sheet and returns the ids that were pushed, so the
  * pull step can skip them: the snapshot it works from predates these writes.
+ * All row rewrites go in one request and all new rows in another, so the cost is
+ * two calls regardless of how many entries are pending.
  */
-async function pushDirtyEntries(remoteEntries, rowMap, { interactiveAuth }) {
+async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth }) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
-  const dirtyEntries = await getDirtyEntries();
-  const pushedIds = new Set();
+  const updates = [];
+  const appends = [];
 
-  for (const local of dirtyEntries) {
-    const remote = remoteById.get(local.id);
-
-    if (remote && isRemoteNewer(remote, local)) continue;
-
-    if (rowMap.has(local.id)) {
-      await updateRemoteEntry(rowMap.get(local.id), local, { interactiveAuth });
+  for (const entry of local.all()) {
+    if (!entry.dirty) continue;
+    const remote = remoteById.get(entry.id);
+    if (remote && isRemoteNewer(remote, entry)) continue;
+    if (rowMap.has(entry.id)) {
+      updates.push({ rowIndex: rowMap.get(entry.id), entry });
     } else {
-      const appendedRow = await appendRemoteEntry(local, { interactiveAuth });
-      // Without a row from the API the entry stays unmapped and is matched by id
-      // on the next read, which is safer than writing to a guessed row.
-      if (appendedRow) rowMap.set(local.id, appendedRow);
+      appends.push(entry);
     }
-    pushedIds.add(local.id);
-    await markSynced(local);
+  }
+
+  const pushedIds = new Set();
+  if (!updates.length && !appends.length) return pushedIds;
+
+  await updateRemoteEntries(updates, { interactiveAuth });
+  // Rows come back from the API; an unmapped entry is matched by id on the next
+  // read rather than written to a guessed row.
+  for (const { id, rowIndex } of await appendRemoteEntries(appends, { interactiveAuth })) {
+    rowMap.set(id, rowIndex);
+  }
+
+  for (const entry of [...updates.map((update) => update.entry), ...appends]) {
+    pushedIds.add(entry.id);
+    local.apply([await markSynced(entry)]);
   }
 
   return pushedIds;
 }
 
-async function pullRemoteEntries(remoteEntries, pushedIds = new Set()) {
-  const localEntries = await getAllEntries();
-  const localById = new Map(localEntries.map((entry) => [entry.id, entry]));
+async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set()) {
+  const localById = new Map(local.all().map((entry) => [entry.id, entry]));
   const toSave = [];
 
   for (const remote of remoteEntries) {
     if (pushedIds.has(remote.id)) continue;
-    const local = localById.get(remote.id);
-    if (!local || !local.dirty || isRemoteNewer(remote, local)) {
+    const existing = localById.get(remote.id);
+    if (!existing || !existing.dirty || isRemoteNewer(remote, existing)) {
       toSave.push(normalizeEntry({
         ...remote,
         dirty: false,
@@ -104,11 +145,12 @@ async function pullRemoteEntries(remoteEntries, pushedIds = new Set()) {
   }
 
   await putEntries(toSave);
+  local.apply(toSave);
+  return toSave.length;
 }
 
-async function markMultipleActiveTimers() {
-  const entries = await getAllEntries();
-  const active = entries
+async function markMultipleActiveTimers(local) {
+  const active = local.all()
     .filter((entry) => !entry.deleted_at && !entry.end_at)
     .sort((a, b) => String(b.start_at).localeCompare(String(a.start_at)));
 
@@ -128,50 +170,43 @@ async function markMultipleActiveTimers() {
     }));
 
   await putEntries(changed);
-  return changed;
+  return local.apply(changed);
 }
 
-async function purgeDeletedEntries(remoteEntries = null, rowMap = null, { interactiveAuth = false } = {}) {
-  const cutoffMs = addDays(new Date(), -14).getTime();
-  const isExpired = (deletedAt) => {
-    const time = new Date(deletedAt).getTime();
-    return Number.isFinite(time) && time < cutoffMs;
-  };
-  const failedRemoteIds = new Set();
+function isExpiredDeletion(deletedAt) {
+  if (!deletedAt) return false;
+  const time = new Date(deletedAt).getTime();
+  return Number.isFinite(time) && time < addDays(new Date(), -14).getTime();
+}
 
-  if (remoteEntries && rowMap) {
-    // deleteRemoteRow shifts every row below it up by one, so the indices in
-    // rowMap only stay valid while deleting from the bottom of the sheet up.
-    const expiredRows = remoteEntries
-      .filter((entry) => entry.deleted_at && isExpired(entry.deleted_at) && rowMap.has(entry.id))
-      .map((entry) => ({ id: entry.id, rowIndex: rowMap.get(entry.id) }))
-      .sort((first, second) => second.rowIndex - first.rowIndex);
+async function purgeDeletedEntries(local, remoteEntries, rowMap, { interactiveAuth = false } = {}) {
+  const expiredRows = remoteEntries
+    .filter((entry) => isExpiredDeletion(entry.deleted_at) && rowMap.has(entry.id))
+    .map((entry) => ({ id: entry.id, rowIndex: rowMap.get(entry.id) }));
 
-    for (const { id, rowIndex } of expiredRows) {
-      try {
-        await deleteRemoteRow(rowIndex, { interactiveAuth });
-        rowMap.delete(id);
-      } catch {
-        // Keep the local copy so the row is retried on the next sync.
-        failedRemoteIds.add(id);
-      }
+  // deleteRemoteRows orders the deletions itself; one request covers every row.
+  let blockedIds = new Set();
+  if (expiredRows.length) {
+    try {
+      await deleteRemoteRows(expiredRows.map((row) => row.rowIndex), { interactiveAuth });
+      for (const { id } of expiredRows) rowMap.delete(id);
+    } catch {
+      // Keep the local copies so the rows are retried on the next sync.
+      blockedIds = new Set(expiredRows.map((row) => row.id));
     }
   }
 
-  const localEntries = await getAllEntries();
-  const toDelete = localEntries.filter((entry) => entry.deleted_at
-    && isExpired(entry.deleted_at)
-    && !failedRemoteIds.has(entry.id));
+  const toDelete = local.all().filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
   for (const entry of toDelete) {
     await deleteEntry(entry.id);
+    local.forget(entry.id);
   }
   return toDelete.length;
 }
 
-async function markStaleActiveTimers() {
+async function markStaleActiveTimers(local) {
   const todayStartMs = startOfLocalDay(new Date()).getTime();
-  const entries = await getAllEntries();
-  const stale = entries.filter((entry) => {
+  const stale = local.all().filter((entry) => {
     if (entry.deleted_at) return false;
     if (entry.end_at) return false;
     // Entries already flagged needs_review are still open timers and must be
@@ -180,7 +215,7 @@ async function markStaleActiveTimers() {
     if (!Number.isFinite(startMs)) return true;
     return startMs < todayStartMs;
   });
-  if (!stale.length) return 0;
+  if (!stale.length) return [];
   const timestamp = nowIso();
   const changed = stale.map((entry) =>
     normalizeEntry({
@@ -194,26 +229,51 @@ async function markStaleActiveTimers() {
     })
   );
   await putEntries(changed);
-  return changed.length;
+  return local.apply(changed);
 }
 
-async function pushLocalConfig({ interactiveAuth }) {
-  const localValue = await getSetting("duration_multiplier", "1");
-  const localUpdatedAt = await getSetting("duration_multiplier_updated_at", "");
-  if (!localUpdatedAt) return;
-  await updateRemoteConfig("duration_multiplier", String(localValue), localUpdatedAt, { interactiveAuth });
+/**
+ * True when the local multiplier has moved since it was last exchanged with the
+ * sheet. Needed so a config change is still pushed on a cycle where the remote
+ * file is otherwise unchanged and the read is skipped.
+ */
+async function hasPendingConfig() {
+  const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
+  if (!localUpdatedAt) return false;
+  return localUpdatedAt !== String(await getSetting(MULTIPLIER_SYNCED_KEY, "") || "");
 }
 
-async function pullRemoteConfig({ interactiveAuth }) {
-  const remoteConfig = await readRemoteConfig({ interactiveAuth });
-  const remote = remoteConfig["duration_multiplier"];
-  if (remote && remote.updated_at) {
-    const localUpdatedAt = await getSetting("duration_multiplier_updated_at", "");
-    if (remote.updated_at > localUpdatedAt) {
-      await setSetting("duration_multiplier", remote.value);
-      await setSetting("duration_multiplier_updated_at", remote.updated_at);
-    }
+/**
+ * Reconciles duration_multiplier against the config rows already in the
+ * snapshot, and writes only when the local value is genuinely newer. Returns
+ * true when it wrote to the sheet.
+ */
+async function syncConfig(remoteConfig, configRows, { interactiveAuth }) {
+  const remote = remoteConfig[MULTIPLIER_KEY];
+  const remoteUpdatedAt = remote ? String(remote.updated_at || "") : "";
+  const remoteValue = remote ? String(remote.value || "") : "";
+  const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
+  const localValue = String(await getSetting(MULTIPLIER_KEY, "1"));
+
+  if (remoteUpdatedAt && remoteUpdatedAt > localUpdatedAt) {
+    await setSetting(MULTIPLIER_KEY, remoteValue);
+    await setSetting(MULTIPLIER_UPDATED_KEY, remoteUpdatedAt);
+    await setSetting(MULTIPLIER_SYNCED_KEY, remoteUpdatedAt);
+    return false;
   }
+
+  if (!localUpdatedAt) return false;
+  if (remoteUpdatedAt === localUpdatedAt && remoteValue === localValue) {
+    await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
+    return false;
+  }
+
+  await updateRemoteConfig(MULTIPLIER_KEY, localValue, localUpdatedAt, {
+    rowIndex: configRows.get(MULTIPLIER_KEY) || 0,
+    interactiveAuth
+  });
+  await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
+  return true;
 }
 
 async function runSyncCycle({ interactiveAuth, force }) {
@@ -236,19 +296,44 @@ async function runSyncCycle({ interactiveAuth, force }) {
   }
 
   try {
-    await markStaleActiveTimers();
+    const local = localState(await getAllEntries());
+    const staleChanges = await markStaleActiveTimers(local);
     // Flagged before the push so the conflict markers travel in the same pass.
-    const conflictChanges = await markMultipleActiveTimers();
+    const conflictChanges = await markMultipleActiveTimers(local);
 
-    const snapshot = await readRemoteEntries({ interactiveAuth });
-    const pushedIds = await pushDirtyEntries(snapshot.entries, snapshot.rowMap, { interactiveAuth });
-    await pullRemoteEntries(snapshot.entries, pushedIds);
+    const hasLocalWork = local.all().some((entry) => entry.dirty || isExpiredDeletion(entry.deleted_at))
+      || await hasPendingConfig();
+
+    // Drive reports when the file last changed for a fraction of the cost of
+    // downloading it. With nothing to push and no remote change since the last
+    // read, the whole exchange is skipped. An empty modifiedTime means Drive is
+    // unavailable or the scope was never granted, so the read always happens.
+    const modifiedTime = await getRemoteModifiedTime({ interactiveAuth });
+    const lastSeenModified = String(await getSetting(REMOTE_MODIFIED_KEY, "") || "");
+    if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified && !hasLocalWork) {
+      await clearBackoff();
+      if (staleChanges.length || conflictChanges.length) notifyEntriesChanged({ action: "sync" });
+      return {
+        status: conflictChanges.length ? "needs review" : "synced",
+        warning: conflictChanges.length ? "multiple active timers flagged" : "",
+        syncedAt: nowIso(),
+        remoteRead: false
+      };
+    }
+
+    const snapshot = await readRemoteSnapshot({ interactiveAuth });
+    const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
+    await pullRemoteEntries(local, snapshot.entries, pushedIds);
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
-    await purgeDeletedEntries(snapshot.entries, snapshot.rowMap, { interactiveAuth });
+    const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
+    const configPushed = await syncConfig(snapshot.config, snapshot.configRows, { interactiveAuth });
 
-    await pullRemoteConfig({ interactiveAuth });
-    await pushLocalConfig({ interactiveAuth });
+    // Our own writes bump modifiedTime, so it is re-read to avoid a needless
+    // download next cycle. If Drive lags, the gate simply opens once more.
+    const wroteRemotely = pushedIds.size > 0 || purged > 0 || configPushed;
+    const nextModified = wroteRemotely ? await getRemoteModifiedTime({ interactiveAuth }) : modifiedTime;
+    await setSetting(REMOTE_MODIFIED_KEY, nextModified || "");
 
     const timestamp = nowIso();
     await clearBackoff();
@@ -256,7 +341,8 @@ async function runSyncCycle({ interactiveAuth, force }) {
     return {
       status: conflictChanges.length ? "needs review" : "synced",
       warning: conflictChanges.length ? "multiple active timers flagged" : "",
-      syncedAt: timestamp
+      syncedAt: timestamp,
+      remoteRead: true
     };
   } catch (error) {
     await recordBackoff(error);
