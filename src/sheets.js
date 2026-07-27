@@ -220,6 +220,32 @@ export async function ensureAppMarker(config, configRows, { interactiveAuth = fa
   return true;
 }
 
+/**
+ * Confirms with Drive that the stored spreadsheet is really gone, either deleted
+ * or in the trash.
+ *
+ * A 404 from the Sheets API alone is not enough to act on: it can also mean the
+ * file exists but is no longer reachable with this token, and reprovisioning on
+ * that would strand the user on a second spreadsheet while the first still holds
+ * their data. Anything other than a definite answer returns false, leaving the
+ * original error to surface.
+ */
+export async function isSpreadsheetGone({ interactiveAuth = false } = {}) {
+  const spreadsheetId = await getSpreadsheetId();
+  if (!spreadsheetId) return false;
+
+  try {
+    const data = await apiFetch(
+      `/files/${spreadsheetId}?fields=trashed,explicitlyTrashed&supportsAllDrives=true`,
+      {},
+      { interactiveAuth, baseUrl: DRIVE_API_BASE }
+    );
+    return Boolean(data && (data.trashed || data.explicitlyTrashed));
+  } catch (error) {
+    return /not found|notFound|File not found/i.test(String(error.message || ""));
+  }
+}
+
 export function spreadsheetUrl(spreadsheetId) {
   return spreadsheetId ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit` : "";
 }

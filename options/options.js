@@ -3,7 +3,7 @@ import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig } from "../src/config-loader.js";
 import { spreadsheetUrl } from "../src/sheets.js";
-import { detachSpreadsheet, syncNow } from "../src/sync.js";
+import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 
@@ -70,7 +70,6 @@ function renderSpreadsheet(spreadsheetId) {
   const link = $("#spreadsheetLink");
   $("#spreadsheetId").textContent = spreadsheetId || "not set";
   $("#copySpreadsheetId").disabled = !spreadsheetId;
-  $("#detachSpreadsheet").disabled = !spreadsheetId;
 
   if (!spreadsheetId) {
     link.textContent = "Not set up yet";
@@ -146,23 +145,10 @@ async function copySpreadsheetIdClicked() {
   }
 }
 
-async function detachSpreadsheetClicked() {
-  const confirmed = confirm(
-    "Forget the current spreadsheet?\n\n"
-    + "The spreadsheet itself is not deleted. The next sync detects a spreadsheet again, "
-    + "and will pick up this same one unless you trash or rename it first."
-  );
-  if (!confirmed) return;
-
-  await detachSpreadsheet();
-  setStatus("Spreadsheet detached. The next sync will detect or create one.");
-  await refresh();
-}
-
 function bindEvents() {
   $("#saveSettings").addEventListener("click", saveSettings);
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
-  $("#detachSpreadsheet").addEventListener("click", detachSpreadsheetClicked);
+
   $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
   $("#signInButton").addEventListener("click", signInClicked);
   $("#signOutButton").addEventListener("click", signOutClicked);

@@ -5,9 +5,9 @@ import {
   ensureAppMarker,
   getRemoteModifiedTime,
   getSpreadsheetId,
+  isSpreadsheetGone,
   provisionSpreadsheet,
   readRemoteSnapshot,
-  setSpreadsheetId,
   updateRemoteConfig,
   updateRemoteEntries
 } from "./sheets.js";
@@ -278,6 +278,22 @@ async function ensureSpreadsheet(local, { interactiveAuth }) {
   return provisioned;
 }
 
+/**
+ * Recovers from a spreadsheet that has been deleted or trashed, by detecting or
+ * creating a replacement and re-seeding it from local data.
+ *
+ * Only acts once Drive confirms the file is actually gone, so an unreachable but
+ * intact spreadsheet still reports its error rather than being silently replaced.
+ */
+async function reprovisionIfSpreadsheetGone(error, local, { interactiveAuth }) {
+  if (error.code !== "API_ERROR" && error.code !== "SHEET_MISSING") return null;
+  if (!await isSpreadsheetGone({ interactiveAuth })) return null;
+
+  const provisioned = await provisionSpreadsheet({ interactiveAuth });
+  await reseedForNewSpreadsheet(local);
+  return provisioned;
+}
+
 async function hasPendingConfig() {
   const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
   if (!localUpdatedAt) return false;
@@ -343,7 +359,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     const conflictChanges = await markMultipleActiveTimers(local);
     // Under the sync lock, so two contexts cannot both decide none exists and
     // each create one.
-    const provisioned = await ensureSpreadsheet(local, { interactiveAuth });
+    let provisioned = await ensureSpreadsheet(local, { interactiveAuth });
 
     // Both marking passes set dirty, so either of them producing changes makes
     // hasLocalWork true and forces the read below.
@@ -366,7 +382,16 @@ async function runSyncCycle({ interactiveAuth, force }) {
       }
     }
 
-    const snapshot = await readRemoteSnapshot({ interactiveAuth });
+    let snapshot;
+    try {
+      snapshot = await readRemoteSnapshot({ interactiveAuth });
+    } catch (error) {
+      const recovered = await reprovisionIfSpreadsheetGone(error, local, { interactiveAuth });
+      if (!recovered) throw error;
+      provisioned = recovered;
+      snapshot = await readRemoteSnapshot({ interactiveAuth });
+    }
+
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
     const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds);
     // Purge last: it consumes the same snapshot, and deleting rows first would
@@ -433,15 +458,7 @@ export async function nextSyncDelayMinutes() {
   return Math.min(baseMinutes * factor, MAX_IDLE_INTERVAL_MINUTES);
 }
 
-/**
- * Forgets the current spreadsheet so the next sync detects or creates one again.
- * The spreadsheet itself is untouched; to pick a different one, trash or rename
- * the current one first, otherwise it is simply adopted again.
- */
-export async function detachSpreadsheet() {
-  await setSpreadsheetId("");
-  await setSetting(REMOTE_MODIFIED_KEY, "");
-}
+
 
 export async function syncNow({ interactiveAuth = false, force = false } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
