@@ -1,4 +1,10 @@
-import { deleteEverywhere, keepLocal, keepRemote, loadReconciliation } from "../src/reconcile.js";
+import {
+  deleteDuplicateRows,
+  deleteEverywhere,
+  keepLocal,
+  keepRemote,
+  loadReconciliation
+} from "../src/reconcile.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
@@ -119,6 +125,41 @@ function renderDifferent(items) {
   });
 }
 
+function renderDuplicates(items) {
+  if (!items.length) return [emptyNote("No entry appears in more than one spreadsheet row.")];
+
+  return items.map((item) => {
+    const row = document.createElement("article");
+    row.className = "row";
+    const rows = [item.keepRowIndex, ...item.extraRowIndexes].sort((a, b) => a - b);
+    row.append(
+      rowHeading(item.entry, [`rows ${rows.join(", ")}`, `keeping row ${item.keepRowIndex}`]),
+      actionRow([
+        {
+          label: `Delete ${item.extraRowIndexes.length} extra row${item.extraRowIndexes.length === 1 ? "" : "s"}`,
+          action: () => confirmDeleteRows(item.extraRowIndexes),
+          danger: true
+        }
+      ])
+    );
+    return row;
+  });
+}
+
+/**
+ * Row deletion cannot be undone from here and touches the spreadsheet directly,
+ * so it always asks first.
+ */
+async function confirmDeleteRows(rowIndexes) {
+  const confirmed = confirm(
+    `Delete ${rowIndexes.length} duplicate row${rowIndexes.length === 1 ? "" : "s"} from the spreadsheet?\n\n`
+    + `Row${rowIndexes.length === 1 ? "" : "s"} ${rowIndexes.join(", ")} will be removed. `
+    + "The most recently updated copy of each entry is kept. This cannot be undone from here."
+  );
+  if (!confirmed) return;
+  await deleteDuplicateRows(rowIndexes, { interactiveAuth: false });
+}
+
 function renderLocalOnly(items) {
   if (!items.length) return [emptyNote("Every local entry exists in the spreadsheet.")];
 
@@ -153,14 +194,27 @@ function renderRemoteOnly(items) {
   });
 }
 
+function divergenceCount() {
+  if (!report) return 0;
+  return report.different.length
+    + report.localOnly.length
+    + report.remoteOnly.length
+    + report.duplicateRowCount;
+}
+
 function render() {
   if (!report) return;
 
   $("#localCount").textContent = String(report.localCount);
+  $("#remoteRowCount").textContent = String(report.remoteRowCount);
   $("#remoteCount").textContent = String(report.remoteCount);
+  $("#duplicateRowCount").textContent = String(report.duplicateRowCount);
   $("#inSyncCount").textContent = String(report.inSync);
-  const divergences = report.different.length + report.localOnly.length + report.remoteOnly.length;
-  $("#divergenceCount").textContent = String(divergences);
+  $("#divergenceCount").textContent = String(divergenceCount());
+
+  $("#duplicateHeading").textContent = `Duplicate rows in the spreadsheet (${report.duplicates.length})`;
+  $("#duplicateList").replaceChildren(...renderDuplicates(report.duplicates));
+  $("#deleteAllDuplicates").disabled = !report.duplicates.length;
 
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
@@ -183,7 +237,7 @@ async function scan({ quiet = false } = {}) {
   try {
     report = await loadReconciliation({ interactiveAuth: false });
     render();
-    const divergences = report.different.length + report.localOnly.length + report.remoteOnly.length;
+    const divergences = divergenceCount();
     setStatus(divergences
       ? `${divergences} divergence${divergences === 1 ? "" : "s"} found. Choose a side, then sync.`
       : "This device and the spreadsheet agree on every entry.");
@@ -237,6 +291,9 @@ async function runSync() {
 function bindEvents() {
   $("#rescanButton").addEventListener("click", () => scan());
   $("#syncButton").addEventListener("click", runSync);
+  $("#deleteAllDuplicates").addEventListener("click", () => resolve(() => confirmDeleteRows(
+    report.duplicates.flatMap((item) => item.extraRowIndexes)
+  )));
   $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different, (item) => keepLocal(item.id)));
   $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different, (item) => keepRemote(item.remote)));
   $("#keepAllNewest").addEventListener("click", () => resolveMany(report.different, (item) => (

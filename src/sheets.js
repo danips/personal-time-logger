@@ -379,9 +379,9 @@ async function readSnapshotOnce(spreadsheetId, { interactiveAuth }) {
   ].join("&");
   const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
 
-  const { entries, rowMap } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
+  const { entries, rowMap, duplicates } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
   const { config, configRows } = rowsToConfig(valuesForRange(data.valueRanges, CONFIG_SHEET_NAME));
-  return { entries, rowMap, config, configRows };
+  return { entries, rowMap, duplicates, config, configRows };
 }
 
 /**
@@ -406,22 +406,57 @@ export async function readRemoteSnapshot({ interactiveAuth = false } = {}) {
   }
 }
 
+/**
+ * Turns sheet rows into entries, one per id.
+ *
+ * The same id can appear in several rows, from a duplicated append or a hand
+ * edit. Where it does, the row with the newest updated_at wins rather than
+ * whichever happens to come last, so a stale duplicate below a fresh one cannot
+ * overwrite newer data. The losing rows are reported as duplicates so they can be
+ * cleaned up deliberately.
+ */
 function rowsToEntries(rows) {
   const cells = rowsAsText(rows);
   if (!headersMatch(cells[0] || [])) {
     throw codedError("SHEET_MISSING", "The time_entries tab header row is missing or invalid.");
   }
 
-  const entries = [];
-  const rowMap = new Map();
+  const byId = new Map();
   cells.slice(1).forEach((row, index) => {
     if (!row[0]) return;
+    const rowIndex = index + 2;
     const entry = rowToEntry(row);
-    entries.push(entry);
-    rowMap.set(entry.id, index + 2);
+    const existing = byId.get(entry.id);
+
+    if (!existing) {
+      byId.set(entry.id, { entry, rowIndex, rowIndexes: [rowIndex] });
+      return;
+    }
+
+    existing.rowIndexes.push(rowIndex);
+    if (String(entry.updated_at || "") > String(existing.entry.updated_at || "")) {
+      existing.entry = entry;
+      existing.rowIndex = rowIndex;
+    }
   });
 
-  return { entries, rowMap };
+  const entries = [];
+  const rowMap = new Map();
+  const duplicates = [];
+  for (const record of byId.values()) {
+    entries.push(record.entry);
+    rowMap.set(record.entry.id, record.rowIndex);
+    if (record.rowIndexes.length > 1) {
+      duplicates.push({
+        id: record.entry.id,
+        entry: record.entry,
+        keepRowIndex: record.rowIndex,
+        extraRowIndexes: record.rowIndexes.filter((rowIndex) => rowIndex !== record.rowIndex)
+      });
+    }
+  }
+
+  return { entries, rowMap, duplicates };
 }
 
 function appendedRowIndex(data) {

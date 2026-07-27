@@ -1,7 +1,7 @@
 import { getAllEntries, getEntry, putEntry } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry, softDeleteEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
-import { readRemoteSnapshot } from "./sheets.js";
+import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
 import { nowIso } from "./time.js";
 
 // Only the columns that live in the sheet are compared. dirty, last_sync_at and
@@ -34,7 +34,7 @@ function newerSide(localEntry, remoteEntry) {
  * Sorts every entry into in-sync, differing, local-only, or remote-only.
  * Pure, so the classification can be exercised without touching the network.
  */
-export function compareEntries(localEntries, remoteEntries) {
+export function compareEntries(localEntries, remoteEntries, duplicates = []) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const localIds = new Set(localEntries.map((entry) => entry.id));
 
@@ -63,13 +63,20 @@ export function compareEntries(localEntries, remoteEntries) {
     if (!localIds.has(remote.id)) remoteOnly.push({ id: remote.id, remote });
   }
 
+  const duplicateRowCount = duplicates.reduce((total, item) => total + item.extraRowIndexes.length, 0);
+
   return {
     inSync,
     different,
     localOnly,
     remoteOnly,
+    duplicates,
     localCount: localEntries.length,
-    remoteCount: remoteEntries.length
+    // Unique ids, which is what remoteEntries holds. Duplicate rows are counted
+    // separately, otherwise the totals appear not to add up.
+    remoteCount: remoteEntries.length,
+    remoteRowCount: remoteEntries.length + duplicateRowCount,
+    duplicateRowCount
   };
 }
 
@@ -84,9 +91,22 @@ export async function loadReconciliation({ interactiveAuth = false } = {}) {
   ]);
 
   return {
-    ...compareEntries(localEntries.map(normalizeEntry), snapshot.entries),
+    ...compareEntries(localEntries.map(normalizeEntry), snapshot.entries, snapshot.duplicates || []),
     scannedAt: nowIso()
   };
+}
+
+/**
+ * Deletes the surplus rows for a duplicated id, keeping the one sync uses.
+ *
+ * This is the one resolution that writes to the sheet directly, because a
+ * duplicate row has no local counterpart to mark and therefore nothing for sync
+ * to carry.
+ */
+export async function deleteDuplicateRows(extraRowIndexes, { interactiveAuth = false } = {}) {
+  if (!extraRowIndexes.length) return 0;
+  await deleteRemoteRows(extraRowIndexes, { interactiveAuth });
+  return extraRowIndexes.length;
 }
 
 /**

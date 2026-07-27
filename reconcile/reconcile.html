@@ -26,7 +26,15 @@
           </div>
           <div>
             <dt>Rows in the spreadsheet</dt>
+            <dd id="remoteRowCount">-</dd>
+          </div>
+          <div>
+            <dt>Distinct entries in the spreadsheet</dt>
             <dd id="remoteCount">-</dd>
+          </div>
+          <div>
+            <dt>Duplicate spreadsheet rows</dt>
+            <dd id="duplicateRowCount">-</dd>
           </div>
           <div>
             <dt>Identical on both sides</dt>
@@ -49,6 +57,20 @@
           </div>
         </div>
         <div id="differentList" class="group-list"></div>
+      </section>
+
+      <section id="duplicateSection" class="panel" aria-labelledby="duplicateHeading">
+        <div class="panel-heading">
+          <h2 id="duplicateHeading">Duplicate rows in the spreadsheet</h2>
+          <div class="actions">
+            <button id="deleteAllDuplicates" type="button">Delete all extra rows</button>
+          </div>
+        </div>
+        <p class="note">
+          The same entry appears in more than one row. Sync uses the most recently
+          updated of them; the others are stale copies that only take up space.
+        </p>
+        <div id="duplicateList" class="group-list"></div>
       </section>
 
       <section id="localOnlySection" class="panel" aria-labelledby="localOnlyHeading">
