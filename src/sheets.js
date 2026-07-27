@@ -256,6 +256,106 @@ export async function getRemoteModifiedTime({ interactiveAuth = false } = {}) {
   }
 }
 
+const MAX_COPY_ROWS_PER_REQUEST = 2000;
+
+/**
+ * Appends rows in chunks and returns how many rows Google reports writing.
+ * Append is used rather than a plain update because it grows the grid, which a
+ * freshly created spreadsheet (1000 rows by default) needs for a long history.
+ */
+async function appendRows(spreadsheetId, range, rows, { interactiveAuth }) {
+  let written = 0;
+  for (let index = 0; index < rows.length; index += MAX_COPY_ROWS_PER_REQUEST) {
+    const chunk = rows.slice(index, index + MAX_COPY_ROWS_PER_REQUEST);
+    const data = await apiFetch(
+      `/${spreadsheetId}/values/${encodeRange(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+      { method: "POST", body: JSON.stringify({ values: chunk }) },
+      { interactiveAuth }
+    );
+    written += data && data.updates ? Number(data.updates.updatedRows || 0) : 0;
+  }
+  return written;
+}
+
+/**
+ * Copies the current spreadsheet's contents into a brand new spreadsheet created
+ * by this extension, then points the stored ID at the copy.
+ *
+ * The point is ownership: drive.file only covers files the extension created, and
+ * there is no way to claim an existing file, so a spreadsheet whose ID was pasted
+ * in by hand can never answer the modifiedTime check used to skip reads.
+ *
+ * The source spreadsheet is never modified, and the stored ID is switched only
+ * after Google confirms every row was written, so a failure part way through
+ * leaves the existing setup working.
+ */
+export async function copyToOwnedSpreadsheet({ interactiveAuth = true } = {}) {
+  const sourceId = await getSpreadsheetId();
+  if (!sourceId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+
+  const readSource = async (ranges) => {
+    const query = [
+      ...ranges.map((range) => `ranges=${encodeRange(range)}`),
+      "valueRenderOption=UNFORMATTED_VALUE",
+      "fields=valueRanges(range,values)"
+    ].join("&");
+    return apiFetch(`/${sourceId}/values:batchGet?${query}`, {}, { interactiveAuth });
+  };
+
+  // A spreadsheet set up before the config tab existed has no config range, and
+  // batchGet rejects the whole request for an unknown range.
+  const source = await readSource([FULL_RANGE, CONFIG_FULL_RANGE])
+    .catch(() => readSource([FULL_RANGE]));
+
+  const asText = (rows) => (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
+  const entryRows = asText(valuesForRange(source.valueRanges, SHEET_NAME));
+  const configRows = asText(valuesForRange(source.valueRanges, CONFIG_SHEET_NAME));
+  if (!headersMatch(entryRows[0] || [])) {
+    throw codedError("SHEET_MISSING", "The current time_entries tab header row is missing or invalid, so it cannot be copied.");
+  }
+
+  const entryBody = entryRows.slice(1).filter((row) => row[0]);
+  const configBody = configRows.slice(1).filter((row) => row[0]);
+
+  const created = await apiFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      properties: { title: `Personal Time Logger (${new Date().toISOString().slice(0, 10)})` },
+      sheets: [
+        { properties: { title: SHEET_NAME } },
+        { properties: { title: CONFIG_SHEET_NAME } }
+      ]
+    })
+  }, { interactiveAuth });
+
+  const targetId = created.spreadsheetId;
+  if (!targetId) throw codedError("API_ERROR", "Google did not return an ID for the new spreadsheet");
+
+  await apiFetch(`/${targetId}/values:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueInputOption: "RAW",
+      data: [
+        { range: HEADER_RANGE, values: [SHEET_HEADERS] },
+        { range: CONFIG_HEADER_RANGE, values: [CONFIG_HEADERS] }
+      ]
+    })
+  }, { interactiveAuth });
+
+  const copiedEntries = await appendRows(targetId, FULL_RANGE, entryBody, { interactiveAuth });
+  const copiedConfig = await appendRows(targetId, CONFIG_FULL_RANGE, configBody, { interactiveAuth });
+
+  if (copiedEntries !== entryBody.length || copiedConfig !== configBody.length) {
+    throw codedError(
+      "API_ERROR",
+      `Copy incomplete: ${copiedEntries} of ${entryBody.length} entry rows written to spreadsheet ${targetId}. The current spreadsheet is unchanged and still in use.`
+    );
+  }
+
+  await setSpreadsheetId(targetId);
+  return { spreadsheetId: targetId, previousSpreadsheetId: sourceId, rowCount: copiedEntries };
+}
+
 export async function testConnection({ interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");

@@ -2,8 +2,8 @@ import { getSetting, setSetting } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig } from "../src/config-loader.js";
-import { createOrInitializeSpreadsheet, setSpreadsheetId } from "../src/sheets.js";
-import { syncNow } from "../src/sync.js";
+import { copyToOwnedSpreadsheet, createOrInitializeSpreadsheet, setSpreadsheetId } from "../src/sheets.js";
+import { clearRemoteReadMarker, syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 
@@ -128,8 +128,36 @@ async function initializeClicked() {
   await refresh();
 }
 
+async function copyToOwnedSheetClicked() {
+  const button = $("#copyToOwnedSheet");
+  const confirmed = confirm(
+    "Create a new spreadsheet owned by this extension, copy every row into it, and switch to it?\n\n"
+    + "The current spreadsheet is left untouched as a backup, and its ID is shown when the copy finishes. "
+    + "The new spreadsheet has a different URL."
+  );
+  if (!confirmed) return;
+
+  try {
+    button.disabled = true;
+    setStatus("Copying to a new spreadsheet...");
+    const result = await copyToOwnedSpreadsheet({ interactiveAuth: true });
+    $("#spreadsheetId").value = result.spreadsheetId;
+    // The new file has its own modification history, so the skip-read marker
+    // from the old one must not be trusted.
+    await clearRemoteReadMarker();
+    setStatus(`Copied ${result.rowCount} entry rows. Now using ${result.spreadsheetId}. Backup: ${result.previousSpreadsheetId}`);
+    syncNow({ force: true }).catch(() => {});
+  } catch (error) {
+    setStatus(formatError(error));
+  } finally {
+    button.disabled = false;
+  }
+  await refresh();
+}
+
 function bindEvents() {
   $("#saveSettings").addEventListener("click", saveSettings);
+  $("#copyToOwnedSheet").addEventListener("click", copyToOwnedSheetClicked);
   $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
   $("#signInButton").addEventListener("click", signInClicked);
   $("#signOutButton").addEventListener("click", signOutClicked);

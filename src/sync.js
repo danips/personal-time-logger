@@ -352,6 +352,14 @@ async function runSyncCycle({ interactiveAuth, force }) {
   }
 }
 
+/**
+ * Forgets the last seen remote modification time so the next sync reads the sheet
+ * unconditionally. Call after switching to a different spreadsheet.
+ */
+export async function clearRemoteReadMarker() {
+  await setSetting(REMOTE_MODIFIED_KEY, "");
+}
+
 export async function syncNow({ interactiveAuth = false, force = false } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
   // while a user action is still syncing.

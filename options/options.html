@@ -75,7 +75,16 @@
         <div class="actions">
           <button id="saveSettings" type="button">Save Settings</button>
           <button id="initSheet" type="button">Create/Initialize Spreadsheet</button>
+          <button id="copyToOwnedSheet" type="button">Copy To Extension-Owned Spreadsheet</button>
         </div>
+        <p class="note">
+          Copying creates a new spreadsheet owned by this extension, moves every row
+          into it, and switches to it. The current spreadsheet is left untouched as a
+          backup, and its ID is shown afterwards. Only a spreadsheet the extension
+          created can be checked for changes before syncing, which lets an unchanged
+          sheet be skipped instead of downloaded. Note that the new spreadsheet has a
+          different URL.
+        </p>
       </section>
     </main>
     <script type="module" src="options.js"></script>
