@@ -9,6 +9,7 @@ import {
   bindMinuteRollover,
   durationSeconds,
   formatElapsed,
+  fromLocalInputValue,
   localDateKey,
   localTime,
   startOfLocalDay as startOfDay,
@@ -284,30 +285,35 @@ function getEntryById(id) {
   return renderedEntries.find((entry) => entry.id === id);
 }
 
+/**
+ * Places the popup beside its entry, kept inside the viewport.
+ *
+ * Measures the popup rather than assuming a size, so the caller must make it
+ * visible first. Measuring it while hidden reports zero height, which used to fall
+ * back to a guess and left the bottom of a low entry's popup off-screen with its
+ * buttons unreachable.
+ */
 function positionPopupForEntry(entryId) {
   const block = document.querySelector(`[data-entry-id="${entryId}"]`);
   if (!block) return;
+
   const popup = $(".edit-popup");
   const blockRect = block.getBoundingClientRect();
-  const popupWidth = 380;
-  const popupHeight = popup.offsetHeight || 400;
+  const popupRect = popup.getBoundingClientRect();
+  const popupWidth = popupRect.width || 380;
+  const popupHeight = popupRect.height || 400;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const pad = 12;
+
   let left = blockRect.right + pad;
-  let top = blockRect.top;
-  if (left + popupWidth > vw - pad) {
-    left = blockRect.left - popupWidth - pad;
-  }
-  if (left < pad) {
-    left = Math.max(pad, (vw - popupWidth) / 2);
-  }
-  if (top + popupHeight > vh - pad) {
-    top = Math.max(pad, vh - popupHeight - pad);
-  }
-  if (top < pad) {
-    top = pad;
-  }
+  if (left + popupWidth > vw - pad) left = blockRect.left - popupWidth - pad;
+  if (left < pad) left = Math.max(pad, (vw - popupWidth) / 2);
+
+  // Anything taller than the viewport sits at the top edge and scrolls inside
+  // itself, which the popup's max-height and overflow allow for.
+  const top = Math.max(pad, Math.min(blockRect.top, vh - popupHeight - pad));
+
   popup.style.left = `${left}px`;
   popup.style.top = `${top}px`;
 }
@@ -704,8 +710,10 @@ function openSelectedEntryEditor() {
     ? "Create a copy at the same date and time"
     : "Stop this entry before duplicating it";
 
-  positionPopupForEntry(entry.id);
+  // Unhidden first so the popup can be measured; positioning it while hidden
+  // reports no height.
   $("#calendarEditOverlay").hidden = false;
+  positionPopupForEntry(entry.id);
   $("#calendarEditProject").focus();
 }
 
