@@ -46,7 +46,7 @@ The repository includes a GitHub Actions release workflow for personal distribut
 - Pushing a version tag signs and publishes that version automatically.
 - Firefox installations using the first signed build receive later versions automatically.
 
-The GitHub Pages files are publicly fetchable because Firefox's updater cannot authenticate to a private download. They do not contain the Google OAuth client ID, client secret, access token, refresh token, spreadsheet ID, or time entries. OAuth credentials are entered once in Options and stored only in each Firefox profile.
+The GitHub Pages files are publicly fetchable because Firefox's updater cannot authenticate to a private download. They do not contain the Google OAuth client ID, client secret, access token, refresh token, spreadsheet ID, or time entries. OAuth client credentials are entered once in Options and stored in Firefox synchronized extension storage; OAuth tokens stay in each local Firefox profile.
 
 ### One-time setup
 
@@ -105,7 +105,7 @@ The extension requests two scopes: `spreadsheets`, and `drive.file` for per-file
 
 When you click **Sign In**, the extension shows a Google device code and opens Google's device authorization page. Leave the options page open while Google authorizes the device. This path is the same in Chromium and Firefox, avoids extension redirect URI mismatch issues, and stores a refresh token locally so the extension can refresh access tokens after the usual one-hour access token expires.
 
-The device-flow credentials and tokens are stored in the local Firefox profile. They are not included in published XPI files or synchronized by the extension.
+The device-flow client ID and client secret are stored with Firefox Sync so they can be restored on another desktop Firefox device signed into the same Mozilla account with Add-ons sync enabled. Access and refresh tokens remain in the local Firefox profile and are never synchronized, so each device still requires its own Google sign-in. None of these values are included in published XPI files.
 
 ### Long-Lived Sign-In With Device Flow
 

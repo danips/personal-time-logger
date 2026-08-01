@@ -1,7 +1,7 @@
 import { getSetting, setSetting } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
-import { getConfig } from "../src/config-loader.js";
+import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
 import { spreadsheetUrl } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -52,8 +52,7 @@ async function saveGoogleCredentials() {
   const clientId = $("#googleClientId").value.trim();
   const clientSecret = $("#googleClientSecret").value.trim();
 
-  await setSetting("google_oauth_client_id", clientId);
-  await setSetting("google_oauth_client_secret", clientSecret);
+  await setOAuthClientCredentials(clientId, clientSecret);
 
   if (
     clientId !== previousConfig.GOOGLE_CLIENT_ID
@@ -62,7 +61,7 @@ async function saveGoogleCredentials() {
     await signOut();
   }
 
-  setStatus("Google credentials saved on this device");
+  setStatus("Google credentials saved to Firefox Sync");
   await refresh();
 }
 

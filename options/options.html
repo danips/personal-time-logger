@@ -23,12 +23,16 @@
           OAuth client secret
           <input id="googleClientSecret" type="password" autocomplete="off" spellcheck="false">
         </label>
-        <p class="note">Stored only in this Firefox profile. Each device needs its own one-time setup.</p>
         <p class="note">
-          Credentials and tokens are kept unencrypted in extension storage, which is
-          all a browser extension can offer. Anyone able to read this Firefox profile
-          can read them. Use Sign Out to remove tokens, and revoke access in your
-          Google Account to invalidate them. See PRIVACY.md for details.
+          The client ID and client secret are saved with Firefox Sync and can be
+          restored on desktop devices signed into the same Mozilla account with
+          Add-ons sync enabled. Each device still needs its own Google sign-in.
+        </p>
+        <p class="note">
+          Credentials and tokens are unencrypted in each Firefox profile. OAuth
+          access and refresh tokens stay on this device and are never put in Firefox
+          Sync. Use Sign Out to remove tokens, and revoke access in your Google
+          Account to invalidate them. See PRIVACY.md for details.
         </p>
         <dl>
           <div>

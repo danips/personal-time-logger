@@ -60,6 +60,18 @@ export const platform = {
     return apiCall(rawApi.action.setIcon, rawApi.action, details);
   },
 
+  async getSyncedStorage(keys) {
+    if (!rawApi.storage || !rawApi.storage.sync) return {};
+    return apiCall(rawApi.storage.sync.get, rawApi.storage.sync, keys);
+  },
+
+  async setSyncedStorage(values) {
+    if (!rawApi.storage || !rawApi.storage.sync) {
+      throw new Error("Synchronized extension storage is unavailable");
+    }
+    return apiCall(rawApi.storage.sync.set, rawApi.storage.sync, values);
+  },
+
   scheduleAlarm(name, periodInMinutes) {
     if (!rawApi.alarms || !rawApi.alarms.create) return false;
     rawApi.alarms.create(name, { periodInMinutes, delayInMinutes: periodInMinutes });
