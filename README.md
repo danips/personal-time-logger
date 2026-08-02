@@ -86,7 +86,7 @@ git push origin v0.1.2
 
 Firefox periodically checks the deployed `updates.json` and installs a higher signed version. In `about:addons`, **Check for Updates** can trigger an immediate check.
 
-The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. `./xpi_gen.sh` can create an unsigned review archive locally, but normal Firefox installations still require the Mozilla-signed XPI.
+The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. `./scripts/xpi_gen.sh` can create an unsigned review archive locally, but normal Firefox installations still require the Mozilla-signed XPI.
 
 ## Google Cloud OAuth Setup
 
@@ -285,7 +285,6 @@ manifest.json
 package.json
 README.md
 PRIVACY.md
-xpi_gen.sh
 background/
 calendar/
 icons/

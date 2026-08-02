@@ -5,5 +5,4 @@ node_modules/
 web-ext-artifacts/
 *.xpi
 /.project
-tmp/
 .vscode/
