@@ -6,3 +6,5 @@ web-ext-artifacts/
 *.xpi
 /.project
 .vscode/
+.idea/
+.DS_Store

@@ -85,7 +85,12 @@ function renderHeader(dailyTotals = []) {
 
   const corner = document.createElement("div");
   corner.className = "corner-header";
-  corner.textContent = "Time";
+  const cornerLabel = document.createElement("span");
+  cornerLabel.textContent = "Time";
+  const weekTotal = document.createElement("em");
+  weekTotal.textContent = formatTotalHours(dailyTotals.reduce((sum, seconds) => sum + (Number(seconds) || 0), 0));
+  weekTotal.title = "Total logged for the displayed week";
+  corner.append(cornerLabel, weekTotal);
   header.append(corner);
 
   for (let index = 0; index < DAY_COUNT; index += 1) {
@@ -767,6 +772,22 @@ async function clearSelection() {
   setStatus("Ready");
 }
 
+/**
+ * Dismisses the selection when the pointer goes down anywhere outside the
+ * selected entry and its popup.
+ *
+ * Bound to pointerdown rather than click because dragging the popup releases the
+ * pointer over the grid, and the resulting click is dispatched on the common
+ * ancestor of press and release (the page body). On click that would read as an
+ * outside click and close the popup mid-drag.
+ */
+function handleOutsidePointerDown(event) {
+  if (!selectedEntryId || event.button !== 0) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target && target.closest(".entry-block, .edit-overlay")) return;
+  clearSelection().catch((error) => setStatus(formatError(error)));
+}
+
 async function changeWeek(nextStart) {
   closeEditor();
   setResizeUndo(null);
@@ -801,6 +822,7 @@ function bindEvents() {
     const parsed = weekStartFromInput(event.target.value);
     if (parsed) await changeWeek(parsed);
   });
+  document.addEventListener("pointerdown", handleOutsidePointerDown);
   window.addEventListener("resize", syncScrollbarGutter);
 }
 
@@ -820,6 +842,7 @@ async function init() {
 window.addEventListener("pagehide", () => {
   if (refreshTimer) clearInterval(refreshTimer);
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
+  document.removeEventListener("pointerdown", handleOutsidePointerDown);
   window.removeEventListener("resize", syncScrollbarGutter);
 });
 

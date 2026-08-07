@@ -278,11 +278,14 @@ textarea {
   border-right: 0;
 }
 
+.corner-header span,
+.corner-header em,
 .day-heading strong,
 .day-heading em {
   display: block;
 }
 
+.corner-header em,
 .day-heading em {
   margin-top: 2px;
   color: var(--muted);
@@ -290,6 +293,13 @@ textarea {
   font-style: normal;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+/* The time column is narrower than a day column, so the week total is sized down
+   to keep HH:MM:SS on one line. */
+.corner-header em {
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .day-heading.today {
