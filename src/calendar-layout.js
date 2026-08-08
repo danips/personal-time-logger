@@ -152,7 +152,11 @@ export function buildSegments(entries, weekStart) {
           ? effectiveSeconds * actualDurationSeconds(visibleStart, visibleEnd) / displaySeconds
           : 0,
         startMinute: minutesSinceStartOfDay(visibleStart),
-        endMinute: minutesSinceStartOfDay(visibleEnd),
+        // minutesSinceStartOfDay rolls midnight back to zero. Keep a segment
+        // ending at the day boundary at the bottom of the calendar instead.
+        endMinute: visibleEnd.getTime() === dayEnd.getTime()
+          ? MINUTES_PER_DAY
+          : minutesSinceStartOfDay(visibleEnd),
         startsEntry: visibleStart.getTime() === entryStart.getTime(),
         endsEntry: visibleEnd.getTime() === displayEnd.getTime()
       });

@@ -57,6 +57,8 @@ describe("buildSegments", () => {
     assert.equal(segments[1].length, 1);
     assert.equal(segments[0][0].startsEntry, true);
     assert.equal(segments[0][0].endsEntry, false);
+    assert.equal(segments[0][0].startMinute, 23 * 60);
+    assert.equal(segments[0][0].endMinute, 24 * 60);
     assert.equal(segments[1][0].startsEntry, false);
     assert.equal(segments[1][0].endsEntry, true);
 
