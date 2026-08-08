@@ -175,6 +175,16 @@ export async function releaseLock(key, holder) {
   });
 }
 
+export async function renewLock(key, holder) {
+  return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
+    const record = await requestToPromise(objectStore.get(key));
+    const lock = record ? record.value : null;
+    if (!lock || lock.holder !== holder) return false;
+    await requestToPromise(objectStore.put({ key, value: { ...lock, acquired_at: Date.now() } }));
+    return true;
+  });
+}
+
 export async function deleteEntry(id) {
   await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.delete(id)));
 }

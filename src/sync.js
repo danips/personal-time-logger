@@ -1,4 +1,4 @@
-import { claimLock, deleteEntry, getAllEntries, getEntry, mutateEntries, mutateSettings, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
+import { claimLock, deleteEntry, getAllEntries, getEntry, mutateEntries, mutateSettings, putEntry, putEntries, releaseLock, renewLock, setSetting, getSetting } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -366,6 +366,15 @@ async function runSyncCycle({ interactiveAuth, force }) {
     throw codedError("SYNC_BUSY", "another sync is already running");
   }
 
+  let leaseLost = false;
+  const leaseTimer = setInterval(() => {
+    renewLock(SYNC_LOCK_KEY, CONTEXT_ID).then((renewed) => {
+      if (!renewed) leaseLost = true;
+    }).catch(() => {
+      leaseLost = true;
+    });
+  }, Math.floor(SYNC_LOCK_TTL_MS / 3));
+
   try {
     const local = localState(await getAllEntries());
     // A timer left running overnight stays running. Only genuinely competing
@@ -411,6 +420,8 @@ async function runSyncCycle({ interactiveAuth, force }) {
       snapshot = await readRemoteSnapshot({ interactiveAuth });
     }
 
+    if (leaseLost) throw codedError("SYNC_BUSY", "sync lease was lost; retrying from a fresh snapshot is required");
+
     const forcedResolutionIds = await verifiedLocalResolutionIds(local, snapshot.entries);
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, {
       interactiveAuth,
@@ -451,6 +462,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     await recordBackoff(error);
     throw error;
   } finally {
+    clearInterval(leaseTimer);
     await releaseLock(SYNC_LOCK_KEY, CONTEXT_ID);
   }
 }

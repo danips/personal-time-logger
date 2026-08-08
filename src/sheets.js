@@ -21,6 +21,7 @@ const APP_MARKER_VALUE = "personal-time-logger";
 // Validating a candidate costs one read each, so a Drive full of app-created
 // files cannot turn setup into a long serial crawl.
 const MAX_CANDIDATES = 5;
+const API_TIMEOUT_MS = 30_000;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -68,14 +69,25 @@ function resetSheetCache() {
 async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl = API_BASE } = {}) {
   if (!platform.isOnline()) throw codedError("OFFLINE", "Network is offline");
   const token = await getAccessToken({ interactive: interactiveAuth });
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google API request timed out");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const text = await response.text();
   const data = text ? (() => {
