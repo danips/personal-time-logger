@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { parse } from "acorn";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,46 +14,99 @@ function jsFiles(directory) {
     .map((name) => `${directory}/${name}`);
 }
 
-/** Drops import statements, whose own text would otherwise look like usage. */
-function withoutImports(text) {
-  return text.replace(/import\s[\s\S]*?from\s*["'][^"']*["'];/g, " ");
+function parseModule(file) {
+  return parse(readFileSync(join(root, file), "utf8"), {
+    ecmaVersion: "latest",
+    sourceType: "module"
+  });
 }
 
-/** Strips comments and strings, so a name mentioned in prose is not read as code. */
-function codeOnly(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
-    .replace(/`(?:\\[\s\S]|[^`\\])*`/g, " ")
-    .replace(/'(?:\\.|[^'\\])*'/g, " ")
-    .replace(/"(?:\\.|[^"\\])*"/g, " ");
-}
-
-function importedNames(text) {
-  const names = new Set();
-  for (const [, block] of text.matchAll(/import \{([^}]*)\} from/g)) {
-    for (const part of block.split(",")) {
-      const name = part.trim();
-      if (name) names.add(name.split(" as ").pop().trim());
+function walk(node, visit, parent = null, key = "") {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) walk(item, visit, parent, key);
+    return;
+  }
+  if (typeof node.type !== "string") return;
+  visit(node, parent, key);
+  for (const [childKey, child] of Object.entries(node)) {
+    if (childKey === "type") continue;
+    if (Array.isArray(child)) {
+      for (const item of child) walk(item, visit, node, childKey);
+    } else {
+      walk(child, visit, node, childKey);
     }
   }
-  for (const [, name] of text.matchAll(/import (\w+) from/g)) names.add(name);
+}
+
+function addPatternNames(pattern, names) {
+  if (!pattern) return;
+  if (pattern.type === "Identifier") {
+    names.add(pattern.name);
+  } else if (pattern.type === "AssignmentPattern") {
+    addPatternNames(pattern.left, names);
+  } else if (pattern.type === "RestElement") {
+    addPatternNames(pattern.argument, names);
+  } else if (pattern.type === "ArrayPattern") {
+    for (const item of pattern.elements) addPatternNames(item, names);
+  } else if (pattern.type === "ObjectPattern") {
+    for (const property of pattern.properties) addPatternNames(property.value, names);
+  }
+}
+
+function declaredNames(program) {
+  const names = new Set();
+  walk(program, (node) => {
+    if (node.type === "ImportDeclaration") {
+      for (const specifier of node.specifiers) names.add(specifier.local.name);
+    } else if (node.type === "VariableDeclarator") {
+      addPatternNames(node.id, names);
+    } else if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression" || node.type === "ArrowFunctionExpression") {
+      if (node.id) names.add(node.id.name);
+      for (const parameter of node.params) addPatternNames(parameter, names);
+    } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
+      if (node.id) names.add(node.id.name);
+    } else if (node.type === "CatchClause") {
+      addPatternNames(node.param, names);
+    }
+  });
   return names;
 }
 
-const sourceFiles = MODULE_DIRECTORIES.flatMap(jsFiles);
+function exportedNames(program) {
+  const names = new Set();
+  for (const statement of program.body) {
+    if (statement.type !== "ExportNamedDeclaration") continue;
+    if (statement.declaration?.type === "VariableDeclaration") {
+      for (const declaration of statement.declaration.declarations) addPatternNames(declaration.id, names);
+    } else if (statement.declaration?.id) {
+      names.add(statement.declaration.id.name);
+    }
+    for (const specifier of statement.specifiers) names.add(specifier.exported.name);
+  }
+  return names;
+}
 
-// Every name exported anywhere in src/, and where it comes from.
+function isIdentifierReference(node, parent, key) {
+  if (node.type !== "Identifier") return false;
+  if (parent?.type === "MemberExpression" && key === "property" && !parent.computed) return false;
+  if (parent?.type === "Property" && key === "key" && !parent.computed) return false;
+  if ((parent?.type === "MethodDefinition" || parent?.type === "PropertyDefinition") && key === "key" && !parent.computed) return false;
+  if (parent?.type === "ImportSpecifier" && key === "imported") return false;
+  if (parent?.type === "LabeledStatement" || parent?.type === "BreakStatement" || parent?.type === "ContinueStatement") return false;
+  if (parent?.type === "ExportSpecifier" && key === "exported") return false;
+  return true;
+}
+
+const sourceFiles = MODULE_DIRECTORIES.flatMap(jsFiles);
+const programs = new Map(sourceFiles.map((file) => [file, parseModule(file)]));
 const exportedBy = new Map();
 for (const file of sourceFiles.filter((file) => file.startsWith("src/"))) {
-  const text = readFileSync(join(root, file), "utf8");
-  for (const [, name] of text.matchAll(/export (?:async function|function|const|let|class) (\w+)/g)) {
-    exportedBy.set(name, file);
-  }
+  for (const name of exportedNames(programs.get(file))) exportedBy.set(name, file);
 }
 
 describe("module imports", () => {
-  it("finds shared exports to check against", () => {
+  it("parses every extension module and finds shared exports", () => {
     assert.ok(exportedBy.size > 30, `expected many shared exports, found ${exportedBy.size}`);
   });
 
@@ -61,17 +115,15 @@ describe("module imports", () => {
   // importing it, so submitting threw before anything was written.
   for (const file of sourceFiles) {
     it(`${file} imports every shared name it uses`, () => {
-      const text = readFileSync(join(root, file), "utf8");
-      const code = codeOnly(withoutImports(text));
-      const imported = importedNames(text);
-      const declared = new Set([...code.matchAll(/(?:function|const|let|var|class)\s+(\w+)/g)].map((m) => m[1]));
-
-      const missing = [...new Set([...code.matchAll(/\b(\w+)\b/g)].map((m) => m[1]))]
-        .filter((name) => exportedBy.has(name) && exportedBy.get(name) !== file)
-        .filter((name) => !imported.has(name) && !declared.has(name))
-        .sort();
-
-      assert.deepEqual(missing, [], `${file} uses ${missing.join(", ")} without importing`);
+      const program = programs.get(file);
+      const declared = declaredNames(program);
+      const missing = new Set();
+      walk(program, (node, parent, key) => {
+        if (!isIdentifierReference(node, parent, key)) return;
+        if (exportedBy.get(node.name) === file || declared.has(node.name)) return;
+        if (exportedBy.has(node.name)) missing.add(node.name);
+      });
+      assert.deepEqual([...missing].sort(), [], `${file} uses ${[...missing].join(", ")} without importing`);
     });
   }
 });

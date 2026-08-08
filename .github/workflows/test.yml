@@ -20,7 +20,8 @@ jobs:
         with:
           node-version: 24
 
-      # No install step: the extension has no dependencies and the tests use only
-      # the Node standard library.
+      - name: Install pinned development tooling
+        run: npm ci
+
       - name: Run unit tests
         run: npm test

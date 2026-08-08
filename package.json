@@ -5,5 +5,8 @@
   "description": "Local-first time tracking with Google Sheets sync. Packaging and tests only; the extension itself has no dependencies.",
   "scripts": {
     "test": "node --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "acorn": "8.15.0"
   }
 }
