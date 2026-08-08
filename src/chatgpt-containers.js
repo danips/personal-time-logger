@@ -1,4 +1,4 @@
-import { getSetting, removeSetting, setSetting } from "./db.js";
+import { getSetting, mutateSetting, mutateSettings, removeSetting, setSetting } from "./db.js";
 import { extractUsageIdentity, normalizeBridgeResult, OFFICIAL_USAGE_URL, UsageError } from "./codex-usage.js";
 import { platform } from "./platform.js";
 
@@ -15,11 +15,38 @@ export const REFRESH_COOLDOWN_MS = 60_000;
 const inFlightRefreshes = new Map();
 
 function dependencies(overrides = {}) {
+  const get = overrides.getSetting || getSetting;
+  const set = overrides.setSetting || setSetting;
+  const remove = overrides.removeSetting || removeSetting;
+  const localMutateSetting = async (key, mutator) => {
+    const next = mutator(await get(key));
+    if (next === undefined) await remove(key);
+    else await set(key, next);
+    return next;
+  };
   return {
     platform: overrides.platform || platform,
-    getSetting: overrides.getSetting || getSetting,
-    setSetting: overrides.setSetting || setSetting,
-    removeSetting: overrides.removeSetting || removeSetting,
+    getSetting: get,
+    setSetting: set,
+    removeSetting: remove,
+    mutateSetting: overrides.mutateSetting || (overrides.getSetting || overrides.setSetting || overrides.removeSetting
+      ? localMutateSetting
+      : mutateSetting),
+    mutateSettings: overrides.mutateSettings || (overrides.getSetting || overrides.setSetting || overrides.removeSetting
+      ? async (keys, mutator) => {
+        const values = new Map();
+        for (const key of keys) {
+          const value = await get(key);
+          if (value !== undefined) values.set(key, value);
+        }
+        const result = mutator(values);
+        for (const key of keys) {
+          if (values.has(key)) await set(key, values.get(key));
+          else await remove(key);
+        }
+        return result;
+      }
+      : mutateSettings),
     now: overrides.now || (() => Date.now()),
     crypto: overrides.crypto || globalThis.crypto
   };
@@ -59,9 +86,18 @@ async function readAccounts(deps) {
   return Array.isArray(value) ? value : [];
 }
 
-async function writeAccounts(deps, accounts) {
-  await deps.setSetting(CHATGPT_ACCOUNTS_KEY, accounts);
-  return accounts;
+async function mutateAccounts(deps, mutator) {
+  let result;
+  await deps.mutateSetting(CHATGPT_ACCOUNTS_KEY, (value) => {
+    const accounts = Array.isArray(value) ? value : [];
+    const outcome = mutator(accounts);
+    if (!outcome || !Array.isArray(outcome.accounts)) {
+      throw new TypeError("Account mutators must return an accounts array");
+    }
+    result = outcome.result;
+    return outcome.accounts;
+  });
+  return result;
 }
 
 function withoutTransientIdentity(account) {
@@ -77,13 +113,12 @@ function findAccount(accounts, predicate) {
 
 async function ensureProfileSalt(deps) {
   ensureCrypto(deps.crypto);
-  const existing = await deps.getSetting(CHATGPT_PROFILE_SALT_KEY, "");
-  if (typeof existing === "string" && existing) return existing;
-  const bytes = new Uint8Array(32);
-  deps.crypto.getRandomValues(bytes);
-  const salt = base64Url(bytes);
-  await deps.setSetting(CHATGPT_PROFILE_SALT_KEY, salt);
-  return salt;
+  return deps.mutateSetting(CHATGPT_PROFILE_SALT_KEY, (existing) => {
+    if (typeof existing === "string" && existing) return existing;
+    const bytes = new Uint8Array(32);
+    deps.crypto.getRandomValues(bytes);
+    return base64Url(bytes);
+  });
 }
 
 async function fingerprintAccount(identity, salt, cryptoApi) {
@@ -122,29 +157,35 @@ async function saveVerifiedAccount(deps, account, rawBody) {
     collectedAt: new Date(deps.now()).toISOString()
   });
   const identity = extractUsageIdentity(rawBody);
-  const accounts = await readAccounts(deps);
   let fingerprint = account.fingerprint || "";
   if (identity) {
     const salt = await ensureProfileSalt(deps);
     fingerprint = await fingerprintAccount(identity, salt, deps.crypto);
-    const duplicate = accounts.find((candidate) => candidate.id !== account.id && candidate.fingerprint === fingerprint);
-    if (duplicate) throw usageError("duplicate_account", "This ChatGPT account is already connected");
   }
 
-  const saved = withoutTransientIdentity({
-    ...account,
-    pending_setup: false,
-    fingerprint,
-    email: normalized.account.email,
-    plan_type: normalized.account.plan_type,
-    snapshot: normalized,
-    last_success_at: normalized.collected_at,
-    last_refresh_at: deps.now(),
-    last_error: null
+  return mutateAccounts(deps, (accounts) => {
+    const current = findAccount(accounts, (candidate) => candidate.id === account.id);
+    if (!current) throw usageError("account_not_found", "ChatGPT account was disconnected while it was being verified");
+    if (fingerprint) {
+      const duplicate = accounts.find((candidate) => candidate.id !== account.id && candidate.fingerprint === fingerprint);
+      if (duplicate) throw usageError("duplicate_account", "This ChatGPT account is already connected");
+    }
+    const saved = withoutTransientIdentity({
+      ...current,
+      pending_setup: false,
+      fingerprint,
+      email: normalized.account.email,
+      plan_type: normalized.account.plan_type,
+      snapshot: normalized,
+      last_success_at: normalized.collected_at,
+      last_refresh_at: deps.now(),
+      last_error: null
+    });
+    return {
+      accounts: accounts.map((candidate) => candidate.id === account.id ? saved : candidate),
+      result: saved
+    };
   });
-  const next = accounts.map((candidate) => candidate.id === account.id ? saved : candidate);
-  await writeAccounts(deps, next);
-  return saved;
 }
 
 export async function getChatGptAccounts(overrides = {}) {
@@ -160,7 +201,6 @@ export async function createAccountContainer(label, overrides = {}) {
   const normalizedLabel = normalizeLabel(label);
   const identity = await deps.platform.createContextualIdentity(`Worklog ChatGPT - ${normalizedLabel}`);
   if (!identity || !identity.cookieStoreId) throw usageError("containers_unavailable", "Firefox did not create a container");
-  const accounts = await readAccounts(deps);
   const account = {
     id: accountId(deps.crypto),
     label: normalizedLabel,
@@ -174,7 +214,7 @@ export async function createAccountContainer(label, overrides = {}) {
     last_refresh_at: 0,
     last_error: null
   };
-  await writeAccounts(deps, [...accounts, account]);
+  await mutateAccounts(deps, (accounts) => ({ accounts: [...accounts, account], result: account }));
   await deps.platform.createTab({ url: CHATGPT_USAGE_PAGE_URL, cookieStoreId: identity.cookieStoreId, active: true });
   return account;
 }
@@ -218,19 +258,27 @@ async function refreshAccountInternal(account, deps) {
       }
       refreshedFingerprint = fingerprint;
     }
-    const accounts = await readAccounts(deps);
-    const saved = withoutTransientIdentity({
-      ...account,
-      fingerprint: refreshedFingerprint,
-      email: normalized.account.email,
-      plan_type: normalized.account.plan_type,
-      snapshot: normalized,
-      last_success_at: normalized.collected_at,
-      last_refresh_at: deps.now(),
-      last_error: null
+    return mutateAccounts(deps, (accounts) => {
+      const current = findAccount(accounts, (candidate) => candidate.id === account.id);
+      if (!current) throw usageError("account_not_found", "ChatGPT account was disconnected while it was refreshing");
+      if (current.fingerprint && refreshedFingerprint && current.fingerprint !== refreshedFingerprint) {
+        throw usageError("account_mismatch", "The connected Firefox container is signed in to a different ChatGPT account");
+      }
+      const saved = withoutTransientIdentity({
+        ...current,
+        fingerprint: refreshedFingerprint,
+        email: normalized.account.email,
+        plan_type: normalized.account.plan_type,
+        snapshot: normalized,
+        last_success_at: normalized.collected_at,
+        last_refresh_at: deps.now(),
+        last_error: null
+      });
+      return {
+        accounts: accounts.map((candidate) => candidate.id === account.id ? saved : candidate),
+        result: saved
+      };
     });
-    await writeAccounts(deps, accounts.map((candidate) => candidate.id === account.id ? saved : candidate));
-    return saved;
   } finally {
     if (tabInfo.temporary) await deps.platform.removeTab(tabInfo.tab.id);
   }
@@ -249,24 +297,30 @@ export async function refreshAccount(account, overrides = {}) {
   }
   const request = (async () => {
     const attemptedAt = deps.now();
-    const accounts = await readAccounts(deps);
-    const attemptedAccount = accounts.find((candidate) => candidate.id === account.id) || account;
-    await writeAccounts(deps, accounts.map((candidate) => candidate.id === account.id
-      ? { ...candidate, last_attempt_at: attemptedAt }
-      : candidate));
-    return refreshAccountInternal({ ...attemptedAccount, last_attempt_at: attemptedAt }, deps);
+    const attemptedAccount = await mutateAccounts(deps, (accounts) => {
+      const current = findAccount(accounts, (candidate) => candidate.id === account.id);
+      if (!current) throw usageError("account_not_found", "ChatGPT account is unavailable");
+      const attempted = { ...current, last_attempt_at: attemptedAt };
+      return {
+        accounts: accounts.map((candidate) => candidate.id === account.id ? attempted : candidate),
+        result: attempted
+      };
+    });
+    return refreshAccountInternal(attemptedAccount, deps);
   })()
     .catch(async (error) => {
-      const accounts = await readAccounts(deps);
       const safeError = error instanceof UsageError ? error : usageError("service_error", "ChatGPT usage refresh failed");
       const failure = {
         code: safeError.code,
         occurred_at: new Date(deps.now()).toISOString(),
         retry_after_seconds: Number.isFinite(safeError.retry_after_seconds) ? safeError.retry_after_seconds : null
       };
-      await writeAccounts(deps, accounts.map((candidate) => candidate.id === account.id
-        ? { ...candidate, last_error: failure }
-        : candidate));
+      await mutateAccounts(deps, (accounts) => ({
+        accounts: accounts.map((candidate) => candidate.id === account.id
+          ? { ...candidate, last_error: failure }
+          : candidate),
+        result: null
+      }));
       throw safeError;
     })
     .finally(() => inFlightRefreshes.delete(account.id));
@@ -291,14 +345,23 @@ export async function refreshAllAccounts(accounts, overrides = {}) {
 
 export async function disconnectAccount(accountIdToRemove, overrides = {}) {
   const deps = dependencies(overrides);
-  const accounts = await readAccounts(deps);
-  await writeAccounts(deps, accounts.filter((account) => account.id !== accountIdToRemove));
+  await mutateAccounts(deps, (accounts) => ({
+    accounts: accounts.filter((account) => account.id !== accountIdToRemove),
+    result: null
+  }));
 }
 
 export async function clearChatGptUsageData(overrides = {}) {
   const deps = dependencies(overrides);
-  await deps.removeSetting(CHATGPT_ACCOUNTS_KEY);
-  await deps.removeSetting(CHATGPT_PROFILE_SALT_KEY);
-  await deps.removeSetting(CHATGPT_CACHE_VERSION_KEY);
-  await deps.removeSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY);
+  await deps.mutateSettings([
+    CHATGPT_ACCOUNTS_KEY,
+    CHATGPT_PROFILE_SALT_KEY,
+    CHATGPT_CACHE_VERSION_KEY,
+    CHATGPT_SESSION_TOKEN_CONSENT_KEY
+  ], (settings) => {
+    settings.delete(CHATGPT_ACCOUNTS_KEY);
+    settings.delete(CHATGPT_PROFILE_SALT_KEY);
+    settings.delete(CHATGPT_CACHE_VERSION_KEY);
+    settings.delete(CHATGPT_SESSION_TOKEN_CONSENT_KEY);
+  });
 }
