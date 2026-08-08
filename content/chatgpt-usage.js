@@ -23,6 +23,41 @@ function resultError(status, errorCode, response = null) {
   };
 }
 
+async function readBoundedJson(response) {
+  const declaredLength = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) throw new Error("response_too_large");
+  if (!response.body || typeof response.body.getReader !== "function") {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error("response_too_large");
+    return JSON.parse(text);
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error("response_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader["releaseLock"]();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
 async function readUsageIsolated() {
   if (location.origin !== "https://chatgpt.com") return resultError(403, "access_denied");
 
@@ -41,12 +76,8 @@ async function readUsageIsolated() {
     if (response.status === 429) return resultError(response.status, "temporarily_rate_limited", response);
     if (!response.ok) return resultError(response.status, "service_error", response);
 
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
-      return resultError(response.status, "schema_changed", response);
-    }
     try {
-      return { ok: true, status: response.status, body: JSON.parse(text) };
+      return { ok: true, status: response.status, body: await readBoundedJson(response), transport: "isolated" };
     } catch {
       return resultError(response.status, "schema_changed", response);
     }

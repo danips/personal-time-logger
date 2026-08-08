@@ -27,11 +27,37 @@
   }
 
   async function readJson(response) {
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
-      throw new Error("response_too_large");
+    const declaredLength = Number(response.headers.get("Content-Length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) throw new Error("response_too_large");
+    if (!response.body || typeof response.body.getReader !== "function") {
+      const text = await response.text();
+      if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error("response_too_large");
+      return JSON.parse(text);
     }
-    return JSON.parse(text);
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_RESPONSE_BYTES) {
+          await reader.cancel();
+          throw new Error("response_too_large");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader["releaseLock"]();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
   }
 
   function decodeJwtPayload(token) {

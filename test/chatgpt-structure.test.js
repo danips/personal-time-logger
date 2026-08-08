@@ -52,6 +52,16 @@ describe("ChatGPT usage security boundaries", () => {
     assert.doesNotMatch(pageBridge, /storage\.|browser\.|chrome\.|console\.|localStorage|sessionStorage|document\.cookie/);
   });
 
+  it("caps streamed usage payloads before retaining their full body", () => {
+    const isolated = readFileSync(join(root, "content/chatgpt-usage.js"), "utf8");
+    const pageBridge = readFileSync(join(root, "content/chatgpt-usage-page.js"), "utf8");
+    for (const source of [isolated, pageBridge]) {
+      assert.match(source, /response\.body\.getReader\(\)/);
+      assert.match(source, /total > MAX_RESPONSE_BYTES/);
+      assert.match(source, /reader\.cancel\(\)/);
+    }
+  });
+
   it("renders popup usage from local snapshots without another ChatGPT request", () => {
     assert.match(popup, /getChatGptAccounts/);
     assert.match(popup, /Next allowance refresh/);
