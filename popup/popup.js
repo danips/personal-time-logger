@@ -59,6 +59,8 @@ const $mergeEdit = $("#mergeEdit");
 const $newTimerToggle = $("#newTimerToggle");
 const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
+const $newTimerSection = $("#newTimerSection");
+const $newTimerDivider = $("#newTimerDivider");
 
 let renderedActiveId;
 
@@ -379,15 +381,18 @@ function updateElapsed() {
   $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
   $stopButton.classList.toggle("hidden", !latest);
   $activePanel.classList.toggle("is-running", hasActive);
-  $activePanel.tabIndex = latest ? 0 : -1;
-  $activePanel.setAttribute("role", latest ? "button" : "region");
-  $activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "No active timer");
+  $activePanel.tabIndex = 0;
+  $activePanel.setAttribute("role", "button");
+  $activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "Start a new timer");
   $activeDot.classList.toggle("hidden", !latest);
   if (latest) $activeDot.style.setProperty("--project-color", projectColor(latest));
+  if (hasActive) setNewTimerOpen(false);
   setActiveIcon(hasActive);
 }
 
 function setNewTimerOpen(open) {
+  $newTimerSection.classList.toggle("hidden", !open);
+  $newTimerDivider.classList.toggle("hidden", !open);
   $newTimerToggle.setAttribute("aria-expanded", open ? "true" : "false");
   $newTimerPanel.classList.toggle("hidden", !open);
   $newTimerIcon.textContent = open ? "-" : "+";
@@ -562,7 +567,11 @@ async function showEdit(id) {
 function editActiveTimer(event) {
   if (event && event.target.closest("#stopButton")) return;
   const latest = activeEntries[0];
-  if (!latest) return;
+  if (!latest) {
+    setNewTimerOpen(true);
+    $("#project").focus();
+    return;
+  }
   showEdit(latest.id);
 }
 
