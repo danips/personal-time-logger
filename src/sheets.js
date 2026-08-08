@@ -51,6 +51,10 @@ function rowsAsText(rows) {
   return (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
 }
 
+export function rowFingerprint(row) {
+  return rowsAsText([row])[0].slice(0, SHEET_HEADERS.length).join("\u0000");
+}
+
 function decodeRemoteRow(row, rowIndex) {
   const values = Object.fromEntries(SHEET_HEADERS.map((header, index) => [header, row[index] || ""]));
   const validDate = (value) => Boolean(value) && Number.isFinite(new Date(value).getTime());
@@ -543,10 +547,17 @@ export function rowsToEntries(rows) {
     entries.push(decoded.entry);
     rowMap.set(decoded.entry.id, record.rowIndex);
     if (record.rowIndexes.length > 1) {
+      const rows = record.rowIndexes.map((rowIndex) => ({
+        id: record.entry.id,
+        rowIndex,
+        expectedFingerprint: rowFingerprint(cells[rowIndex - 1])
+      }));
       duplicates.push({
         id: record.entry.id,
         entry: decoded.entry,
         keepRowIndex: record.rowIndex,
+        keepRow: rows.find((row) => row.rowIndex === record.rowIndex),
+        extraRows: rows.filter((row) => row.rowIndex !== record.rowIndex),
         extraRowIndexes: record.rowIndexes.filter((rowIndex) => rowIndex !== record.rowIndex)
       });
     }
@@ -561,20 +572,43 @@ function appendedRowIndex(data) {
   return match ? Number(match[1]) : 0;
 }
 
-async function verifyRemoteRowIds(spreadsheetId, rows, { interactiveAuth = false } = {}) {
-  const expected = rows.filter((row) => row && row.id && row.rowIndex > 1);
-  if (!expected.length) return;
-  const query = expected.map((row) => `ranges=${encodeRange(`${SHEET_NAME}!A${row.rowIndex}:A${row.rowIndex}`)}`)
-    .concat("fields=valueRanges(range,values)")
-    .join("&");
-  const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
-  const values = data.valueRanges || [];
-  for (let index = 0; index < expected.length; index += 1) {
-    const actual = values[index]?.values?.[0]?.[0] == null ? "" : String(values[index].values[0][0]);
-    if (actual !== expected[index].id) {
-      throw codedError("REMOTE_ROW_STALE", "A spreadsheet row changed before it could be updated. Sync will retry from a fresh snapshot.");
+function remoteRowPreconditions(rows) {
+  const requested = [...new Map(rows.map((row) => [row?.rowIndex, row])).values()]
+    .sort((first, second) => first.rowIndex - second.rowIndex);
+  for (const row of requested) {
+    if (!row || !Number.isInteger(row.rowIndex) || row.rowIndex <= 1
+      || !row.id || typeof row.expectedFingerprint !== "string" || !row.expectedFingerprint) {
+      throw codedError("REMOTE_ROW_PRECONDITION_REQUIRED", "Remote mutations require a row index, id, and full row fingerprint from a fresh snapshot.");
     }
   }
+  return requested;
+}
+
+async function readRowsForMutation(spreadsheetId, { interactiveAuth = false } = {}) {
+  const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(FULL_RANGE)}?valueRenderOption=UNFORMATTED_VALUE`, {}, { interactiveAuth });
+  const rows = rowsAsText(data.values);
+  if (!headersMatch(rows[0] || [])) {
+    throw codedError("REMOTE_ROW_STALE", "The spreadsheet header changed before the mutation could be applied.");
+  }
+  return rows;
+}
+
+function verifyRemoteRows(rows, expected) {
+  for (const row of expected) {
+    const actual = rows[row.rowIndex - 1] || [];
+    if (String(actual[0] || "") !== row.id || rowFingerprint(actual) !== row.expectedFingerprint) {
+      throw codedError("REMOTE_ROW_STALE", "A spreadsheet row changed before it could be updated. Refresh reconciliation and try again.");
+    }
+  }
+}
+
+function fingerprintCounts(rows) {
+  const counts = new Map();
+  for (const row of rows.slice(1)) {
+    const fingerprint = rowFingerprint(row);
+    counts.set(fingerprint, (counts.get(fingerprint) || 0) + 1);
+  }
+  return counts;
 }
 
 /**
@@ -628,17 +662,14 @@ async function getSheetId({ interactiveAuth = false } = {}) {
  * Deletes rows in a single batchUpdate. Rows are removed highest-first because
  * each deleteDimension shifts everything below it up.
  */
-export async function deleteRemoteRows(rowIndexes, { interactiveAuth = false } = {}) {
-  const requested = rowIndexes.map((row) => typeof row === "number" ? { rowIndex: row, id: "" } : row);
-  const rows = [...new Map(requested
-    .filter((row) => row && row.rowIndex > 1)
-    .map((row) => [row.rowIndex, row])).values()]
-    .sort((a, b) => b.rowIndex - a.rowIndex);
+export async function deleteRemoteRows(preconditions, { interactiveAuth = false } = {}) {
+  const rows = remoteRowPreconditions(preconditions).sort((first, second) => second.rowIndex - first.rowIndex);
   if (!rows.length) return;
 
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-  await verifyRemoteRowIds(spreadsheetId, rows, { interactiveAuth });
+  const before = await readRowsForMutation(spreadsheetId, { interactiveAuth });
+  verifyRemoteRows(before, rows);
   const sheetId = await getSheetId({ interactiveAuth });
 
   await apiFetch(`/${spreadsheetId}:batchUpdate`, {
@@ -651,6 +682,17 @@ export async function deleteRemoteRows(rowIndexes, { interactiveAuth = false } =
       }))
     })
   }, { interactiveAuth });
+
+  const after = await readRowsForMutation(spreadsheetId, { interactiveAuth });
+  const beforeCounts = fingerprintCounts(before);
+  const afterCounts = fingerprintCounts(after);
+  for (const row of rows) {
+    const expectedCount = (beforeCounts.get(row.expectedFingerprint) || 0)
+      - rows.filter((candidate) => candidate.expectedFingerprint === row.expectedFingerprint).length;
+    if ((afterCounts.get(row.expectedFingerprint) || 0) !== expectedCount) {
+      throw codedError("REMOTE_ROW_STALE", "The spreadsheet changed while duplicate rows were being deleted. Refresh reconciliation and verify the result.");
+    }
+  }
 }
 
 /**
@@ -661,7 +703,13 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
   if (!updates.length) return;
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
-  await verifyRemoteRowIds(spreadsheetId, updates.map(({ rowIndex, entry }) => ({ rowIndex, id: entry.id })), { interactiveAuth });
+  const rows = remoteRowPreconditions(updates.map(({ rowIndex, entry, expectedFingerprint }) => ({
+    rowIndex,
+    id: entry.id,
+    expectedFingerprint
+  })));
+  const before = await readRowsForMutation(spreadsheetId, { interactiveAuth });
+  verifyRemoteRows(before, rows);
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
@@ -673,4 +721,11 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
       }))
     })
   }, { interactiveAuth });
+
+  const after = await readRowsForMutation(spreadsheetId, { interactiveAuth });
+  verifyRemoteRows(after, updates.map(({ rowIndex, entry }) => ({
+    rowIndex,
+    id: entry.id,
+    expectedFingerprint: rowFingerprint(entryToRow(entry))
+  })));
 }

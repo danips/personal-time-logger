@@ -137,7 +137,7 @@ function renderDuplicates(items) {
       actionRow([
         {
           label: `Delete ${item.extraRowIndexes.length} extra row${item.extraRowIndexes.length === 1 ? "" : "s"}`,
-          action: () => confirmDeleteRows(item.extraRowIndexes),
+          action: () => confirmDeleteRows(item.extraRows),
           danger: true
         }
       ])
@@ -150,14 +150,15 @@ function renderDuplicates(items) {
  * Row deletion cannot be undone from here and touches the spreadsheet directly,
  * so it always asks first.
  */
-async function confirmDeleteRows(rowIndexes) {
+async function confirmDeleteRows(rows) {
+  const rowIndexes = rows.map((row) => row.rowIndex);
   const confirmed = confirm(
     `Delete ${rowIndexes.length} duplicate row${rowIndexes.length === 1 ? "" : "s"} from the spreadsheet?\n\n`
     + `Row${rowIndexes.length === 1 ? "" : "s"} ${rowIndexes.join(", ")} will be removed. `
     + "The most recently updated copy of each entry is kept. This cannot be undone from here."
   );
   if (!confirmed) return;
-  await deleteDuplicateRows(rowIndexes, { interactiveAuth: false });
+  await deleteDuplicateRows(rows, { interactiveAuth: false });
 }
 
 function renderLocalOnly(items) {
@@ -292,7 +293,7 @@ function bindEvents() {
   $("#rescanButton").addEventListener("click", () => scan());
   $("#syncButton").addEventListener("click", runSync);
   $("#deleteAllDuplicates").addEventListener("click", () => resolve(() => confirmDeleteRows(
-    report.duplicates.flatMap((item) => item.extraRowIndexes)
+    report.duplicates.flatMap((item) => item.extraRows)
   )));
   $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different, (item) => (
     keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })

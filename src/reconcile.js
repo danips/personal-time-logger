@@ -108,10 +108,10 @@ export async function loadReconciliation({ interactiveAuth = false } = {}) {
  * duplicate row has no local counterpart to mark and therefore nothing for sync
  * to carry.
  */
-export async function deleteDuplicateRows(extraRowIndexes, { interactiveAuth = false } = {}) {
-  if (!extraRowIndexes.length) return 0;
-  await deleteRemoteRows(extraRowIndexes, { interactiveAuth });
-  return extraRowIndexes.length;
+export async function deleteDuplicateRows(extraRows, { interactiveAuth = false } = {}) {
+  if (!extraRows.length) return 0;
+  await deleteRemoteRows(extraRows, { interactiveAuth });
+  return extraRows.length;
 }
 
 /**

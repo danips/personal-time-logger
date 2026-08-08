@@ -41,7 +41,11 @@ export is intentionally not produced by this command.
 Every remote update or deletion is fenced by the complete serialized row
 fingerprint observed in the snapshot. The extension re-reads and compares that
 row immediately before mutation, then verifies the intended result afterward.
-A mismatch is a reconciliation conflict; the extension never overwrites it.
+A mismatch is a reconciliation conflict; the extension never intentionally
+overwrites a row that fails preflight. Google Sheets has no conditional
+row-update API, so a manual edit can still land in the narrow gap after
+preflight and before the write; postflight detects observable interleavings,
+but cannot provide a database-style atomic compare-and-swap guarantee.
 
 ### D2 — Cross-device conflict ordering
 

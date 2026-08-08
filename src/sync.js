@@ -113,7 +113,7 @@ async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth,
     const remote = remoteById.get(entry.id);
     if (remote && isRemoteNewer(remote, entry) && !forcedIds.has(entry.id)) continue;
     if (rowMap.has(entry.id)) {
-      updates.push({ rowIndex: rowMap.get(entry.id), entry });
+      updates.push({ rowIndex: rowMap.get(entry.id), entry, expectedFingerprint: entryFingerprint(remote) });
     } else {
       appends.push(entry);
     }
@@ -233,11 +233,15 @@ function isExpiredDeletion(deletedAt) {
 export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicates = [], { interactiveAuth = false } = {}) {
   const expiredRows = remoteEntries
     .filter((entry) => isExpiredDeletion(entry.deleted_at) && rowMap.has(entry.id))
-    .map((entry) => ({ id: entry.id, rowIndex: rowMap.get(entry.id) }));
+    .map((entry) => ({
+      id: entry.id,
+      rowIndex: rowMap.get(entry.id),
+      expectedFingerprint: entryFingerprint(entry)
+    }));
   for (const duplicate of duplicates) {
     if (!duplicate?.entry || !isExpiredDeletion(duplicate.entry.deleted_at)) continue;
-    for (const rowIndex of duplicate.extraRowIndexes || []) {
-      expiredRows.push({ id: duplicate.id, rowIndex });
+    for (const row of duplicate.extraRows || []) {
+      expiredRows.push(row);
     }
   }
 
