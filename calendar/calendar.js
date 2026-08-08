@@ -57,6 +57,7 @@ let editingEntryRevision = null;
 let editingMultiplyValue = "";
 let unsubscribeEntryEvents = null;
 let lastResizeUndo = null;
+let renderGeneration = 0;
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -242,9 +243,12 @@ function syncScrollbarGutter() {
 
 async function render() {
   if (dragState) return;
+  const generation = ++renderGeneration;
   const weekEnd = addDays(weekStart, DAY_COUNT);
-  renderedEntries = (await getVisibleEntries()).filter((entry) => intersectsWeek(entry, weekStart, weekEnd));
-  const segmentsByDay = buildSegments(renderedEntries, weekStart);
+  const nextEntries = (await getVisibleEntries()).filter((entry) => intersectsWeek(entry, weekStart, weekEnd));
+  if (generation !== renderGeneration) return;
+  renderedEntries = nextEntries;
+  const segmentsByDay = buildSegments(nextEntries, weekStart);
   $("#weekPicker").value = isoWeekValue(weekStart);
   renderHeader(dailyTotalsFromSegments(segmentsByDay));
   renderCalendar(segmentsByDay);

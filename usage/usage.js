@@ -29,6 +29,7 @@ const $clearData = $("#clearData");
 const $sessionTokenConsent = $("#sessionTokenConsent");
 const retryTimers = new Map();
 let sessionTokenConsent = false;
+let renderGeneration = 0;
 
 function messageFor(error) {
   if (error?.code === "sign_in_required" && error.http_status === 401) {
@@ -310,15 +311,20 @@ function accountCard(account, enabled) {
 }
 
 async function render({ autoRefresh = true } = {}) {
-  const permitted = await platform.hasOptionalHostPermission(CHATGPT_HOST_PERMISSION);
-  sessionTokenConsent = Boolean(await getSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, false));
+  const generation = ++renderGeneration;
+  const [permitted, storedConsent, accounts] = await Promise.all([
+    platform.hasOptionalHostPermission(CHATGPT_HOST_PERMISSION),
+    getSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, false),
+    getChatGptAccounts()
+  ]);
+  if (generation !== renderGeneration) return;
+  sessionTokenConsent = Boolean(storedConsent);
   const enabled = permitted && sessionTokenConsent;
   $sessionTokenConsent.checked = sessionTokenConsent;
   $grant.hidden = permitted;
   $grant.disabled = !sessionTokenConsent;
   $setup.hidden = !enabled;
   $clearData.disabled = false;
-  const accounts = await getChatGptAccounts();
   $refreshAll.hidden = !enabled || !accounts.length;
   $accounts.replaceChildren();
   if (!accounts.length) {
