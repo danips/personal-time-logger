@@ -48,4 +48,31 @@ describe("sync pull CAS", () => {
     assert.equal(pulled, 0);
     assert.deepEqual(await db.getEntry("entry-1"), localEdit);
   });
+
+  it("does not import over an id created locally after the snapshot", async () => {
+    const remote = entry({ id: "appeared-locally", task: "Remote value", updated_at: "2026-08-08T11:00:00.000Z" });
+    const local = {
+      entries: [],
+      all() { return this.entries; },
+      apply(changed) { this.entries.push(...changed); }
+    };
+    const created = entry({ id: "appeared-locally", task: "Local create", revision: 1, dirty: true });
+    await db.putEntry(created);
+
+    assert.equal(await pullRemoteEntries(local, [remote]), 0);
+    assert.deepEqual(await db.getEntry(created.id), created);
+  });
+
+  it("imports a genuinely remote-only entry", async () => {
+    const remote = entry({ id: "remote-only", task: "Remote value", updated_at: "2026-08-08T11:00:00.000Z" });
+    const local = {
+      entries: [],
+      all() { return this.entries; },
+      apply(changed) { this.entries.push(...changed); }
+    };
+
+    assert.equal(await pullRemoteEntries(local, [remote]), 1);
+    assert.equal((await db.getEntry(remote.id)).task, "Remote value");
+    assert.equal((await db.getEntry(remote.id)).dirty, false);
+  });
 });
