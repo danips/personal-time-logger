@@ -5,26 +5,43 @@ function lastError() {
   return rawApi && rawApi.runtime ? rawApi.runtime.lastError : null;
 }
 
-function callbackApi(fn, context, ...args) {
+function callbackOrPromiseApi(fn, context, ...args) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (callback) => (value) => {
+      if (settled) return;
+      settled = true;
+      callback(value);
+    };
     try {
-      fn.call(context, ...args, (result) => {
+      const result = fn.call(context, ...args, (callbackResult) => {
         const error = lastError();
         if (error) {
-          reject(new Error(error.message || String(error)));
+          settle(reject)(new Error(error.message || String(error)));
           return;
         }
-        resolve(result);
+        settle(resolve)(callbackResult);
       });
+      if (result && typeof result.then === "function") result.then(settle(resolve), settle(reject));
     } catch (error) {
-      reject(error);
+      settle(reject)(error);
     }
   });
 }
 
 function apiCall(fn, context, ...args) {
   if (usesPromiseApi) return fn.call(context, ...args);
-  return callbackApi(fn, context, ...args);
+  return callbackOrPromiseApi(fn, context, ...args);
+}
+
+async function getTab(tabId) {
+  if (!rawApi.tabs || !rawApi.tabs.get) return null;
+  try {
+    return await apiCall(rawApi.tabs.get, rawApi.tabs, tabId);
+  } catch (error) {
+    if (/tab.*not found|no tab/i.test(error.message || "")) return null;
+    throw error;
+  }
 }
 
 export const platform = {
@@ -35,7 +52,7 @@ export const platform = {
   async openOptionsPage() {
     if (!rawApi.runtime.openOptionsPage) return;
     if (usesPromiseApi) return rawApi.runtime.openOptionsPage();
-    return callbackApi(rawApi.runtime.openOptionsPage, rawApi.runtime);
+    return callbackOrPromiseApi(rawApi.runtime.openOptionsPage, rawApi.runtime);
   },
 
   async openExtensionPage(path) {
@@ -44,11 +61,10 @@ export const platform = {
       try {
         return await apiCall(rawApi.tabs.create, rawApi.tabs, { url });
       } catch (error) {
-        window.open(url, "_blank");
-        return;
+        throw new Error(`Could not open extension page: ${error.message || error}`);
       }
     }
-    window.open(url, "_blank");
+    throw new Error("Browser tabs API is unavailable");
   },
 
   async hasOptionalHostPermission(origin) {
@@ -93,13 +109,7 @@ export const platform = {
   },
 
   async getTab(tabId) {
-    if (!rawApi.tabs || !rawApi.tabs.get) return null;
-    try {
-      return await apiCall(rawApi.tabs.get, rawApi.tabs, tabId);
-    } catch (error) {
-      if (/tab.*not found|no tab/i.test(error.message || "")) return null;
-      throw error;
-    }
+    return getTab(tabId);
   },
 
   async getCurrentTab(windowId) {
@@ -109,7 +119,7 @@ export const platform = {
       windowId
     });
     if (!tabs.length) return null;
-    return this.getTab(tabs[0].id);
+    return getTab(tabs[0].id);
   },
 
   async getCurrentWindow() {
@@ -141,35 +151,43 @@ export const platform = {
   },
 
   async waitForTabComplete(tabId, timeoutMs = 20_000) {
-    const current = await this.getTab(tabId);
-    if (!current) throw new Error("ChatGPT tab is no longer available");
-    if (current.status === "complete") return current;
     if (!rawApi.tabs || !rawApi.tabs.onUpdated) {
       throw new Error("Browser tab update events are unavailable");
     }
 
     return new Promise((resolve, reject) => {
       let timer;
+      let settled = false;
       const cleanup = () => {
         rawApi.tabs.onUpdated.removeListener(onUpdated);
         clearTimeout(timer);
       };
+      const settle = (callback) => (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback(value);
+      };
       const onUpdated = async (updatedTabId, changeInfo) => {
         if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-        const tab = await this.getTab(tabId);
-        if (!tab) {
-          cleanup();
-          reject(new Error("ChatGPT tab is no longer available"));
-          return;
+        try {
+          const tab = await getTab(tabId);
+          if (!tab) throw new Error("ChatGPT tab is no longer available");
+          settle(resolve)(tab);
+        } catch (error) {
+          settle(reject)(error);
         }
-        cleanup();
-        resolve(tab);
       };
       timer = setTimeout(() => {
-        cleanup();
-        reject(new Error("Timed out waiting for the ChatGPT tab to load"));
+        settle(reject)(new Error("Timed out waiting for the ChatGPT tab to load"));
       }, timeoutMs);
       rawApi.tabs.onUpdated.addListener(onUpdated);
+      // Register first, then re-check so completion in the gap cannot strand
+      // the wait until timeout.
+      getTab(tabId).then((current) => {
+        if (!current) throw new Error("ChatGPT tab is no longer available");
+        if (current.status === "complete") settle(resolve)(current);
+      }).catch(settle(reject));
     });
   },
 
@@ -184,7 +202,7 @@ export const platform = {
   },
 
   isOnline() {
-    return navigator.onLine !== false;
+    return globalThis.navigator?.onLine !== false;
   },
 
   async setIcon(details) {
