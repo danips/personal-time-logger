@@ -1,4 +1,4 @@
-import { getActiveEntries, getDirtyEntries, getVisibleEntries } from "../src/db.js";
+import { getActiveEntries, getDirtyEntries, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { getChatGptAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, createEntry, hasMultiplier, mergeEntries, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
@@ -34,6 +34,16 @@ let ticker = null;
 let unsubscribeEntryEvents = null;
 const expandedRecentGroups = new Set();
 let recentWeekCount = 1;
+const WINDOW_SIZE_SETTING = "window_resize_presets";
+const DEFAULT_WINDOW_SIZES = [
+  { width: 2000, height: 1000, isWindow: false },
+  { width: 1500, height: 1000, isWindow: false },
+  { width: 1300, height: 900, isWindow: false }
+];
+const MAX_WINDOW_SIZE = 10000;
+let windowSizes = DEFAULT_WINDOW_SIZES.map((size) => ({ ...size }));
+let editingWindowSizes = [];
+let windowSizeEditorOpen = false;
 
 const $activePanel = $(".active-panel");
 const $activeDot = $("#activeProjectDot");
@@ -64,6 +74,9 @@ const $newTimerSection = $("#newTimerSection");
 const $newTimerDivider = $("#newTimerDivider");
 const $chatGptUsageSummary = $("#chatGptUsageSummary");
 const $chatGptUsageValues = $("#chatGptUsageValues");
+const $windowSizePresets = $("#windowSizePresets");
+const $windowSizeEditor = $("#windowSizeEditor");
+const $windowSizeFields = $("#windowSizeFields");
 
 let renderedActiveId;
 
@@ -505,6 +518,158 @@ function compactPercent(value) {
   return `${Math.round(numeric * 10) / 10}%`;
 }
 
+function normalizeWindowSizes(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((size) => ({
+      width: Number(size?.width),
+      height: Number(size?.height),
+      isWindow: size?.isWindow === true || size?.isWindow === "true"
+    }))
+    .filter((size) => Number.isInteger(size.width) && Number.isInteger(size.height)
+      && size.width > 0 && size.width <= MAX_WINDOW_SIZE
+      && size.height > 0 && size.height <= MAX_WINDOW_SIZE);
+}
+
+function windowSizeLabel(size) {
+  return `${size.width}×${size.height}`;
+}
+
+function renderWindowSizePresets() {
+  const buttons = windowSizes.map((size) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "window-size-button";
+    button.dataset.windowWidth = String(size.width);
+    button.dataset.windowHeight = String(size.height);
+    button.dataset.windowMode = String(size.isWindow);
+    button.textContent = windowSizeLabel(size);
+    button.title = `${size.isWindow ? "Resize browser window" : "Resize viewport"} to ${size.width} by ${size.height}`;
+    return button;
+  });
+  if (!buttons.length) {
+    const empty = document.createElement("span");
+    empty.className = "window-size-empty";
+    empty.textContent = "No sizes";
+    buttons.push(empty);
+  }
+  $windowSizePresets.replaceChildren(...buttons);
+}
+
+function renderWindowSizeEditor() {
+  const rows = editingWindowSizes.map((size, index) => {
+    const row = document.createElement("div");
+    row.className = "window-size-field-row";
+
+    const width = document.createElement("input");
+    width.className = "window-size-input window-size-width";
+    width.type = "number";
+    width.min = "1";
+    width.max = String(MAX_WINDOW_SIZE);
+    width.step = "1";
+    width.value = String(size.width);
+    width.placeholder = "Width";
+    width.setAttribute("aria-label", `Width for window size ${index + 1}`);
+
+    const separator = document.createElement("span");
+    separator.className = "window-size-separator";
+    separator.textContent = "×";
+
+    const height = document.createElement("input");
+    height.className = "window-size-input window-size-height";
+    height.type = "number";
+    height.min = "1";
+    height.max = String(MAX_WINDOW_SIZE);
+    height.step = "1";
+    height.value = String(size.height);
+    height.placeholder = "Height";
+    height.setAttribute("aria-label", `Height for window size ${index + 1}`);
+
+    const modeLabel = document.createElement("label");
+    modeLabel.className = "window-size-mode";
+    modeLabel.title = "Checked: width and height apply to the outer browser window. Unchecked: they apply to the page viewport.";
+    const mode = document.createElement("input");
+    mode.className = "window-size-window-mode";
+    mode.type = "checkbox";
+    mode.checked = Boolean(size.isWindow);
+    mode.setAttribute("aria-label", `Use outer window size for preset ${index + 1}`);
+    const modeText = document.createElement("span");
+    modeText.textContent = "Window";
+    modeLabel.append(mode, modeText);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "window-size-remove danger";
+    remove.dataset.removeWindowSize = String(index);
+    remove.title = "Remove window size";
+    remove.setAttribute("aria-label", `Remove window size ${index + 1}`);
+    remove.textContent = "×";
+
+    row.append(width, separator, height, modeLabel, remove);
+    return row;
+  });
+  $windowSizeFields.replaceChildren(...rows);
+}
+
+function setWindowSizeEditorOpen(open) {
+  windowSizeEditorOpen = open;
+  if (open) {
+    editingWindowSizes = windowSizes.map((size) => ({ ...size }));
+    renderWindowSizeEditor();
+  }
+  $windowSizeEditor.classList.toggle("hidden", !open);
+}
+
+function readWindowSizeEditor() {
+  return [...$windowSizeFields.querySelectorAll(".window-size-field-row")].map((row) => ({
+    width: Number(row.querySelector(".window-size-width").value),
+    height: Number(row.querySelector(".window-size-height").value),
+    isWindow: row.querySelector(".window-size-window-mode").checked
+  }));
+}
+
+async function resizeBrowserWindow(width, height, isWindow) {
+  try {
+    const target = await platform.getCurrentWindow();
+    if (!target?.id) throw new Error("No browser window is available");
+    let windowWidth = width;
+    let windowHeight = height;
+    if (!isWindow) {
+      const tab = await platform.getCurrentTab(target.id);
+      if (!Number.isFinite(tab?.width) || !Number.isFinite(tab?.height)) {
+        throw new Error("Could not read the current tab viewport size");
+      }
+      // Preserve the current window-to-viewport chrome offset.
+      windowWidth += target.width - tab.width;
+      windowHeight += target.height - tab.height;
+    }
+    await platform.resizeWindow(target.id, windowWidth, windowHeight);
+  } catch (error) {
+    setStatus($syncStatus, "error", formatError(error));
+  }
+}
+
+async function saveWindowSizes() {
+  const sizes = readWindowSizeEditor();
+  const valid = sizes.every((size) => Number.isInteger(size.width) && Number.isInteger(size.height)
+    && size.width > 0 && size.width <= MAX_WINDOW_SIZE
+    && size.height > 0 && size.height <= MAX_WINDOW_SIZE);
+  if (!valid) {
+    setStatus($syncStatus, "error", `Window sizes must be whole numbers from 1 to ${MAX_WINDOW_SIZE}`);
+    return;
+  }
+  windowSizes = sizes;
+  await setSetting(WINDOW_SIZE_SETTING, windowSizes);
+  setWindowSizeEditorOpen(false);
+  renderWindowSizePresets();
+}
+
+async function loadWindowSizes() {
+  const stored = normalizeWindowSizes(await getSetting(WINDOW_SIZE_SETTING, null));
+  if (stored) windowSizes = stored;
+  renderWindowSizePresets();
+}
+
 async function renderChatGptUsageSummary() {
   const summaries = (await getChatGptAccounts())
     .map((account) => ({
@@ -701,6 +866,32 @@ function bindEvents() {
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html"));
   $("#openReconcile").addEventListener("click", () => platform.openExtensionPage("reconcile/reconcile.html"));
   $("#openCodexUsage").addEventListener("click", () => platform.openExtensionPage("usage/usage.html"));
+  $windowSizePresets.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-window-width]");
+    if (!button) return;
+    resizeBrowserWindow(
+      Number(button.dataset.windowWidth),
+      Number(button.dataset.windowHeight),
+      button.dataset.windowMode === "true"
+    );
+  });
+  $("#editWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(!windowSizeEditorOpen));
+  $("#addWindowSize").addEventListener("click", () => {
+    editingWindowSizes = readWindowSizeEditor();
+    editingWindowSizes.push({ width: 1280, height: 720, isWindow: false });
+    renderWindowSizeEditor();
+  });
+  $windowSizeFields.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-window-size]");
+    if (!remove) return;
+    editingWindowSizes = readWindowSizeEditor();
+    editingWindowSizes.splice(Number(remove.dataset.removeWindowSize), 1);
+    renderWindowSizeEditor();
+  });
+  $("#saveWindowSizes").addEventListener("click", () => {
+    saveWindowSizes().catch((error) => setStatus($syncStatus, "error", formatError(error)));
+  });
+  $("#cancelWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(false));
   $chatGptUsageValues.addEventListener("click", (event) => {
     if (event.target.closest(".chatgpt-usage-value")) platform.openExtensionPage("usage/usage.html");
   });
@@ -750,6 +941,7 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  await loadWindowSizes();
   unsubscribeEntryEvents = onEntriesChanged(() => {
     render().catch((error) => {
       setStatus($syncStatus, "error", formatError(error));

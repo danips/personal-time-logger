@@ -102,6 +102,36 @@ export const platform = {
     }
   },
 
+  async getCurrentTab(windowId) {
+    if (!rawApi.tabs || !rawApi.tabs.query) return null;
+    const tabs = await apiCall(rawApi.tabs.query, rawApi.tabs, {
+      active: true,
+      windowId
+    });
+    if (!tabs.length) return null;
+    return this.getTab(tabs[0].id);
+  },
+
+  async getCurrentWindow() {
+    if (!rawApi.windows || !rawApi.windows.getCurrent) return null;
+    return apiCall(rawApi.windows.getCurrent, rawApi.windows);
+  },
+
+  async resizeWindow(windowId, width, height) {
+    if (!rawApi.windows || !rawApi.windows.update) {
+      throw new Error("Browser windows API is unavailable");
+    }
+    if (rawApi.windows.get) {
+      const current = await apiCall(rawApi.windows.get, rawApi.windows, windowId);
+      if (current?.state && current.state !== "normal") {
+        // Browser APIs ignore width/height while a window is maximized or
+        // fullscreen, so restore it before setting its outer dimensions.
+        await apiCall(rawApi.windows.update, rawApi.windows, windowId, { state: "normal" });
+      }
+    }
+    return apiCall(rawApi.windows.update, rawApi.windows, windowId, { width, height });
+  },
+
   async queryChatGptTabs(cookieStoreId) {
     if (!rawApi.tabs || !rawApi.tabs.query) return [];
     return apiCall(rawApi.tabs.query, rawApi.tabs, {

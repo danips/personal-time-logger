@@ -32,6 +32,23 @@
         <span id="chatGptUsageValues" class="chatgpt-usage-values"></span>
       </section>
 
+      <section class="window-size-section" aria-label="Window sizes">
+        <div class="window-size-row">
+          <span class="window-size-label">Window size</span>
+          <div id="windowSizePresets" class="window-size-presets"></div>
+          <button id="editWindowSizes" class="window-size-edit" title="Edit window sizes" aria-label="Edit window sizes" type="button">+</button>
+        </div>
+        <div id="windowSizeEditor" class="window-size-editor hidden">
+          <div id="windowSizeFields" class="window-size-fields"></div>
+          <div class="window-size-editor-actions">
+            <button id="addWindowSize" type="button">Add</button>
+            <span></span>
+            <button id="saveWindowSizes" type="button">Save</button>
+            <button id="cancelWindowSizes" type="button">Cancel</button>
+          </div>
+        </div>
+      </section>
+
       <section class="active-panel" aria-label="No active timer">
         <div class="active-copy">
           <span class="active-label-row">
