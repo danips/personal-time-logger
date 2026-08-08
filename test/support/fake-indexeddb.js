@@ -77,6 +77,8 @@ class FakeTransaction {
     this.hasOperations = false;
     this.started = false;
     this.finished = false;
+    this.operations = [];
+    this.processing = false;
   }
 
   objectStore(name) {
@@ -89,6 +91,21 @@ class FakeTransaction {
     this.hasOperations = true;
     this.pending += 1;
     const request = new FakeRequest();
+    this.operations.push({ operation, request });
+    this.runNextOperation();
+    return request;
+  }
+
+  start() {
+    this.started = true;
+    this.runNextOperation();
+    this.finishWhenIdle();
+  }
+
+  runNextOperation() {
+    if (!this.started || this.finished || this.processing || !this.operations.length) return;
+    this.processing = true;
+    const { operation, request } = this.operations.shift();
     setTimeout(() => {
       try {
         request.succeed(operation());
@@ -99,9 +116,10 @@ class FakeTransaction {
         return;
       }
       this.pending -= 1;
+      this.processing = false;
+      this.runNextOperation();
       this.finishWhenIdle();
     }, 0);
-    return request;
   }
 
   finishWhenIdle() {
@@ -170,8 +188,7 @@ function createIndexedDB() {
       if (this.transactions.some((transaction) => transaction !== next && transaction.started && !transaction.finished)) {
         return;
       }
-      next.started = true;
-      next.finishWhenIdle();
+      next.start();
     }
   };
 

@@ -1,4 +1,4 @@
-import { getSetting, setSetting, getEntry, putEntry } from "./db.js";
+import { getSetting, mutateEntries, mutateEntry, mutateSetting, putEntry } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
 import { durationSeconds, nowIso, uuid } from "./time.js";
 
@@ -20,12 +20,7 @@ export const SHEET_HEADERS = [
 ];
 
 export async function getDeviceId() {
-  let deviceId = await getSetting("device_id");
-  if (!deviceId) {
-    deviceId = uuid();
-    await setSetting("device_id", deviceId);
-  }
-  return deviceId;
+  return mutateSetting("device_id", (deviceId) => deviceId || uuid());
 }
 
 async function getDurationMultiplier() {
@@ -85,7 +80,7 @@ async function selectedMultiplyValue(value) {
   return normalizeMultiplyValue(value);
 }
 
-async function computedDurationSeconds(startAt, endAt, multiply) {
+function computedDurationSeconds(startAt, endAt, multiply) {
   const actual = durationSeconds(startAt, endAt);
   const multiplier = Number(normalizeMultiplyValue(multiply));
   if (!multiplier) return actual;
@@ -143,125 +138,132 @@ export async function createEntry(fields) {
   return entry;
 }
 
-export async function duplicateEntry(id) {
-  const existing = await getEntry(id);
-  if (!existing || existing.deleted_at) throw new Error("Entry not found");
-  if (!existing.end_at) throw new Error("Active entries cannot be duplicated");
-
+export async function duplicateEntry(id, { expectedRevision } = {}) {
   const timestamp = nowIso();
-  const entry = normalizeEntry({
-    ...existing,
-    id: uuid(),
-    created_at: timestamp,
-    updated_at: timestamp,
-    deleted_at: "",
-    device_id: await getDeviceId(),
-    revision: 1,
-    dirty: true,
-    last_sync_at: "",
-    sync_error: ""
+  const deviceId = await getDeviceId();
+  const entry = await mutateEntries([id], expectedRevision, (entries) => {
+    const existing = entries.get(id);
+    if (existing.deleted_at) throw new Error("Entry not found");
+    if (!existing.end_at) throw new Error("Active entries cannot be duplicated");
+
+    const duplicate = normalizeEntry({
+      ...existing,
+      id: uuid(),
+      created_at: timestamp,
+      updated_at: timestamp,
+      deleted_at: "",
+      device_id: deviceId,
+      revision: 1,
+      dirty: true,
+      last_sync_at: "",
+      sync_error: ""
+    });
+    entries.set(duplicate.id, duplicate);
+    return duplicate;
   });
-  await putEntry(entry);
-  notifyEntriesChanged({ action: "duplicate", ids: [entry.id], sourceId: existing.id });
+  notifyEntriesChanged({ action: "duplicate", ids: [entry.id], sourceId: id });
   return entry;
 }
 
-export async function stopEntry(id) {
-  const existing = await getEntry(id);
-  if (!existing) throw new Error("Entry not found");
-  // Idempotent: a second stop (stale UI, double click) must not rewrite end_at.
-  if (existing.end_at) return normalizeEntry(existing);
+export async function stopEntry(id, { expectedRevision } = {}) {
   const timestamp = nowIso();
-  const multiply = await selectedMultiplyValue(existing.multiply);
-  const entry = normalizeEntry({
-    ...existing,
-    end_at: timestamp,
-    duration_seconds: await computedDurationSeconds(existing.start_at, timestamp, multiply),
-    updated_at: timestamp,
-    revision: Number(existing.revision || 0) + 1,
-    dirty: true,
-    sync_error: ""
+  const entry = await mutateEntry(id, expectedRevision, (existing) => {
+    // Idempotent: a second stop (stale UI, double click) must not rewrite end_at.
+    if (existing.end_at) return normalizeEntry(existing);
+    const multiply = normalizeMultiplyValue(existing.multiply);
+    return normalizeEntry({
+      ...existing,
+      end_at: timestamp,
+      duration_seconds: computedDurationSeconds(existing.start_at, timestamp, multiply),
+      updated_at: timestamp,
+      revision: Number(existing.revision || 0) + 1,
+      dirty: true,
+      sync_error: ""
+    });
   });
-  await putEntry(entry);
   notifyEntriesChanged({ action: "stop", ids: [entry.id] });
   return entry;
 }
 
-export async function updateEntry(id, changes) {
-  const existing = await getEntry(id);
-  if (!existing) throw new Error("Entry not found");
+export async function updateEntry(id, changes, { expectedRevision } = {}) {
   const timestamp = nowIso();
-  const nextStart = changes.start_at || existing.start_at;
-  const nextEnd = changes.end_at !== undefined ? changes.end_at : existing.end_at;
-  const nextMultiply = changes.multiply !== undefined
+  const requestedMultiply = changes.multiply !== undefined
     ? await selectedMultiplyValue(changes.multiply)
-    : await selectedMultiplyValue(existing.multiply);
-  const next = normalizeEntry({
-    ...existing,
-    ...changes,
-    multiply: nextMultiply,
-    duration_seconds: nextEnd
-      ? await computedDurationSeconds(nextStart, nextEnd, nextMultiply)
-      : 0,
-    updated_at: timestamp,
-    revision: Number(existing.revision || 0) + 1,
-    dirty: true,
-    sync_error: ""
+    : undefined;
+  const next = await mutateEntry(id, expectedRevision, (existing) => {
+    const nextStart = changes.start_at || existing.start_at;
+    const nextEnd = changes.end_at !== undefined ? changes.end_at : existing.end_at;
+    const nextMultiply = requestedMultiply === undefined
+      ? normalizeMultiplyValue(existing.multiply)
+      : requestedMultiply;
+    return normalizeEntry({
+      ...existing,
+      ...changes,
+      multiply: nextMultiply,
+      duration_seconds: nextEnd
+        ? computedDurationSeconds(nextStart, nextEnd, nextMultiply)
+        : 0,
+      updated_at: timestamp,
+      revision: Number(existing.revision || 0) + 1,
+      dirty: true,
+      sync_error: ""
+    });
   });
-  await putEntry(next);
   notifyEntriesChanged({ action: "update", ids: [next.id] });
   return next;
 }
 
-export async function softDeleteEntry(id) {
-  return updateEntry(id, { deleted_at: nowIso() });
+export async function softDeleteEntry(id, options = {}) {
+  return updateEntry(id, { deleted_at: nowIso() }, options);
 }
 
-export async function mergeEntries(targetId, sourceId) {
-  const targetExisting = await getEntry(targetId);
-  const sourceExisting = await getEntry(sourceId);
-  if (!canMergeEntries(targetExisting, sourceExisting)) {
-    throw new Error("Entries must be completed and have the same project, task, and description");
-  }
-
-  const target = normalizeEntry(targetExisting);
-  const source = normalizeEntry(sourceExisting);
+export async function mergeEntries(targetId, sourceId, { expectedRevisions } = {}) {
   const timestamp = nowIso();
-  const targetStart = new Date(target.start_at);
-  const sourceStart = new Date(source.start_at);
-  const mergedStart = targetStart <= sourceStart ? target.start_at : source.start_at;
-  const actualMs = actualDurationMs(target) + actualDurationMs(source);
-  const mergedEnd = new Date(new Date(mergedStart).getTime() + actualMs).toISOString();
-  const sameMultiply = target.multiply === source.multiply;
+  const result = await mutateEntries([targetId, sourceId], expectedRevisions, (entries) => {
+    const targetExisting = entries.get(targetId);
+    const sourceExisting = entries.get(sourceId);
+    if (!canMergeEntries(targetExisting, sourceExisting)) {
+      throw new Error("Entries must be completed and have the same project, task, and description");
+    }
 
-  const merged = normalizeEntry({
-    ...target,
-    start_at: mergedStart,
-    end_at: mergedEnd,
-    duration_seconds: storedDuration(target) + storedDuration(source),
-    multiply: sameMultiply ? target.multiply : "",
-    status: target.status === "needs_review" || source.status === "needs_review" || !sameMultiply
-      ? "needs_review"
-      : "ok",
-    updated_at: timestamp,
-    revision: Number(target.revision || 0) + 1,
-    dirty: true,
-    sync_error: ""
+    const target = normalizeEntry(targetExisting);
+    const source = normalizeEntry(sourceExisting);
+    const targetStart = new Date(target.start_at);
+    const sourceStart = new Date(source.start_at);
+    const mergedStart = targetStart <= sourceStart ? target.start_at : source.start_at;
+    const actualMs = actualDurationMs(target) + actualDurationMs(source);
+    const mergedEnd = new Date(new Date(mergedStart).getTime() + actualMs).toISOString();
+    const sameMultiply = target.multiply === source.multiply;
+
+    const merged = normalizeEntry({
+      ...target,
+      start_at: mergedStart,
+      end_at: mergedEnd,
+      duration_seconds: storedDuration(target) + storedDuration(source),
+      multiply: sameMultiply ? target.multiply : "",
+      status: target.status === "needs_review" || source.status === "needs_review" || !sameMultiply
+        ? "needs_review"
+        : "ok",
+      updated_at: timestamp,
+      revision: Number(target.revision || 0) + 1,
+      dirty: true,
+      sync_error: ""
+    });
+
+    const deleted = normalizeEntry({
+      ...source,
+      deleted_at: timestamp,
+      updated_at: timestamp,
+      revision: Number(source.revision || 0) + 1,
+      dirty: true,
+      sync_error: ""
+    });
+    entries.set(merged.id, merged);
+    entries.set(deleted.id, deleted);
+    return { merged, deleted };
   });
-
-  const deleted = normalizeEntry({
-    ...source,
-    deleted_at: timestamp,
-    updated_at: timestamp,
-    revision: Number(source.revision || 0) + 1,
-    dirty: true,
-    sync_error: ""
-  });
-
-  await putEntry(merged);
-  await putEntry(deleted);
-  notifyEntriesChanged({ action: "merge", ids: [merged.id, deleted.id] });
-  return { merged, deleted };
+  notifyEntriesChanged({ action: "merge", ids: [result.merged.id, result.deleted.id] });
+  return result;
 }
 
 export function entryToRow(entry) {
