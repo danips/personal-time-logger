@@ -151,6 +151,41 @@ describe("ChatGPT container orchestration", () => {
     assert.equal(result.skip_reason, "cooldown");
   });
 
+  it("joins duplicate refresh requests for the same account", async () => {
+    const { calls, values, overrides } = harness();
+    await createAccountContainer("Account 1", overrides);
+    const account = await verifyAccount("firefox-container-1", overrides);
+    values.set("chatgpt_usage_accounts", [{ ...account, last_refresh_at: 0 }]);
+    let reads = 0;
+    overrides.platform.sendTabMessage = async () => {
+      reads += 1;
+      return { status: 200, body: response() };
+    };
+
+    const [first, second] = await Promise.all([
+      refreshAccount(account, { ...overrides, ignoreCooldown: true }),
+      refreshAccount(account, { ...overrides, ignoreCooldown: true })
+    ]);
+    assert.equal(first.id, second.id);
+    // One verification plus one joined refresh.
+    assert.equal(reads, 1);
+    assert.equal(calls.createdTabs.filter((tab) => tab.active === false).length, 1);
+  });
+
+  it("records a typed error when a connected container was deleted", async () => {
+    const { values, overrides } = harness();
+    await createAccountContainer("Account 1", overrides);
+    const account = await verifyAccount("firefox-container-1", overrides);
+    values.set("chatgpt_usage_accounts", [{ ...account, last_refresh_at: 0 }]);
+    overrides.platform.getContextualIdentity = async () => null;
+
+    await assert.rejects(
+      () => refreshAccount(account, { ...overrides, ignoreCooldown: true }),
+      { code: "container_deleted" }
+    );
+    assert.equal(values.get("chatgpt_usage_accounts")[0].last_error.code, "container_deleted");
+  });
+
   it("rejects connecting the same account twice", async () => {
     const { values, overrides } = harness();
     await createAccountContainer("Account 1", overrides);
