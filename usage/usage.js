@@ -10,10 +10,9 @@ import {
   clearChatGptUsageData
 } from "../src/chatgpt-containers.js";
 import { getSetting, setSetting } from "../src/db.js";
-import { UsageError } from "../src/codex-usage.js";
+import { OFFICIAL_USAGE_URL, UsageError } from "../src/codex-usage.js";
 import { platform } from "../src/platform.js";
 
-const OFFICIAL_USAGE_URL = "https://chatgpt.com/codex/cloud/settings/analytics#usage";
 const AUTO_REFRESH_AFTER_MS = 5 * 60 * 1000;
 const STALE_AFTER_MS = 15 * 60 * 1000;
 const RETRY_DELAY_MS = 2_000;
