@@ -56,10 +56,6 @@ function sameMergeFields(first, second) {
     && first.description === second.description;
 }
 
-function storedDuration(entry) {
-  return Number(entry.duration_seconds) || durationSeconds(entry.start_at, entry.end_at);
-}
-
 function actualDurationMs(entry) {
   return durationSeconds(entry.start_at, entry.end_at) * 1000;
 }
@@ -281,22 +277,20 @@ export async function mergeEntries(targetId, sourceId, { expectedRevisions } = {
 
     const target = normalizeEntry(targetExisting);
     const source = normalizeEntry(sourceExisting);
-    const targetStart = new Date(target.start_at);
-    const sourceStart = new Date(source.start_at);
-    const mergedStart = targetStart <= sourceStart ? target.start_at : source.start_at;
+    // A merge appends the selected source's elapsed work to the selected target.
+    // It intentionally compacts gaps and retains the target's multiplier/status,
+    // so differing historical multipliers never silently change the target.
+    const mergedStart = target.start_at;
     const actualMs = actualDurationMs(target) + actualDurationMs(source);
     const mergedEnd = new Date(new Date(mergedStart).getTime() + actualMs).toISOString();
-    const sameMultiply = target.multiply === source.multiply;
 
     const merged = normalizeEntry({
       ...target,
       start_at: mergedStart,
       end_at: mergedEnd,
-      duration_seconds: storedDuration(target) + storedDuration(source),
-      multiply: sameMultiply ? target.multiply : "",
-      status: target.status === "needs_review" || source.status === "needs_review" || !sameMultiply
-        ? "needs_review"
-        : "ok",
+      duration_seconds: computedDurationSeconds(mergedStart, mergedEnd, target.multiply),
+      multiply: target.multiply,
+      status: target.status,
       updated_at: timestamp,
       revision: Number(target.revision || 0) + 1,
       dirty: true,

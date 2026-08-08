@@ -68,6 +68,35 @@ describe("atomic entry mutations", () => {
     assert.equal((await db.getEntry("merge-source")).deleted_at, deleted.deleted_at);
   });
 
+  it("appends actual time to the selected target and retains its multiplier", async () => {
+    await db.putEntries([
+      fixture({
+        id: "multiplied-target",
+        start_at: "2026-08-08T12:00:00.000Z",
+        end_at: "2026-08-08T13:00:00.000Z",
+        duration_seconds: 7200,
+        multiply: "2",
+        status: "ok"
+      }),
+      fixture({
+        id: "earlier-source",
+        start_at: "2026-08-08T09:00:00.000Z",
+        end_at: "2026-08-08T09:30:00.000Z",
+        duration_seconds: 5400,
+        multiply: "3",
+        status: "needs_review"
+      })
+    ]);
+
+    const { merged } = await entries.mergeEntries("multiplied-target", "earlier-source");
+
+    assert.equal(merged.start_at, "2026-08-08T12:00:00.000Z");
+    assert.equal(merged.end_at, "2026-08-08T13:30:00.000Z");
+    assert.equal(merged.multiply, "2");
+    assert.equal(merged.duration_seconds, 10_800);
+    assert.equal(merged.status, "ok");
+  });
+
   it("rolls back a merge when a later write in its transaction fails", async () => {
     await db.putEntries([
       fixture({ id: "rollback-target", revision: 1 }),
