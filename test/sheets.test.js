@@ -79,4 +79,11 @@ describe("rowsToEntries", () => {
     const { duplicates } = rowsToEntries(sheet([fixture(), fixture({ id: "entry-2" })]));
     assert.deepEqual(duplicates, []);
   });
+
+  it("quarantines malformed rows instead of assigning fresh timestamps", () => {
+    const rows = sheet([fixture({ id: "valid" }), fixture({ id: "broken", updated_at: "not-a-date" })]);
+    const { entries, quarantined } = rowsToEntries(rows);
+    assert.deepEqual(entries.map((entry) => entry.id), ["valid"]);
+    assert.deepEqual(quarantined.map((item) => item.id), ["broken"]);
+  });
 });

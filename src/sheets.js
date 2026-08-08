@@ -50,6 +50,20 @@ function rowsAsText(rows) {
   return (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
 }
 
+function decodeRemoteRow(row, rowIndex) {
+  const values = Object.fromEntries(SHEET_HEADERS.map((header, index) => [header, row[index] || ""]));
+  const validDate = (value) => Boolean(value) && Number.isFinite(new Date(value).getTime());
+  const validOptionalDate = (value) => !value || Number.isFinite(new Date(value).getTime());
+  const revision = Number(values.revision);
+  const duration = Number(values.duration_seconds);
+  if (!values.id || !validDate(values.start_at) || !validDate(values.created_at) || !validDate(values.updated_at)
+    || !validOptionalDate(values.end_at) || !validOptionalDate(values.deleted_at)
+    || !Number.isInteger(revision) || revision < 1 || !Number.isFinite(duration) || duration < 0) {
+    return { entry: null, quarantine: { rowIndex, id: values.id, reason: "invalid_entry", row } };
+  }
+  return { entry: rowToEntry(row), quarantine: null };
+}
+
 // The numeric sheet id is needed to delete rows. It is cached in memory and in
 // settings, so it costs one metadata request per spreadsheet rather than one per
 // extension context.
@@ -486,20 +500,26 @@ export function rowsToEntries(rows) {
   const entries = [];
   const rowMap = new Map();
   const duplicates = [];
+  const quarantined = [];
   for (const record of byId.values()) {
-    entries.push(record.entry);
-    rowMap.set(record.entry.id, record.rowIndex);
+    const decoded = decodeRemoteRow(cells[record.rowIndex - 1], record.rowIndex);
+    if (!decoded.entry) {
+      quarantined.push(decoded.quarantine);
+      continue;
+    }
+    entries.push(decoded.entry);
+    rowMap.set(decoded.entry.id, record.rowIndex);
     if (record.rowIndexes.length > 1) {
       duplicates.push({
         id: record.entry.id,
-        entry: record.entry,
+        entry: decoded.entry,
         keepRowIndex: record.rowIndex,
         extraRowIndexes: record.rowIndexes.filter((rowIndex) => rowIndex !== record.rowIndex)
       });
     }
   }
 
-  return { entries, rowMap, duplicates };
+  return { entries, rowMap, duplicates, quarantined };
 }
 
 function appendedRowIndex(data) {
