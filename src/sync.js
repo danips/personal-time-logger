@@ -101,13 +101,55 @@ function localState(entries) {
   };
 }
 
+function remoteFingerprintSets(snapshot) {
+  const fingerprints = new Map();
+  const add = (id, fingerprint) => {
+    if (!id || !fingerprint) return;
+    if (!fingerprints.has(id)) fingerprints.set(id, new Set());
+    fingerprints.get(id).add(fingerprint);
+  };
+  for (const entry of snapshot.entries) add(entry.id, entryFingerprint(entry));
+  for (const duplicate of snapshot.duplicates || []) {
+    for (const row of [duplicate.keepRow, ...(duplicate.extraRows || [])]) {
+      add(duplicate.id, row?.expectedFingerprint);
+    }
+  }
+  return fingerprints;
+}
+
+async function confirmAmbiguousAppends(entries, { interactiveAuth }) {
+  const snapshot = await readRemoteSnapshot({ interactiveAuth });
+  const remoteFingerprints = remoteFingerprintSets(snapshot);
+  const confirmed = [];
+  const conflicts = [];
+
+  for (const entry of entries) {
+    const observed = remoteFingerprints.get(entry.id);
+    if (observed?.has(entryFingerprint(entry))) {
+      confirmed.push({ id: entry.id, rowIndex: snapshot.rowMap.get(entry.id) || 0 });
+    } else if (observed?.size) {
+      conflicts.push(entry.id);
+    }
+  }
+
+  return { confirmed, conflicts };
+}
+
+async function acknowledgePushedEntries(local, entries, pushedIds) {
+  for (const entry of entries) {
+    const acknowledgement = await markSynced(entry);
+    if (acknowledgement.entry) local.apply([acknowledgement.entry]);
+    if (acknowledgement.applied) pushedIds.add(entry.id);
+  }
+}
+
 /**
  * Writes local changes to the sheet and returns the ids that were pushed, so the
  * pull step can skip them: the snapshot it works from predates these writes.
  * All row rewrites go in one request and all new rows in another, so the cost is
  * two calls regardless of how many entries are pending.
  */
-async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth, forcedIds = new Set() }) {
+export async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth, forcedIds = new Set() }) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const updates = [];
   const appends = [];
@@ -127,17 +169,42 @@ async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth,
   if (!updates.length && !appends.length) return pushedIds;
 
   await updateRemoteEntries(updates, { interactiveAuth });
-  // Rows come back from the API; an unmapped entry is matched by id on the next
-  // read rather than written to a guessed row.
-  for (const { id, rowIndex } of await appendRemoteEntries(appends, { interactiveAuth })) {
-    rowMap.set(id, rowIndex);
+
+  let appendFailure = null;
+  let appendMappings = [];
+  try {
+    appendMappings = await appendRemoteEntries(appends, { interactiveAuth });
+  } catch (error) {
+    appendFailure = error;
   }
 
-  for (const entry of [...updates.map((update) => update.entry), ...appends]) {
-    const acknowledgement = await markSynced(entry);
-    if (acknowledgement.entry) local.apply([acknowledgement.entry]);
-    if (acknowledgement.applied) pushedIds.add(entry.id);
+  const confirmedAppendIds = new Set(appendMappings.map(({ id }) => id));
+  let appendConflicts = [];
+  if (appendFailure || confirmedAppendIds.size < appends.length) {
+    let recovery;
+    try {
+      recovery = await confirmAmbiguousAppends(appends.filter((entry) => !confirmedAppendIds.has(entry.id)), { interactiveAuth });
+    } catch (error) {
+      if (appendFailure) throw appendFailure;
+      throw error;
+    }
+    for (const { id, rowIndex } of recovery.confirmed) {
+      confirmedAppendIds.add(id);
+      if (rowIndex) rowMap.set(id, rowIndex);
+    }
+    appendConflicts = recovery.conflicts;
   }
+
+  for (const { id, rowIndex } of appendMappings) {
+    if (confirmedAppendIds.has(id)) rowMap.set(id, rowIndex);
+  }
+  const confirmedAppends = appends.filter((entry) => confirmedAppendIds.has(entry.id));
+  await acknowledgePushedEntries(local, [...updates.map((update) => update.entry), ...confirmedAppends], pushedIds);
+
+  if (appendConflicts.length) {
+    throw codedError("REMOTE_APPEND_CONFLICT", `Spreadsheet rows conflict with append${appendConflicts.length === 1 ? "" : "s"}: ${appendConflicts.join(", ")}`);
+  }
+  if (appendFailure) throw appendFailure;
 
   return pushedIds;
 }

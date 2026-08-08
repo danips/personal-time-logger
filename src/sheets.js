@@ -566,10 +566,14 @@ export function rowsToEntries(rows) {
   return { entries, rowMap, duplicates, quarantined };
 }
 
-function appendedRowIndex(data) {
+function appendedRowSpan(data) {
   const range = data && data.updates ? data.updates.updatedRange : "";
-  const match = /![A-Z]+(\d+)/.exec(String(range || ""));
-  return match ? Number(match[1]) : 0;
+  const match = /![A-Z]+(\d+)(?::[A-Z]+(\d+))?$/.exec(String(range || ""));
+  if (!match) return null;
+  const firstRow = Number(match[1]);
+  const lastRow = Number(match[2] || match[1]);
+  if (!Number.isInteger(firstRow) || !Number.isInteger(lastRow) || lastRow < firstRow) return null;
+  return { firstRow, rowCount: lastRow - firstRow + 1 };
 }
 
 function remoteRowPreconditions(rows) {
@@ -626,9 +630,12 @@ export async function appendRemoteEntries(entries, { interactiveAuth = false } =
     body: JSON.stringify({ values: entries.map((entry) => entryToRow(entry)) })
   }, { interactiveAuth });
 
-  const firstRow = appendedRowIndex(data);
-  if (!firstRow) return [];
-  return entries.map((entry, index) => ({ id: entry.id, rowIndex: firstRow + index }));
+  const span = appendedRowSpan(data);
+  if (!span) return [];
+  return entries.slice(0, span.rowCount).map((entry, index) => ({
+    id: entry.id,
+    rowIndex: span.firstRow + index
+  }));
 }
 
 async function rememberSheetId(spreadsheetId, sheetId) {

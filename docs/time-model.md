@@ -55,9 +55,10 @@ row order, or device clock value.
 
 ### D3 — Append idempotency
 
-After an ambiguous spreadsheet append result, the extension re-reads by entry
-ID and expected fingerprint before retrying. Only a confirmed matching row can
-be acknowledged as synchronized.
+After an ambiguous spreadsheet append result—including a missing or incomplete
+response range—the extension re-reads by entry ID and expected fingerprint
+before retrying. Only a confirmed matching row can be acknowledged as
+synchronized; a same-ID row with different contents is a conflict.
 
 ### D4 — DST input behavior
 
