@@ -1,4 +1,4 @@
-import { claimLock, deleteEntry, getAllEntries, getEntry, mutateEntries, mutateSettings, putEntry, putEntries, releaseLock, renewLock, setSetting, getSetting } from "./db.js";
+import { claimLock, deleteEntry, getAllEntries, getEntry, mutateEntries, mutateSettings, putEntries, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -46,22 +46,26 @@ function codedError(code, message) {
  * be stale by the time the request returns, so an entry edited mid-flight is
  * left dirty for the next cycle rather than being overwritten.
  */
-async function markSynced(entry) {
-  const current = await getEntry(entry.id);
-  if (current && (current.updated_at !== entry.updated_at
-    || Number(current.revision || 0) !== Number(entry.revision || 0))) {
-    return current;
+export async function markSynced(entry) {
+  try {
+    return await mutateEntries([entry.id], { [entry.id]: Number(entry.revision || 0) }, (entries) => {
+      const current = entries.get(entry.id);
+      if (!current || entryFingerprint(current) !== entryFingerprint(entry)) {
+        return { entry: current || null, applied: false };
+      }
+      const clean = normalizeEntry({
+        ...current,
+        dirty: false,
+        last_sync_at: nowIso(),
+        sync_error: ""
+      });
+      entries.set(entry.id, clean);
+      return { entry: clean, applied: true };
+    });
+  } catch (error) {
+    if (!(error instanceof StorageConflictError)) throw error;
+    return { entry: (await getEntry(entry.id)) || null, applied: false };
   }
-
-  const timestamp = nowIso();
-  const clean = normalizeEntry({
-    ...entry,
-    dirty: false,
-    last_sync_at: timestamp,
-    sync_error: ""
-  });
-  await putEntry(clean);
-  return clean;
 }
 
 async function recordBackoff(error) {
@@ -130,8 +134,9 @@ async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth,
   }
 
   for (const entry of [...updates.map((update) => update.entry), ...appends]) {
-    pushedIds.add(entry.id);
-    local.apply([await markSynced(entry)]);
+    const acknowledgement = await markSynced(entry);
+    if (acknowledgement.entry) local.apply([acknowledgement.entry]);
+    if (acknowledgement.applied) pushedIds.add(entry.id);
   }
 
   return pushedIds;
