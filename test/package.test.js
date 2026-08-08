@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,6 +67,18 @@ async function filesIn(directory) {
   });
 }
 
+async function directoryDigest(directory) {
+  const files = (await filesIn(directory)).sort();
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(file);
+    hash.update("\0");
+    hash.update(await readFile(join(directory, file)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
 describe("Firefox release package", () => {
   it("contains exactly the extension allow-list", async () => {
     const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
@@ -108,6 +121,27 @@ describe("Firefox release package", () => {
     } finally {
       await rm(planted, { force: true });
       await rm(outputDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("prepares identical source for identical release inputs", async () => {
+    const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+    const firstOutput = await mkdtemp(join(artifactsDirectory, ".package-test-"));
+    const secondOutput = await mkdtemp(join(artifactsDirectory, ".package-test-"));
+    const argumentsFor = (outputDirectory) => [
+      "scripts/prepare-firefox-release.mjs",
+      "--base-url", "https://example.invalid/personal-time-logger",
+      "--expected-version", manifest.version,
+      "--output", relative(root, outputDirectory)
+    ];
+
+    try {
+      await execFileAsync(process.execPath, argumentsFor(firstOutput), { cwd: root });
+      await execFileAsync(process.execPath, argumentsFor(secondOutput), { cwd: root });
+      assert.equal(await directoryDigest(firstOutput), await directoryDigest(secondOutput));
+    } finally {
+      await rm(firstOutput, { recursive: true, force: true });
+      await rm(secondOutput, { recursive: true, force: true });
     }
   });
 });
