@@ -131,7 +131,7 @@ describe("ChatGPT usage normalizer", () => {
     const noReset = normalizeUsageResponse(fixture({
       rate_limit: {
         ...fixture().rate_limit,
-        primary_window: { ...fixture().rate_limit.primary_window, reset_at: null }
+        primary_window: { ...fixture().rate_limit.primary_window, reset_at: null, reset_after_seconds: null }
       }
     }));
     assert.equal(noReset.primary_window.reset_at, null);
@@ -139,6 +139,33 @@ describe("ChatGPT usage normalizer", () => {
     const noWindow = normalizeUsageResponse(fixture({ rate_limit: { primary_window: null } }));
     assert.equal(noWindow.primary_window, null);
     assert.deepEqual(noWindow.notices, ["usage_window_unavailable"]);
+  });
+
+  it("derives a reset timestamp from a validated relative reset", () => {
+    const value = normalizeUsageResponse(fixture({
+      rate_limit: {
+        ...fixture().rate_limit,
+        primary_window: { used_percent: 20, reset_after_seconds: 90 }
+      }
+    }), { collectedAt: "2026-08-08T12:00:00.000Z" });
+    assert.equal(value.primary_window.reset_at, "2026-08-08T12:01:30.000Z");
+  });
+
+  it("rejects wrong field types rather than treating them as missing data", () => {
+    assert.throws(
+      () => normalizeUsageResponse(fixture({ rate_limit: "not-an-object" })),
+      { code: "schema_changed" }
+    );
+    assert.throws(
+      () => normalizeUsageResponse(fixture({
+        rate_limit: { ...fixture().rate_limit, primary_window: { used_percent: "nope" } }
+      })),
+      { code: "schema_changed" }
+    );
+    assert.throws(
+      () => extractUsageIdentity(fixture({ user_id: 42 })),
+      { code: "schema_changed" }
+    );
   });
 
   it("preserves access, reached, unlimited, credit, and overage states", () => {
@@ -220,8 +247,14 @@ describe("ChatGPT usage normalizer", () => {
   it("rejects missing required objects and wrong field types", () => {
     assert.throws(() => normalizeUsageResponse({}), { code: "schema_changed" });
     assert.throws(() => normalizeUsageResponse(fixture({ rate_limit: { ...fixture().rate_limit, allowed: "yes" } })), { code: "schema_changed" });
-    assert.equal(normalizeUsageResponse(fixture({ rate_limit: { ...fixture().rate_limit, primary_window: { ...fixture().rate_limit.primary_window, used_percent: 101 } } })).primary_window, null);
-    assert.equal(normalizeUsageResponse(fixture({ rate_limit: { ...fixture().rate_limit, primary_window: { ...fixture().rate_limit.primary_window, reset_at: "tomorrow" } } })).primary_window.reset_at, null);
+    assert.throws(
+      () => normalizeUsageResponse(fixture({ rate_limit: { ...fixture().rate_limit, primary_window: { ...fixture().rate_limit.primary_window, used_percent: 101 } } })),
+      { code: "schema_changed" }
+    );
+    assert.throws(
+      () => normalizeUsageResponse(fixture({ rate_limit: { ...fixture().rate_limit, primary_window: { ...fixture().rate_limit.primary_window, reset_at: "tomorrow" } } })),
+      { code: "schema_changed" }
+    );
   });
 
   it("keeps a secondary window when ChatGPT omits its reset time", () => {

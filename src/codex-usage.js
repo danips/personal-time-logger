@@ -40,8 +40,11 @@ function optionalFiniteNumber(value, field, { minimum = 0, integer = false } = {
   return numericValue;
 }
 
-function resetAtToIso(value) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+function resetAtToIso(value, field) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw schemaError(`${field} has an invalid timestamp`);
+  }
   // ChatGPT has returned reset_at in both Unix seconds and Unix milliseconds.
   // The latter is distinguishable from a plausible seconds timestamp.
   const milliseconds = value >= 100_000_000_000 ? value : value * 1000;
@@ -50,21 +53,22 @@ function resetAtToIso(value) {
   return date.toISOString();
 }
 
-function normalizeWindow(raw, fieldName) {
-  if (!isRecord(raw)) return null;
-  try {
-    const usedPercent = optionalFiniteNumber(raw.used_percent, `${fieldName}.used_percent`, { minimum: 0 });
-    if (usedPercent === null || usedPercent > 100) return null;
-    return {
-      used_percent: usedPercent,
-      remaining_percent: 100 - usedPercent,
-      window_seconds: optionalFiniteNumber(raw.window_seconds ?? raw.limit_window_seconds, `${fieldName}.window_seconds`, { integer: true }),
-      reset_at: resetAtToIso(raw.reset_at)
-    };
-  } catch (error) {
-    if (error instanceof UsageError && error.code === "schema_changed") return null;
-    throw error;
+function normalizeWindow(raw, fieldName, collectedAtMs) {
+  if (raw === undefined || raw === null) return null;
+  if (!isRecord(raw)) throw schemaError(`${fieldName} has an invalid type`);
+  const usedPercent = optionalFiniteNumber(raw.used_percent, `${fieldName}.used_percent`, { minimum: 0 });
+  if (usedPercent === null || usedPercent > 100) throw schemaError(`${fieldName}.used_percent is missing or out of range`);
+  let resetAt = resetAtToIso(raw.reset_at, `${fieldName}.reset_at`);
+  if (!resetAt && raw.reset_after_seconds !== undefined && raw.reset_after_seconds !== null) {
+    const seconds = optionalFiniteNumber(raw.reset_after_seconds, `${fieldName}.reset_after_seconds`, { minimum: 0 });
+    resetAt = new Date(collectedAtMs + seconds * 1000).toISOString();
   }
+  return {
+    used_percent: usedPercent,
+    remaining_percent: 100 - usedPercent,
+    window_seconds: optionalFiniteNumber(raw.window_seconds ?? raw.limit_window_seconds, `${fieldName}.window_seconds`, { integer: true }),
+    reset_at: resetAt
+  };
 }
 
 function normalizeCredits(raw) {
@@ -120,8 +124,13 @@ export function extractUsageIdentity(raw) {
   const rawAccountId = raw.account_id ?? account.account_id;
   // Identity is only a duplicate-detection aid, never required to display a
   // usage response. Some valid account responses omit one of these fields.
-  if (typeof rawUserId !== "string" || typeof rawAccountId !== "string"
-    || !rawUserId || !rawAccountId) return null;
+  if (rawUserId !== undefined && rawUserId !== null && typeof rawUserId !== "string") {
+    throw schemaError("user_id has an invalid type");
+  }
+  if (rawAccountId !== undefined && rawAccountId !== null && typeof rawAccountId !== "string") {
+    throw schemaError("account_id has an invalid type");
+  }
+  if (!rawUserId || !rawAccountId) return null;
   const userId = rawUserId;
   const accountId = rawAccountId;
   return { user_id: userId, account_id: accountId };
@@ -132,18 +141,21 @@ export function normalizeUsageResponse(raw, { label = "ChatGPT account", collect
   if (!("rate_limit" in raw) && !("plan_type" in raw) && !("credits" in raw)) {
     throw schemaError("usage response has no recognized usage fields");
   }
+  if (raw.rate_limit !== undefined && raw.rate_limit !== null && !isRecord(raw.rate_limit)) {
+    throw schemaError("rate_limit has an invalid type");
+  }
+  if (typeof collectedAt !== "string" || Number.isNaN(new Date(collectedAt).getTime())) {
+    throw new TypeError("collectedAt must be an ISO timestamp");
+  }
+  const collectedAtMs = new Date(collectedAt).getTime();
   const rateLimit = isRecord(raw.rate_limit) ? raw.rate_limit : {};
 
-  const primaryWindow = normalizeWindow(rateLimit.primary_window, "rate_limit.primary_window");
+  const primaryWindow = normalizeWindow(rateLimit.primary_window, "rate_limit.primary_window", collectedAtMs);
   let secondaryWindow = null;
   let secondaryNotice = false;
   if (rateLimit.secondary_window !== undefined && rateLimit.secondary_window !== null) {
-    secondaryWindow = normalizeWindow(rateLimit.secondary_window, "rate_limit.secondary_window");
+    secondaryWindow = normalizeWindow(rateLimit.secondary_window, "rate_limit.secondary_window", collectedAtMs);
     secondaryNotice = secondaryWindow === null;
-  }
-
-  if (typeof collectedAt !== "string" || Number.isNaN(new Date(collectedAt).getTime())) {
-    throw new TypeError("collectedAt must be an ISO timestamp");
   }
 
   const account = accountSource(raw);
