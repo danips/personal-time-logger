@@ -408,7 +408,9 @@ function beginDrag(event) {
   if (event.target.closest(".resize-handle")) return;
   const block = event.currentTarget;
   const entry = getEntryById(block.dataset.entryId);
-  if (!entry) return;
+  // A running timer has no settled duration and must stay anchored to its
+  // original start time while it is active.
+  if (!entry || !entry.end_at) return;
 
   event.preventDefault();
   const rect = block.getBoundingClientRect();

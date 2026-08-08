@@ -487,6 +487,11 @@ textarea {
   border-color: var(--active-border);
   background: var(--active);
   color: #17472a;
+  cursor: default;
+}
+
+.entry-block.active-entry:active {
+  cursor: default;
 }
 
 .entry-block.active-entry .entry-fill {
