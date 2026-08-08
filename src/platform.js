@@ -81,11 +81,6 @@ export const platform = {
     return Boolean(rawApi.contextualIdentities);
   },
 
-  async queryContextualIdentities() {
-    if (!rawApi.contextualIdentities || !rawApi.contextualIdentities.query) return [];
-    return apiCall(rawApi.contextualIdentities.query, rawApi.contextualIdentities);
-  },
-
   async createContextualIdentity(name, color = "blue", icon = "fingerprint") {
     if (!rawApi.contextualIdentities || !rawApi.contextualIdentities.create) {
       throw new Error("Firefox contextual identities are unavailable");

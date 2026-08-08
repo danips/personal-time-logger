@@ -169,12 +169,6 @@ async function openOrCreateTab(deps, cookieStoreId, { active, temporary = false 
   return { tab, temporary };
 }
 
-async function readUsageFromTab(deps, tab, label) {
-  await deps.platform.waitForTabComplete(tab.id);
-  const result = await deps.platform.sendTabMessage(tab.id, { type: CHATGPT_MESSAGE_TYPE });
-  return normalizeBridgeResult(result, { label, collectedAt: new Date(deps.now()).toISOString() });
-}
-
 async function saveVerifiedAccount(deps, account, rawBody, expectedGeneration) {
   const normalized = normalizeBridgeResult({ status: 200, body: rawBody }, {
     label: account.label,
