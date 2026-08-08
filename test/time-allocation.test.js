@@ -39,3 +39,18 @@ describe("time allocation", () => {
     assert.deepEqual(allocations.map((allocation) => allocation.effectiveSeconds), [5400, 5400]);
   });
 });
+
+describe("civil-day allocation across DST", () => {
+  function localDayLength(month, day) {
+    const start = new Date(2026, month, day, 0, 0, 0);
+    const end = new Date(2026, month, day + 1, 0, 0, 0);
+    return entryInterval({ start_at: start.toISOString(), end_at: end.toISOString() }).actualSeconds;
+  }
+
+  it("keeps elapsed duration distinct from local 23-hour and 25-hour days", () => {
+    // The test environment uses Europe/Lisbon, which transitions on these
+    // dates. Civil-day splitting must retain the elapsed distinction.
+    assert.equal(localDayLength(2, 29), 23 * 3600);
+    assert.equal(localDayLength(9, 25), 25 * 3600);
+  });
+});

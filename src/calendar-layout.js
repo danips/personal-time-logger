@@ -61,7 +61,8 @@ export function weekStartFromInput(value) {
   const week = Number(match[2]);
   if (!year || week < 1 || week > 53) return null;
   const firstWeek = startOfLocalWeek(new Date(year, 0, 4));
-  return addDays(firstWeek, (week - 1) * 7);
+  const weekStart = addDays(firstWeek, (week - 1) * 7);
+  return isoWeekValue(weekStart) === value ? weekStart : null;
 }
 
 export function snapDateToGrid(date, direction) {

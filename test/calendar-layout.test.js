@@ -200,6 +200,7 @@ describe("week picker values", () => {
     assert.equal(weekStartFromInput("2026-W"), null);
     assert.equal(weekStartFromInput("2026-W00"), null);
     assert.equal(weekStartFromInput("2026-W54"), null);
+    assert.equal(weekStartFromInput("2025-W53"), null);
   });
 });
 

@@ -184,8 +184,8 @@ Header repair assumes the rows below are still aligned with the header, which ho
 7. Use the play button on a recent entry to start a new timer with the same details.
 8. Use **Load more** to reach earlier weeks in the recent list.
 9. Use the calendar button to open the weekly calendar view, and the ⇄ button to open Reconcile.
-10. Use **Export CSV** in the calendar to download entries for its displayed week.
-11. Use the merge controls in a recent entry edit panel or selected calendar entry to combine matching completed logs.
+10. Use **Export CSV** in the calendar to download proportional allocations for its displayed week.
+11. Use the merge controls in a recent entry edit panel or selected calendar entry to append another matching completed log's elapsed time to the selected entry.
 
 Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when Google auth is not ready.
 
@@ -195,9 +195,9 @@ Set **Duration multiplier** in Options. Entries with **Multiply** checked store 
 
 ## Calendar View
 
-The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid. Entries that overlap in time are shown side by side.
+The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid using their actual start/end times. Entries that overlap in time are shown side by side. A multiplier affects effective totals, but is allocated proportionally across the actual interval rather than extending a block into later days.
 
-Click **Export CSV** to download the entries shown in the displayed week. The downloaded filename includes that week's Monday and Sunday dates.
+Click **Export CSV** to download only the portions of entries allocated inside the displayed week. The downloaded filename includes that week's Monday and Sunday dates.
 
 Drag a time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`. Completed entries keep their original duration when moved. Active timers keep running and only their `start_at` value changes.
 
@@ -249,7 +249,7 @@ Resolutions only write locally and then trigger a sync, so every remote write st
 
 ## CSV Export
 
-The CSV export includes:
+The CSV export includes the original entry ID and machine-readable allocation start/end timestamps, plus:
 
 - Project
 - Task
@@ -263,11 +263,11 @@ The CSV export includes:
 - Multiply
 - Status
 
-`Duration (hours)` is the original elapsed time. `Multiplied duration (hours)` is the effective duration after applying the value in `Multiply`.
+`Duration (hours)` is the allocated elapsed time. `Multiplied duration (hours)` is the allocated effective duration after applying the value in `Multiply`. Fields that begin with spreadsheet formula sigils are prefixed safely so opening the file cannot execute a formula.
 
 `Status` is `completed`, `needs_review`, or `running`. A running timer is exported with empty end columns, its elapsed time so far in `Duration (hours)`, and no multiplied duration, since that is not settled until the timer stops.
 
-The calendar exports the displayed week. Deleted entries are excluded.
+The calendar exports clipped allocations for the displayed week. Deleted entries are excluded.
 
 ## Known Limitations
 
@@ -275,7 +275,7 @@ The calendar exports the displayed week. Deleted entries are excluded.
 - Sync is polling-based, not real-time.
 - Conflict handling is intentionally simple.
 - Calendar moving snaps to 15-minute intervals and preserves completed-entry duration; resizing a selected entry snaps to one-minute intervals.
-- Merging keeps one entry, marks the other deleted locally, and requires matching project, task, and description.
+- Merging keeps the selected entry's start, multiplier, and status; it appends the other matching entry's actual elapsed time as one contiguous interval, then marks the other entry deleted locally.
 - Deleted entries remain in the sheet as tombstones for 14 days so multiple devices can converge during sync.
 - When it does read, the extension reads the whole `time_entries` sheet; the Drive check avoids the read entirely rather than making it smaller.
 - Skipping reads only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
