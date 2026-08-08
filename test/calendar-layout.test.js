@@ -81,14 +81,28 @@ describe("buildSegments", () => {
     assert.equal(segments[0][0].startsEntry, false);
   });
 
-  it("stretches the block when a multiplier makes the stored duration longer", () => {
+  it("keeps multiplier geometry on the actual interval", () => {
     const multiplied = entry(at(1, 9), at(1, 10), { duration_seconds: 5400, multiply: "1.5" });
     const [segment] = buildSegments([multiplied], weekStart)[1];
 
     assert.equal(segment.actualSeconds, 3600);
     assert.equal(segment.effectiveSeconds, 5400);
-    // Drawn 90 minutes tall even though only 60 minutes elapsed.
-    assert.equal(segment.endMinute - segment.startMinute, 90);
+    assert.equal(segment.totalSeconds, 5400);
+    // A multiplier changes totals, not the chronology on the calendar.
+    assert.equal(segment.endMinute - segment.startMinute, 60);
+  });
+
+  it("allocates multiplied time proportionally across midnight", () => {
+    const multiplied = entry(at(0, 23, 30), at(1, 0, 30), {
+      duration_seconds: 7200,
+      multiply: "2"
+    });
+    const segments = buildSegments([multiplied], weekStart);
+
+    assert.equal(segments[0][0].totalSeconds, 3600);
+    assert.equal(segments[1][0].totalSeconds, 3600);
+    assert.equal(segments[0][0].endMinute - segments[0][0].startMinute, 30);
+    assert.equal(segments[1][0].endMinute - segments[1][0].startMinute, 30);
   });
 });
 

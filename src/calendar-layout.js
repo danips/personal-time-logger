@@ -1,4 +1,5 @@
 import { addDays, startOfLocalDay, startOfLocalWeek } from "./time.js";
+import { allocateEntry, entryInterval } from "./time-allocation.js";
 
 export const DAY_COUNT = 7;
 export const MINUTES_PER_DAY = 24 * 60;
@@ -74,11 +75,8 @@ export function snapDateToGrid(date, direction) {
 
 /** Whether an entry is visible in a week. A running entry is measured to now. */
 export function intersectsWeek(entry, start, end) {
-  const entryStart = new Date(entry.start_at);
-  if (Number.isNaN(entryStart.getTime())) return false;
-  const entryEnd = entry.end_at ? new Date(entry.end_at) : new Date();
-  const displayEnd = entryEnd > entryStart ? entryEnd : addMinutes(entryStart, SNAP_MINUTES);
-  return entryStart < end && displayEnd > start;
+  const interval = entryInterval(entry);
+  return Boolean(interval && interval.start < end && interval.end > start);
 }
 
 /** Duration a drag preserves, never shorter than one grid slot. */
@@ -103,11 +101,9 @@ export function effectiveDurationSeconds(entry, rawStart, rawEnd) {
   return entry.end_at && stored ? stored : actualSeconds;
 }
 
-/** Where the block ends on screen, stretched when a multiplier applies. */
+/** Calendar geometry always follows elapsed time, never a multiplier tail. */
 export function effectiveEnd(entry, rawStart, rawEnd) {
-  const actualSeconds = actualDurationSeconds(rawStart, rawEnd);
-  const effectiveSeconds = effectiveDurationSeconds(entry, rawStart, rawEnd);
-  return addMinutes(rawStart, Math.max(actualSeconds, effectiveSeconds) / 60);
+  return new Date(rawEnd);
 }
 
 /**
@@ -120,45 +116,35 @@ export function buildSegments(entries, weekStart) {
   const days = Array.from({ length: DAY_COUNT }, () => []);
 
   for (const entry of entries) {
-    const entryStart = new Date(entry.start_at);
-    if (Number.isNaN(entryStart.getTime())) continue;
-
-    const rawEnd = entry.end_at ? new Date(entry.end_at) : new Date();
-    const actualEnd = rawEnd > entryStart ? rawEnd : addMinutes(entryStart, SNAP_MINUTES);
-    const displayEnd = effectiveEnd(entry, entryStart, actualEnd);
-    const effectiveSeconds = effectiveDurationSeconds(entry, entryStart, actualEnd);
-    const actualSeconds = actualDurationSeconds(entryStart, actualEnd);
-    const displaySeconds = actualDurationSeconds(entryStart, displayEnd);
-    if (entryStart >= weekEnd || displayEnd <= weekStart) continue;
+    const interval = entryInterval(entry);
+    if (!interval || interval.start >= weekEnd || interval.end <= weekStart) continue;
 
     for (let index = 0; index < DAY_COUNT; index += 1) {
       const dayStart = addDays(weekStart, index);
       const dayEnd = addDays(dayStart, 1);
-      const visibleStart = maxDate(entryStart, dayStart);
-      const visibleEnd = minDate(displayEnd, dayEnd);
-      if (visibleEnd <= visibleStart) continue;
+      const allocation = allocateEntry(entry, dayStart, dayEnd, { now: interval.end });
+      if (!allocation) continue;
+      const { start: visibleStart, end: visibleEnd } = allocation;
 
       days[index].push({
         entry,
         dayIndex: index,
         visibleStart,
         visibleEnd,
-        actualEnd,
-        displayEnd,
-        effectiveSeconds,
-        actualSeconds,
-        displaySeconds,
-        totalSeconds: displaySeconds
-          ? effectiveSeconds * actualDurationSeconds(visibleStart, visibleEnd) / displaySeconds
-          : 0,
+        actualEnd: interval.end,
+        displayEnd: interval.end,
+        effectiveSeconds: allocation.entryEffectiveSeconds,
+        actualSeconds: allocation.entryActualSeconds,
+        displaySeconds: allocation.entryActualSeconds,
+        totalSeconds: allocation.effectiveSeconds,
         startMinute: minutesSinceStartOfDay(visibleStart),
         // minutesSinceStartOfDay rolls midnight back to zero. Keep a segment
         // ending at the day boundary at the bottom of the calendar instead.
         endMinute: visibleEnd.getTime() === dayEnd.getTime()
           ? MINUTES_PER_DAY
           : minutesSinceStartOfDay(visibleEnd),
-        startsEntry: visibleStart.getTime() === entryStart.getTime(),
-        endsEntry: visibleEnd.getTime() === displayEnd.getTime()
+        startsEntry: visibleStart.getTime() === interval.start.getTime(),
+        endsEntry: visibleEnd.getTime() === interval.end.getTime()
       });
     }
   }
