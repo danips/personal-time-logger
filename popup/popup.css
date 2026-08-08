@@ -155,7 +155,7 @@ h2 {
 }
 
 .active-panel:not(.is-running):hover {
-  background: #f1f3f4;
+  background: #3c4043;
 }
 
 .active-panel:not(.is-running):focus-visible {
