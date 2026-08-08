@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -88,6 +88,25 @@ describe("Firefox release package", () => {
         "https://example.invalid/personal-time-logger/updates.json"
       );
     } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes untracked files placed beside extension source", async () => {
+    const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+    const planted = join(root, "src", ".package-test-untracked.js");
+    const outputDirectory = await mkdtemp(join(artifactsDirectory, ".package-test-"));
+    await writeFile(planted, "unexpected local file\n", "utf8");
+    try {
+      await execFileAsync(process.execPath, [
+        "scripts/prepare-firefox-release.mjs",
+        "--base-url", "https://example.invalid/personal-time-logger",
+        "--expected-version", manifest.version,
+        "--output", relative(root, outputDirectory)
+      ], { cwd: root });
+      await assert.rejects(() => readFile(join(outputDirectory, "src", ".package-test-untracked.js")));
+    } finally {
+      await rm(planted, { force: true });
       await rm(outputDirectory, { recursive: true, force: true });
     }
   });

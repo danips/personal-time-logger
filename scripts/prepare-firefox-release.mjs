@@ -1,6 +1,10 @@
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -33,8 +37,13 @@ manifest.browser_specific_settings.gecko.update_url = `${baseUrl}/updates.json`;
 await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
-for (const directory of ["background", "calendar", "content", "icons", "options", "popup", "reconcile", "src", "usage"]) {
-  await cp(path.join(projectRoot, directory), path.join(outputDirectory, directory), { recursive: true });
+const extensionDirectories = ["background", "calendar", "content", "icons", "options", "popup", "reconcile", "src", "usage"];
+const { stdout } = await execFileAsync("git", ["ls-files", "--", "manifest.json", ...extensionDirectories], { cwd: projectRoot });
+const trackedFiles = stdout.split("\n").filter(Boolean);
+for (const file of trackedFiles) {
+  const target = path.join(outputDirectory, file);
+  await mkdir(path.dirname(target), { recursive: true });
+  await cp(path.join(projectRoot, file), target);
 }
 
 await writeFile(
