@@ -496,6 +496,22 @@ function appendedRowIndex(data) {
   return match ? Number(match[1]) : 0;
 }
 
+async function verifyRemoteRowIds(spreadsheetId, rows, { interactiveAuth = false } = {}) {
+  const expected = rows.filter((row) => row && row.id && row.rowIndex > 1);
+  if (!expected.length) return;
+  const query = expected.map((row) => `ranges=${encodeRange(`${SHEET_NAME}!A${row.rowIndex}:A${row.rowIndex}`)}`)
+    .concat("fields=valueRanges(range,values)")
+    .join("&");
+  const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
+  const values = data.valueRanges || [];
+  for (let index = 0; index < expected.length; index += 1) {
+    const actual = values[index]?.values?.[0]?.[0] == null ? "" : String(values[index].values[0][0]);
+    if (actual !== expected[index].id) {
+      throw codedError("REMOTE_ROW_STALE", "A spreadsheet row changed before it could be updated. Sync will retry from a fresh snapshot.");
+    }
+  }
+}
+
 /**
  * Appends entries in one request and returns the 1-based row of each, in the
  * order given. Returns an empty array when the response carried no usable
@@ -548,17 +564,22 @@ async function getSheetId({ interactiveAuth = false } = {}) {
  * each deleteDimension shifts everything below it up.
  */
 export async function deleteRemoteRows(rowIndexes, { interactiveAuth = false } = {}) {
-  const rows = [...new Set(rowIndexes)].filter((rowIndex) => rowIndex > 1).sort((a, b) => b - a);
+  const requested = rowIndexes.map((row) => typeof row === "number" ? { rowIndex: row, id: "" } : row);
+  const rows = [...new Map(requested
+    .filter((row) => row && row.rowIndex > 1)
+    .map((row) => [row.rowIndex, row])).values()]
+    .sort((a, b) => b.rowIndex - a.rowIndex);
   if (!rows.length) return;
 
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  await verifyRemoteRowIds(spreadsheetId, rows, { interactiveAuth });
   const sheetId = await getSheetId({ interactiveAuth });
 
   await apiFetch(`/${spreadsheetId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({
-      requests: rows.map((rowIndex) => ({
+    requests: rows.map(({ rowIndex }) => ({
         deleteDimension: {
           range: { sheetId, dimension: "ROWS", startIndex: rowIndex - 1, endIndex: rowIndex }
         }
@@ -575,6 +596,7 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
   if (!updates.length) return;
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  await verifyRemoteRowIds(spreadsheetId, updates.map(({ rowIndex, entry }) => ({ rowIndex, id: entry.id })), { interactiveAuth });
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",

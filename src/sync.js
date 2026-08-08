@@ -239,7 +239,7 @@ async function purgeDeletedEntries(local, remoteEntries, rowMap, { interactiveAu
   let blockedIds = new Set();
   if (expiredRows.length) {
     try {
-      await deleteRemoteRows(expiredRows.map((row) => row.rowIndex), { interactiveAuth });
+      await deleteRemoteRows(expiredRows, { interactiveAuth });
       for (const { id } of expiredRows) rowMap.delete(id);
     } catch {
       // Keep the local copies so the rows are retried on the next sync.
