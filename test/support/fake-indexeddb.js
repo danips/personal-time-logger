@@ -46,9 +46,12 @@ class FakeDatabase {
     return this.transactionStore(name, "versionchange");
   }
 
-  transaction(name, mode = "readonly") {
-    if (!this.state.stores.has(name)) throw new Error(`Unknown object store: ${name}`);
-    const transaction = new FakeTransaction(this.state, name, mode);
+  transaction(names, mode = "readonly") {
+    const storeNames = Array.isArray(names) ? names : [names];
+    for (const name of storeNames) {
+      if (!this.state.stores.has(name)) throw new Error(`Unknown object store: ${name}`);
+    }
+    const transaction = new FakeTransaction(this.state, storeNames, mode);
     this.state.transactions.push(transaction);
     this.state.runNextTransaction();
     return transaction;
@@ -62,9 +65,9 @@ class FakeDatabase {
 }
 
 class FakeTransaction {
-  constructor(state, storeName, mode) {
+  constructor(state, storeNames, mode) {
     this.state = state;
-    this.storeName = storeName;
+    this.storeNames = storeNames;
     this.mode = mode;
     this.error = null;
     this.oncomplete = null;
@@ -77,7 +80,7 @@ class FakeTransaction {
   }
 
   objectStore(name) {
-    if (name !== this.storeName) throw new Error(`Store not in transaction: ${name}`);
+    if (!this.storeNames.includes(name)) throw new Error(`Store not in transaction: ${name}`);
     return new FakeObjectStore(this.state.stores.get(name), this, this.mode);
   }
 

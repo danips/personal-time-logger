@@ -67,4 +67,54 @@ describe("IndexedDB repository", () => {
     });
     assert.deepEqual(result, { key: "shared", value: "visible" });
   });
+
+  it("compare-and-swaps an entry revision and reports a typed conflict", async () => {
+    await db.putEntry({ id: "entry-cas", revision: 4, task: "before" });
+
+    const updated = await db.mutateEntry("entry-cas", 4, (entry) => ({
+      ...entry,
+      task: "after",
+      revision: entry.revision + 1
+    }));
+    assert.equal(updated.revision, 5);
+    assert.equal((await db.getEntry("entry-cas")).task, "after");
+
+    await assert.rejects(
+      () => db.mutateEntry("entry-cas", 4, (entry) => ({ ...entry, task: "stale" })),
+      (error) => error.code === "STORAGE_CONFLICT" && error.reason === "revision_mismatch"
+    );
+    assert.equal((await db.getEntry("entry-cas")).task, "after");
+  });
+
+  it("commits multi-entry and multi-setting mutations together", async () => {
+    await db.putEntries([
+      { id: "entry-left", revision: 1, task: "left" },
+      { id: "entry-right", revision: 2, task: "right" }
+    ]);
+    await db.mutateEntries(["entry-left", "entry-right"], { "entry-left": 1, "entry-right": 2 }, (entries) => {
+      for (const entry of entries.values()) entry.revision += 1;
+    });
+    await db.mutateSettings(["first", "second"], (settings) => {
+      settings.set("first", "saved");
+      settings.set("second", 2);
+    });
+
+    assert.deepEqual(
+      [await db.getEntry("entry-left"), await db.getEntry("entry-right")].map((entry) => entry.revision),
+      [2, 3]
+    );
+    assert.equal(await db.getSetting("first"), "saved");
+    assert.equal(await db.getSetting("second"), 2);
+  });
+
+  it("does not apply a multi-entry mutation when any expected revision is stale", async () => {
+    await assert.rejects(
+      () => db.mutateEntries(["entry-left", "entry-right"], { "entry-left": 2, "entry-right": 2 }, (entries) => {
+        for (const entry of entries.values()) entry.task = "changed";
+      }),
+      (error) => error.code === "STORAGE_CONFLICT" && error.id === "entry-right"
+    );
+    assert.equal((await db.getEntry("entry-left")).task, "left");
+    assert.equal((await db.getEntry("entry-right")).task, "right");
+  });
 });

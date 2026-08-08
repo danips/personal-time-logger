@@ -5,6 +5,15 @@ const SETTINGS_STORE = "settings";
 
 let dbPromise = null;
 
+export class StorageConflictError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "StorageConflictError";
+    this.code = "STORAGE_CONFLICT";
+    Object.assign(this, details);
+  }
+}
+
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -45,13 +54,45 @@ function openDb() {
   return dbPromise;
 }
 
-async function store(name, mode, fn) {
+async function stores(names, mode, fn) {
   const db = await openDb();
-  const tx = db.transaction(name, mode);
-  const objectStore = tx.objectStore(name);
-  const result = await fn(objectStore);
+  const storeNames = Array.isArray(names) ? names : [names];
+  const tx = db.transaction(storeNames, mode);
+  const objectStores = new Map(storeNames.map((name) => [name, tx.objectStore(name)]));
+  const result = await fn(objectStores, tx);
   if (mode !== "readonly") await txDone(tx);
   return result;
+}
+
+async function store(name, mode, fn) {
+  return stores(name, mode, (objectStores) => fn(objectStores.get(name)));
+}
+
+function clone(value) {
+  return value === undefined ? undefined : structuredClone(value);
+}
+
+function expectedRevisionFor(id, expectedRevisions, ids) {
+  if (expectedRevisions === undefined || expectedRevisions === null) return undefined;
+  if (expectedRevisions instanceof Map) return expectedRevisions.get(id);
+  if (typeof expectedRevisions === "object") return expectedRevisions[id];
+  return ids.length === 1 ? expectedRevisions : undefined;
+}
+
+function assertExpectedRevision(id, entry, expectedRevision) {
+  if (!entry) {
+    throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
+  }
+  if (expectedRevision === undefined || expectedRevision === null) return;
+  const actualRevision = Number(entry.revision || 0);
+  if (actualRevision !== Number(expectedRevision)) {
+    throw new StorageConflictError("Entry was changed in another context", {
+      id,
+      reason: "revision_mismatch",
+      expectedRevision: Number(expectedRevision),
+      actualRevision
+    });
+  }
 }
 
 export async function getSetting(key, fallback = null) {
@@ -62,6 +103,49 @@ export async function getSetting(key, fallback = null) {
 export async function setSetting(key, value) {
   await store(SETTINGS_STORE, "readwrite", (s) => requestToPromise(s.put({ key, value })));
   return value;
+}
+
+/**
+ * Reads and writes a fixed set of settings in one short transaction. The
+ * mutator receives a Map of setting values, may call set/delete on it, and must
+ * stay synchronous so IndexedDB keeps the transaction active.
+ */
+export async function mutateSettings(keys, mutator) {
+  const uniqueKeys = [...new Set(keys)];
+  return stores(SETTINGS_STORE, "readwrite", async (objectStores) => {
+    const objectStore = objectStores.get(SETTINGS_STORE);
+    const values = new Map();
+    for (const key of uniqueKeys) {
+      const record = await requestToPromise(objectStore.get(key));
+      if (record) values.set(key, clone(record.value));
+    }
+
+    const result = mutator(values);
+    if (result && typeof result.then === "function") {
+      throw new TypeError("Settings mutators must not return a Promise");
+    }
+
+    for (const key of uniqueKeys) {
+      if (values.has(key)) {
+        await requestToPromise(objectStore.put({ key, value: values.get(key) }));
+      } else {
+        await requestToPromise(objectStore.delete(key));
+      }
+    }
+    return result;
+  });
+}
+
+export async function mutateSetting(key, mutator) {
+  return mutateSettings([key], (values) => {
+    const next = mutator(values.get(key));
+    if (next && typeof next.then === "function") {
+      throw new TypeError("Setting mutators must not return a Promise");
+    }
+    if (next === undefined) values.delete(key);
+    else values.set(key, next);
+    return next;
+  });
 }
 
 /**
@@ -111,6 +195,85 @@ export async function putEntries(entries) {
   if (!entries.length) return;
   await store(ENTRY_STORE, "readwrite", async (s) => {
     for (const entry of entries) await requestToPromise(s.put(entry));
+  });
+}
+
+/**
+ * Mutates named entries in one transaction. A mutator can add new ids to the
+ * supplied Map, which is useful for duplicate and replacement-timer actions.
+ * Supplying expected revisions turns the read into a compare-and-swap.
+ */
+export async function mutateEntries(ids, expectedRevisions, mutator) {
+  if (typeof expectedRevisions === "function") {
+    mutator = expectedRevisions;
+    expectedRevisions = undefined;
+  }
+  if (typeof mutator !== "function") throw new TypeError("An entry mutator is required");
+  const uniqueIds = [...new Set(ids)];
+
+  return stores(ENTRY_STORE, "readwrite", async (objectStores) => {
+    const objectStore = objectStores.get(ENTRY_STORE);
+    const entries = new Map();
+    for (const id of uniqueIds) {
+      const entry = await requestToPromise(objectStore.get(id));
+      assertExpectedRevision(id, entry, expectedRevisionFor(id, expectedRevisions, uniqueIds));
+      entries.set(id, clone(entry));
+    }
+
+    const result = mutator(entries);
+    if (result && typeof result.then === "function") {
+      throw new TypeError("Entry mutators must not return a Promise");
+    }
+
+    for (const id of uniqueIds) {
+      if (!entries.has(id)) await requestToPromise(objectStore.delete(id));
+    }
+    for (const [id, entry] of entries) {
+      if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
+      await requestToPromise(objectStore.put(entry));
+    }
+    return result;
+  });
+}
+
+export async function mutateEntry(id, expectedRevision, mutator) {
+  if (typeof expectedRevision === "function") {
+    mutator = expectedRevision;
+    expectedRevision = undefined;
+  }
+  if (typeof mutator !== "function") throw new TypeError("An entry mutator is required");
+  return mutateEntries([id], expectedRevision, (entries) => {
+    const next = mutator(entries.get(id));
+    if (next && typeof next.then === "function") {
+      throw new TypeError("Entry mutators must not return a Promise");
+    }
+    if (next === undefined) entries.delete(id);
+    else entries.set(id, next);
+    return next;
+  });
+}
+
+/** Mutates every entry in one transaction, for operations defined by a query. */
+export async function mutateAllEntries(mutator) {
+  if (typeof mutator !== "function") throw new TypeError("An entry mutator is required");
+  return stores(ENTRY_STORE, "readwrite", async (objectStores) => {
+    const objectStore = objectStores.get(ENTRY_STORE);
+    const existing = await requestToPromise(objectStore.getAll());
+    const entries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const result = mutator(entries);
+    if (result && typeof result.then === "function") {
+      throw new TypeError("Entry mutators must not return a Promise");
+    }
+
+    const nextIds = new Set(entries.keys());
+    for (const entry of existing) {
+      if (!nextIds.has(entry.id)) await requestToPromise(objectStore.delete(entry.id));
+    }
+    for (const [id, entry] of entries) {
+      if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
+      await requestToPromise(objectStore.put(entry));
+    }
+    return result;
   });
 }
 
