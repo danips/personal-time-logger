@@ -25,3 +25,6 @@ jobs:
 
       - name: Run unit tests
         run: npm test
+
+      - name: Lint extension package
+        run: npm run lint:extension

@@ -58,13 +58,13 @@ jobs:
 
       - name: Lint extension
         run: >-
-          npx --yes web-ext@10.3.0 lint
+          npm exec -- web-ext lint
           --source-dir web-ext-artifacts/release-source
           --self-hosted
 
       - name: Sign unlisted extension with Mozilla
         run: >-
-          npx --yes web-ext@10.3.0 sign
+          npm exec -- web-ext sign
           --source-dir web-ext-artifacts/release-source
           --artifacts-dir web-ext-artifacts/signed
           --channel unlisted

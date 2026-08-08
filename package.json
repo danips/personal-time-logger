@@ -4,9 +4,11 @@
   "type": "module",
   "description": "Local-first time tracking with Google Sheets sync. Packaging and tests only; the extension itself has no dependencies.",
   "scripts": {
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "lint:extension": "node scripts/prepare-firefox-release.mjs --base-url https://example.invalid/personal-time-logger --output web-ext-artifacts/lint-source && web-ext lint --source-dir web-ext-artifacts/lint-source --self-hosted"
   },
   "devDependencies": {
-    "acorn": "8.15.0"
+    "acorn": "8.15.0",
+    "web-ext": "10.3.0"
   }
 }
