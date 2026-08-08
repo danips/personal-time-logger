@@ -286,7 +286,9 @@ async function reseedForNewSpreadsheet(local) {
  * this extension created or creating one when there are none.
  */
 async function ensureSpreadsheet(local, { interactiveAuth }) {
-  if (await getSpreadsheetId()) return null;
+  const spreadsheetId = await getSpreadsheetId();
+  const provisioningPending = await getSetting("spreadsheet_provision_pending", "");
+  if (spreadsheetId && provisioningPending !== spreadsheetId) return null;
 
   const provisioned = await provisionSpreadsheet({ interactiveAuth });
   await reseedForNewSpreadsheet(local);

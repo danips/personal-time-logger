@@ -38,6 +38,7 @@ function headersMatch(row) {
 }
 
 const SHEET_ID_SETTING = "time_entries_sheet_id";
+const PROVISION_PENDING_SETTING = "spreadsheet_provision_pending";
 
 const TABS = [
   { title: SHEET_NAME, headers: SHEET_HEADERS, headerRange: HEADER_RANGE },
@@ -190,12 +191,7 @@ async function readHeaderRow(spreadsheetId, range, { interactiveAuth = false } =
 }
 
 async function hasTimeEntriesHeader(spreadsheetId, { interactiveAuth = false } = {}) {
-  try {
-    return headersMatch(await readHeaderRow(spreadsheetId, HEADER_RANGE, { interactiveAuth }));
-  } catch (error) {
-    if (error.code === "AUTH_EXPIRED" || error.code === "OFFLINE" || error.code === "RATE_LIMIT") throw error;
-    return false;
-  }
+  return headersMatch(await readHeaderRow(spreadsheetId, HEADER_RANGE, { interactiveAuth }));
 }
 
 async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
@@ -210,6 +206,12 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
   const spreadsheetId = created.spreadsheetId;
   if (!spreadsheetId) throw codedError("API_ERROR", "Google did not return an ID for the new spreadsheet");
 
+  // Record the ID before initialization. If the following write is interrupted,
+  // the next provisioning attempt repairs this same file instead of making a
+  // second, empty spreadsheet.
+  await setSpreadsheetId(spreadsheetId);
+  await setSetting(PROVISION_PENDING_SETTING, spreadsheetId);
+
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({
@@ -221,6 +223,7 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
     })
   }, { interactiveAuth });
 
+  await setSetting(PROVISION_PENDING_SETTING, "");
   return spreadsheetId;
 }
 
@@ -233,6 +236,14 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
  * recognised as ours.
  */
 export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
+  const storedSpreadsheetId = await getSpreadsheetId();
+  const pendingSpreadsheetId = await getSetting(PROVISION_PENDING_SETTING, "");
+  if (storedSpreadsheetId && pendingSpreadsheetId === storedSpreadsheetId) {
+    await repairSheetLayout(storedSpreadsheetId, { interactiveAuth });
+    await setSetting(PROVISION_PENDING_SETTING, "");
+    return { spreadsheetId: storedSpreadsheetId, name: SPREADSHEET_TITLE, adopted: false, recovered: true };
+  }
+
   const candidates = await listOwnedSpreadsheets({ interactiveAuth });
 
   for (const candidate of candidates.slice(0, MAX_CANDIDATES)) {
@@ -242,7 +253,6 @@ export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
   }
 
   const spreadsheetId = await createOwnedSpreadsheet({ interactiveAuth });
-  await setSpreadsheetId(spreadsheetId);
   return { spreadsheetId, name: SPREADSHEET_TITLE, adopted: false };
 }
 

@@ -1,0 +1,92 @@
+import assert from "node:assert/strict";
+import { after, before, describe, it } from "node:test";
+
+import { SHEET_HEADERS } from "../src/entries.js";
+import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { createGoogleApiMock } from "./support/mock-google-api.js";
+
+installFakeIndexedDB();
+globalThis.browser = {
+  runtime: { getURL: (path) => path },
+  storage: {
+    sync: {
+      async get() {
+        return {
+          google_oauth_client_id: "test-client",
+          google_oauth_client_secret: "test-secret"
+        };
+      },
+      async set() {}
+    }
+  }
+};
+
+let db;
+let sheets;
+let google;
+
+function enqueueNoCandidates() {
+  google.enqueue({ method: "GET", pathname: "/drive/v3/files" }, google.json({ files: [] }));
+}
+
+before(async () => {
+  db = await import("../src/db.js");
+  sheets = await import("../src/sheets.js");
+  google = createGoogleApiMock().install();
+  await db.setSetting("token_data", {
+    access_token: "test-access-token",
+    expires_at: Date.now() + 60_000
+  });
+});
+
+after(() => google.restore());
+
+describe("spreadsheet provisioning", () => {
+  it("resumes initialization of a created spreadsheet instead of creating another", async () => {
+    await sheets.setSpreadsheetId("");
+    await db.setSetting("spreadsheet_provision_pending", "");
+    enqueueNoCandidates();
+    google.enqueue({ method: "POST", pathname: "/v4/spreadsheets" }, google.json({ spreadsheetId: "created-sheet" }));
+    google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/created-sheet/values:batchUpdate" }, google.status(500));
+
+    await assert.rejects(() => sheets.provisionSpreadsheet(), (error) => error.code === "API_ERROR");
+    assert.equal(await sheets.getSpreadsheetId(), "created-sheet");
+    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "created-sheet");
+
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet" }, google.json({
+      sheets: [
+        { properties: { title: "time_entries", sheetId: 1 } },
+        { properties: { title: "config", sheetId: 2 } }
+      ]
+    }));
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/time_entries!A1%3AZ1" }, google.json({
+      values: [SHEET_HEADERS]
+    }));
+    google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/created-sheet/values:batchUpdate" }, google.json({}));
+
+    const recovered = await sheets.provisionSpreadsheet();
+    assert.deepEqual(recovered, {
+      spreadsheetId: "created-sheet",
+      name: "Personal Time Logger",
+      adopted: false,
+      recovered: true
+    });
+    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "");
+    assert.equal(google.calls.filter((call) => call.method === "POST" && call.pathname === "/v4/spreadsheets").length, 1);
+  });
+
+  it("does not create a replacement when candidate validation fails", async () => {
+    await sheets.setSpreadsheetId("");
+    google.calls.length = 0;
+    google.enqueue({ method: "GET", pathname: "/drive/v3/files" }, google.json({
+      files: [{ id: "candidate-sheet", name: "Existing sheet" }]
+    }));
+    google.enqueue(
+      { method: "GET", pathname: "/v4/spreadsheets/candidate-sheet/values/time_entries!A1%3AN1" },
+      google.status(403, { error: { message: "The caller does not have permission" } })
+    );
+
+    await assert.rejects(() => sheets.provisionSpreadsheet(), (error) => error.code === "API_ERROR");
+    assert.equal(google.calls.some((call) => call.method === "POST" && call.pathname === "/v4/spreadsheets"), false);
+  });
+});
