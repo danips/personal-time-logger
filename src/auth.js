@@ -1,10 +1,15 @@
-import { getSetting, removeSetting, setSetting } from "./db.js";
+import { claimLock, getSetting, releaseLock, removeSetting, setSetting } from "./db.js";
 import { getConfig } from "./config-loader.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_KEY = "token_data";
+const TOKEN_REFRESH_LOCK_KEY = "token_refresh_lock";
+const TOKEN_REFRESH_LOCK_TTL_MS = 30_000;
+const TOKEN_REFRESH_POLL_MS = 50;
 const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+
+let refreshInFlight = null;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -182,19 +187,52 @@ async function signInDevice(config, { onDeviceCode } = {}) {
 }
 
 async function refreshToken() {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshTokenOnce().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+function refreshLockHolder() {
+  return `refresh-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
+}
+
+async function refreshTokenOnce() {
   const config = await getConfig();
-  const tokenData = await getTokenData();
   const configError = authConfigError(config);
   if (configError) throw configError;
-  if (!tokenData || !tokenData.refresh_token) throw codedError("AUTH_EXPIRED", "Please sign in again");
 
-  const refreshed = await tokenRequest(tokenRefreshParams(config, tokenData.refresh_token));
+  const holder = refreshLockHolder();
+  const deadline = Date.now() + TOKEN_REFRESH_LOCK_TTL_MS;
+  while (Date.now() < deadline) {
+    if (await claimLock(TOKEN_REFRESH_LOCK_KEY, holder, TOKEN_REFRESH_LOCK_TTL_MS)) {
+      try {
+        const tokenData = await getTokenData();
+        if (isUsable(tokenData)) return tokenData;
+        if (!tokenData || !tokenData.refresh_token) {
+          throw codedError("AUTH_EXPIRED", "Please sign in again");
+        }
 
-  return saveTokenData(withExpiry({
-    ...tokenData,
-    ...refreshed,
-    refresh_token: refreshed.refresh_token || tokenData.refresh_token
-  }));
+        const refreshed = await tokenRequest(tokenRefreshParams(config, tokenData.refresh_token));
+
+        return saveTokenData(withExpiry({
+          ...tokenData,
+          ...refreshed,
+          refresh_token: refreshed.refresh_token || tokenData.refresh_token
+        }));
+      } finally {
+        await releaseLock(TOKEN_REFRESH_LOCK_KEY, holder);
+      }
+    }
+
+    const tokenData = await getTokenData();
+    if (isUsable(tokenData)) return tokenData;
+    await sleep(TOKEN_REFRESH_POLL_MS);
+  }
+
+  throw codedError("AUTH_EXPIRED", "Token refresh is taking too long. Please try again.");
 }
 
 export async function getAccessToken({ interactive = false } = {}) {
