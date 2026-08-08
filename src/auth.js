@@ -186,9 +186,9 @@ async function signInDevice(config, { onDeviceCode } = {}) {
   }));
 }
 
-async function refreshToken() {
+async function refreshToken({ force = false } = {}) {
   if (!refreshInFlight) {
-    refreshInFlight = refreshTokenOnce().finally(() => {
+    refreshInFlight = refreshTokenOnce({ force }).finally(() => {
       refreshInFlight = null;
     });
   }
@@ -199,7 +199,7 @@ function refreshLockHolder() {
   return `refresh-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
 }
 
-async function refreshTokenOnce() {
+async function refreshTokenOnce({ force }) {
   const config = await getConfig();
   const configError = authConfigError(config);
   if (configError) throw configError;
@@ -210,7 +210,7 @@ async function refreshTokenOnce() {
     if (await claimLock(TOKEN_REFRESH_LOCK_KEY, holder, TOKEN_REFRESH_LOCK_TTL_MS)) {
       try {
         const tokenData = await getTokenData();
-        if (isUsable(tokenData)) return tokenData;
+        if (!force && isUsable(tokenData)) return tokenData;
         if (!tokenData || !tokenData.refresh_token) {
           throw codedError("AUTH_EXPIRED", "Please sign in again");
         }
@@ -248,16 +248,16 @@ async function refreshTokenOnce() {
   throw codedError("AUTH_EXPIRED", "Token refresh is taking too long. Please try again.");
 }
 
-export async function getAccessToken({ interactive = false } = {}) {
+export async function getAccessToken({ interactive = false, forceRefresh = false } = {}) {
   const config = await getConfig();
   const configError = authConfigError(config);
   if (configError) throw configError;
 
   const tokenData = await getTokenData();
-  if (isUsable(tokenData)) return tokenData.access_token;
+  if (!forceRefresh && isUsable(tokenData)) return tokenData.access_token;
 
   if (tokenData && tokenData.refresh_token) {
-    const refreshed = await refreshToken();
+    const refreshed = await refreshToken({ force: forceRefresh });
     return refreshed.access_token;
   }
 

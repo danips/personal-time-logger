@@ -80,39 +80,49 @@ function resetSheetCache() {
   driveGateUnavailable = false;
 }
 
+function isIdempotentRequest(options) {
+  return ["GET", "PUT", "DELETE"].includes(String(options.method || "GET").toUpperCase());
+}
+
 async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl = API_BASE } = {}) {
   if (!platform.isOnline()) throw codedError("OFFLINE", "Network is offline");
-  const token = await getAccessToken({ interactive: interactiveAuth });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let token = await getAccessToken({ interactive: interactiveAuth });
   let response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(options.headers || {})
+  let data;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      response = await fetch(`${baseUrl}${path}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        }
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google API request timed out");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const text = await response.text();
+    data = text ? (() => {
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        return { error: { message: text } };
       }
-    });
-  } catch (error) {
-    if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google API request timed out");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+    })() : {};
+
+    if (response.status !== 401 || !isIdempotentRequest(options) || attempt === 1) break;
+    token = await getAccessToken({ interactive: interactiveAuth, forceRefresh: true });
   }
 
-  const text = await response.text();
-  const data = text ? (() => {
-    try {
-      return JSON.parse(text);
-    } catch (error) {
-      return { error: { message: text } };
-    }
-  })() : {};
-
-  if (response.status === 401) throw codedError("AUTH_EXPIRED", "Google auth expired");
+  if (response.status === 401) throw codedError("AUTH_EXPIRED", "Google auth expired after refreshing credentials");
   if (response.status === 429) throw codedError("RATE_LIMIT", "Google API quota or rate limit");
   if (!response.ok) {
     const message = data.error && data.error.message ? data.error.message : `Google API error ${response.status}`;
