@@ -188,7 +188,10 @@ export function normalizeBridgeResult(result, options = {}) {
   if (result.status === 429) throw new UsageError("temporarily_rate_limited", "ChatGPT temporarily rate-limited this request");
   if (result.status < 200 || result.status >= 300) throw new UsageError("service_error", "ChatGPT usage returned an error");
   try {
-    return normalizeUsageResponse(result.body, options);
+    return {
+      ...normalizeUsageResponse(result.body, options),
+      source: result.transport === "page_world_session" ? "page_fallback" : "isolated"
+    };
   } catch (error) {
     if (error instanceof UsageError) throw error;
     throw schemaError("The ChatGPT usage response could not be validated");

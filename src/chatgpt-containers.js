@@ -310,7 +310,15 @@ async function refreshAccountInternal(account, generation, deps) {
       };
     });
   } finally {
-    if (tabInfo.temporary) await deps.platform.removeTab(tabInfo.tab.id);
+    if (tabInfo.temporary) {
+      try {
+        await deps.platform.removeTab(tabInfo.tab.id);
+      } catch {
+        // A temporary-tab cleanup failure must not hide a successful refresh or
+        // replace the original service error. The tab contains the user's own
+        // container session and is therefore left for normal browser cleanup.
+      }
+    }
   }
 }
 
@@ -344,6 +352,7 @@ export async function refreshAccount(account, overrides = {}) {
       const safeError = error instanceof UsageError ? error : usageError("service_error", "ChatGPT usage refresh failed");
       const failure = {
         code: safeError.code,
+        message: String(safeError.message || "ChatGPT usage refresh failed").slice(0, 240),
         occurred_at: new Date(deps.now()).toISOString(),
         retry_after_seconds: Number.isFinite(safeError.retry_after_seconds) ? safeError.retry_after_seconds : null
       };

@@ -129,6 +129,19 @@ describe("ChatGPT container orchestration", () => {
     assert.deepEqual(calls.removedTabs, [calls.createdTabs.at(-1).id]);
   });
 
+  it("keeps a successful refresh when temporary-tab cleanup fails", async () => {
+    const { values, overrides } = harness();
+    await createAccountContainer("Account 1", overrides);
+    const account = await verifyAccount("firefox-container-1", overrides);
+    values.set("chatgpt_usage_accounts", [{ ...account, last_refresh_at: 0 }]);
+    overrides.platform.removeTab = async () => {
+      throw new Error("tab already closed");
+    };
+
+    const refreshed = await refreshAccount(account, { ...overrides, ignoreCooldown: true });
+    assert.equal(refreshed.snapshot.primary_window.used_percent, 4);
+  });
+
   it("enforces the per-account refresh cooldown", async () => {
     const { overrides } = harness();
     await createAccountContainer("Account 1", overrides);

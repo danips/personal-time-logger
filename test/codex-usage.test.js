@@ -44,6 +44,14 @@ describe("ChatGPT usage normalizer", () => {
     assert.equal(OFFICIAL_USAGE_URL, "https://chatgpt.com/codex/cloud/settings/analytics#usage");
   });
 
+  it("records whether data came from the isolated reader or page fallback", () => {
+    assert.equal(normalizeBridgeResult({ status: 200, body: fixture() }).source, "isolated");
+    assert.equal(
+      normalizeBridgeResult({ status: 200, body: fixture(), transport: "page_world_session" }).source,
+      "page_fallback"
+    );
+  });
+
   it("normalizes the redacted Business/team response shape", () => {
     const normalized = normalizeUsageResponse(fixture(), {
       label: "Account 1",

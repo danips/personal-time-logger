@@ -234,11 +234,20 @@ function accountCard(account, enabled) {
     card.append(collected);
   }
 
+  if (snapshot?.source) {
+    const source = document.createElement("p");
+    source.className = "account-collected";
+    source.textContent = snapshot.source === "page_fallback"
+      ? "Source: page fallback — experimental and unverified"
+      : "Source: isolated extension request";
+    card.append(source);
+  }
+
   const storedError = errorCode(account);
   if (storedError) {
     const error = document.createElement("p");
     error.className = "account-error";
-    error.textContent = messageFor({ code: storedError });
+    error.textContent = account.last_error?.message || messageFor({ code: storedError });
     card.append(error);
   }
 
@@ -364,11 +373,16 @@ $("#addAccount").addEventListener("click", async () => {
 $refreshAll.addEventListener("click", async () => {
   if (!sessionTokenConsent) return consentRequired();
   $refreshAll.disabled = true;
-  const results = await refreshAllAccounts(await getChatGptAccounts());
-  const succeeded = results.filter((result) => result.ok).length;
-  $status.textContent = `${succeeded} of ${results.length} account refreshes succeeded.`;
-  $refreshAll.disabled = false;
-  await render({ autoRefresh: false });
+  try {
+    const results = await refreshAllAccounts(await getChatGptAccounts());
+    const succeeded = results.filter((result) => result.ok).length;
+    $status.textContent = `${succeeded} of ${results.length} account refreshes succeeded.`;
+  } catch (error) {
+    $status.textContent = messageFor(error);
+  } finally {
+    $refreshAll.disabled = false;
+    await render({ autoRefresh: false });
+  }
 });
 
 $clearData.addEventListener("click", async () => {
