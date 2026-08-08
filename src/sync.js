@@ -1,4 +1,4 @@
-import { claimLock, deleteEntry, getAllEntries, getEntry, mutateEntries, mutateSettings, putEntries, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
+import { claimLock, getAllEntries, getEntry, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -205,7 +205,7 @@ export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Se
   return applied.length;
 }
 
-async function markMultipleActiveTimers(local) {
+export async function markMultipleActiveTimers(local) {
   const active = local.all()
     .filter((entry) => !entry.deleted_at && !entry.end_at)
     .sort((a, b) => String(b.start_at).localeCompare(String(a.start_at)));
@@ -213,19 +213,31 @@ async function markMultipleActiveTimers(local) {
   if (active.length <= 1) return [];
 
   const older = active.slice(1);
-  const timestamp = nowIso();
-  const changed = older
-    .filter((entry) => entry.status !== "needs_review")
-    .map((entry) => normalizeEntry({
-      ...entry,
-      status: "needs_review",
-      updated_at: timestamp,
-      revision: Number(entry.revision || 0) + 1,
-      dirty: true,
-      sync_error: "Multiple active timers detected"
-    }));
-
-  await putEntries(changed);
+  const expectedById = new Map(older.map((entry) => [entry.id, entryFingerprint(entry)]));
+  const changed = await mutateEntries(older.map((entry) => entry.id), (entries) => {
+    const applied = [];
+    for (const [id, expectedFingerprint] of expectedById) {
+      const current = entries.get(id);
+      if (!current) {
+        entries.delete(id);
+        continue;
+      }
+      if (entryFingerprint(current) !== expectedFingerprint || current.deleted_at || current.end_at || current.status === "needs_review") {
+        continue;
+      }
+      const next = normalizeEntry({
+        ...current,
+        status: "needs_review",
+        updated_at: nowIso(),
+        revision: Number(current.revision || 0) + 1,
+        dirty: true,
+        sync_error: "Multiple active timers detected"
+      });
+      entries.set(id, next);
+      applied.push(next);
+    }
+    return applied;
+  });
   return local.apply(changed);
 }
 
@@ -262,12 +274,24 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
     }
   }
 
-  const toDelete = local.all().filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
-  for (const entry of toDelete) {
-    await deleteEntry(entry.id);
-    local.forget(entry.id);
-  }
-  return toDelete.length;
+  const candidates = local.all().filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
+  const expectedById = new Map(candidates.map((entry) => [entry.id, entryFingerprint(entry)]));
+  const deletedIds = await mutateEntries(candidates.map((entry) => entry.id), (entries) => {
+    const applied = [];
+    for (const [id, expectedFingerprint] of expectedById) {
+      const current = entries.get(id);
+      if (!current) {
+        entries.delete(id);
+        continue;
+      }
+      if (entryFingerprint(current) !== expectedFingerprint || !isExpiredDeletion(current.deleted_at)) continue;
+      entries.delete(id);
+      applied.push(id);
+    }
+    return applied;
+  });
+  for (const id of deletedIds) local.forget(id);
+  return deletedIds.length;
 }
 
 /**
@@ -279,12 +303,21 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
  * revision are deliberately untouched, so reconciling against a sheet that
  * already holds rows still resolves by age rather than by which side is newer.
  */
-async function reseedForNewSpreadsheet(local) {
-  const reseeded = local.all()
-    .filter((entry) => !entry.dirty)
-    .map((entry) => ({ ...entry, dirty: true, sync_error: "" }));
-
-  await putEntries(reseeded);
+export async function reseedForNewSpreadsheet(local) {
+  const reseeded = await mutateEntries(local.all().map((entry) => entry.id), (entries) => {
+    const applied = [];
+    for (const [id, current] of entries) {
+      if (!current) {
+        entries.delete(id);
+        continue;
+      }
+      if (current.dirty && !current.sync_error) continue;
+      const next = { ...current, dirty: true, sync_error: "" };
+      entries.set(id, next);
+      applied.push(next);
+    }
+    return applied;
+  });
   local.apply(reseeded);
   await setSetting(REMOTE_MODIFIED_KEY, "");
   return reseeded.length;
