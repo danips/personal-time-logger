@@ -81,6 +81,7 @@ function expectedRevisionFor(id, expectedRevisions, ids) {
 
 function assertExpectedRevision(id, entry, expectedRevision) {
   if (!entry) {
+    if (expectedRevision === undefined || expectedRevision === null) return;
     throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
   }
   if (expectedRevision === undefined || expectedRevision === null) return;

@@ -1,4 +1,4 @@
-import { claimLock, deleteEntry, getAllEntries, getEntry, mutateSettings, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
+import { claimLock, deleteEntry, getAllEntries, getEntry, mutateEntries, mutateSettings, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -165,26 +165,39 @@ async function clearCompletedResolutions(ids) {
   });
 }
 
-async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set()) {
+export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set()) {
   const localById = new Map(local.all().map((entry) => [entry.id, entry]));
-  const toSave = [];
+  const applied = [];
 
   for (const remote of remoteEntries) {
     if (pushedIds.has(remote.id)) continue;
-    const existing = localById.get(remote.id);
-    if (!existing || !existing.dirty || isRemoteNewer(remote, existing)) {
-      toSave.push(normalizeEntry({
+    const observed = localById.get(remote.id);
+    const result = await mutateEntries([remote.id], observed ? observed.revision : undefined, (entries) => {
+      const current = entries.get(remote.id);
+      // A previously absent entry that appeared during the network read is a
+      // local write, not permission to import over it.
+      if (!observed && current) return { applied: false };
+      if (observed && !current) return { applied: false };
+      if (current && !current.dirty && !isRemoteNewer(remote, current)) return { applied: false };
+      if (current && current.dirty && !isRemoteNewer(remote, current)) return { applied: false };
+
+      const next = normalizeEntry({
         ...remote,
         dirty: false,
         last_sync_at: nowIso(),
         sync_error: ""
-      }));
-    }
+      });
+      entries.set(remote.id, next);
+      return { applied: true, entry: next };
+    }).catch((error) => {
+      if (error.code === "STORAGE_CONFLICT") return { applied: false };
+      throw error;
+    });
+    if (result.applied) applied.push(result.entry);
   }
 
-  await putEntries(toSave);
-  local.apply(toSave);
-  return toSave.length;
+  local.apply(applied);
+  return applied.length;
 }
 
 async function markMultipleActiveTimers(local) {
