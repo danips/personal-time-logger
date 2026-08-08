@@ -47,6 +47,7 @@ const MAX_WINDOW_SIZE = 10000;
 let windowSizes = DEFAULT_WINDOW_SIZES.map((size) => ({ ...size }));
 let editingWindowSizes = [];
 let windowSizeEditorOpen = false;
+let renderGeneration = 0;
 
 const $activePanel = $(".active-panel");
 const $activeDot = $("#activeProjectDot");
@@ -418,8 +419,10 @@ function toggleNewTimer() {
   setNewTimerOpen($newTimerToggle.getAttribute("aria-expanded") !== "true");
 }
 
-async function renderActive() {
-  activeEntries = await getActiveEntries();
+async function renderActive(isCurrent) {
+  const entries = await getActiveEntries();
+  if (!isCurrent()) return false;
+  activeEntries = entries;
   updateElapsed();
 
   if (activeEntries.length > 1) {
@@ -428,6 +431,7 @@ async function renderActive() {
   } else {
     $activeWarning.classList.add("hidden");
   }
+  return true;
 }
 
 function weeksBefore(iso) {
@@ -439,8 +443,9 @@ function weeksBefore(iso) {
   return Math.max(0, Math.round(weeks));
 }
 
-async function renderRecent() {
+async function renderRecent(isCurrent) {
   const allEntries = await getVisibleEntries();
+  if (!isCurrent()) return false;
   const newest = allEntries.find((entry) => entry.start_at);
   if (newest) {
     // Entries are sorted newest first, so expand the window far enough back to
@@ -466,7 +471,7 @@ async function renderRecent() {
     $recentEntries.replaceChildren(empty);
     $loadMoreRecent.classList.toggle("hidden", hiddenCount === 0);
     $loadMoreRecent.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
-    return;
+    return true;
   }
 
   const weekElements = groupRecentEntries(entries).map((week) => {
@@ -506,15 +511,18 @@ async function renderRecent() {
 
   $loadMoreRecent.classList.toggle("hidden", hiddenCount === 0);
   $loadMoreRecent.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
+  return true;
 }
 
-async function renderDirtyBadge() {
-  if (!$dirtyBadge) return;
+async function renderDirtyBadge(isCurrent) {
+  if (!$dirtyBadge) return true;
   const count = (await getDirtyEntries()).length;
+  if (!isCurrent()) return false;
   const label = count > 99 ? "99+ pending" : `${count} pending`;
   $dirtyBadge.textContent = label;
   $dirtyBadge.title = `${count} unsynced local ${count === 1 ? "change" : "changes"}`;
   $dirtyBadge.classList.toggle("hidden", count === 0);
+  return true;
 }
 
 function compactPercent(value) {
@@ -675,7 +683,7 @@ async function loadWindowSizes() {
   renderWindowSizePresets();
 }
 
-async function renderChatGptUsageSummary() {
+async function renderChatGptUsageSummary(isCurrent) {
   const summaries = (await getChatGptAccounts())
     .map((account) => ({
       label: account.email || account.label || "ChatGPT account",
@@ -684,9 +692,10 @@ async function renderChatGptUsageSummary() {
       collectedAt: account.snapshot?.collected_at || account.last_success_at || ""
     }))
     .filter((account) => account.remaining);
+  if (!isCurrent()) return false;
 
   $chatGptUsageSummary.classList.toggle("hidden", summaries.length === 0);
-  if (!summaries.length) return;
+  if (!summaries.length) return true;
 
   const values = summaries.map((account) => {
     const nextRefresh = shortDateTime(account.resetAt) || "not provided";
@@ -701,13 +710,16 @@ async function renderChatGptUsageSummary() {
     return button;
   });
   $chatGptUsageValues.replaceChildren(...values);
+  return true;
 }
 
 async function render() {
-  await renderActive();
-  await renderChatGptUsageSummary();
-  await renderDirtyBadge();
-  await renderRecent();
+  const generation = ++renderGeneration;
+  const isCurrent = () => generation === renderGeneration;
+  if (!(await renderActive(isCurrent))) return;
+  if (!(await renderChatGptUsageSummary(isCurrent))) return;
+  if (!(await renderDirtyBadge(isCurrent))) return;
+  await renderRecent(isCurrent);
 }
 
 async function runSync({ force = false } = {}) {
