@@ -53,6 +53,7 @@ let initialScrollDone = false;
 let refreshTimer = null;
 let selectedEntryId = "";
 let editingEntryId = "";
+let editingEntryRevision = null;
 let editingMultiplyValue = "";
 let unsubscribeEntryEvents = null;
 let lastResizeUndo = null;
@@ -337,6 +338,7 @@ function editFields() {
 
 function loadEditor(entry) {
   editingEntryId = entry.id;
+  editingEntryRevision = Number(entry.revision || 0);
   editingMultiplyValue = entry.multiply || "";
   writeEntryForm(editFields(), entry);
 }
@@ -547,11 +549,13 @@ async function endResize() {
   const undo = {
     id: state.entry.id,
     start_at: state.entry.start_at,
-    end_at: state.entry.end_at
+    end_at: state.entry.end_at,
+    revision: null
   };
 
   try {
-    await updateEntry(state.entry.id, changes);
+    const updated = await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
+    undo.revision = updated.revision;
     setResizeUndo(undo);
     setStatus("Entry resized");
     await render();
@@ -610,7 +614,7 @@ async function endDrag() {
 
   try {
     setResizeUndo(null);
-    await updateEntry(state.entry.id, changes);
+    await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
     setStatus("Entry moved");
     await render();
     if (editingEntryId === state.entry.id) refreshSelectedEntryEditor();
@@ -630,7 +634,7 @@ async function undoResize() {
     await updateEntry(undo.id, {
       start_at: undo.start_at,
       end_at: undo.end_at
-    });
+    }, { expectedRevision: undo.revision });
     setStatus("Resize undone");
     await render();
     if (editingEntryId === undo.id) refreshSelectedEntryEditor();
@@ -658,7 +662,15 @@ async function mergeSelectedEntry() {
 
   try {
     setResizeUndo(null);
-    await mergeEntries(selectedEntryId, sourceId);
+    const target = getEntryById(selectedEntryId);
+    const source = getEntryById(sourceId);
+    if (!target || !source) throw new Error("Entry changed in another window; refreshed");
+    await mergeEntries(selectedEntryId, sourceId, {
+      expectedRevisions: {
+        [selectedEntryId]: target.revision,
+        [sourceId]: source.revision
+      }
+    });
     closeEditor();
     setStatus("Entries merged");
     await render();
@@ -673,7 +685,9 @@ async function duplicateSelectedEntry() {
 
   try {
     setResizeUndo(null);
-    const duplicate = await duplicateEntry(selectedEntryId);
+    const entry = getEntryById(selectedEntryId);
+    if (!entry) throw new Error("Entry changed in another window; refreshed");
+    const duplicate = await duplicateEntry(selectedEntryId, { expectedRevision: entry.revision });
     closeEditor();
     selectedEntryId = duplicate.id;
     setStatus("Entry duplicated");
@@ -686,6 +700,7 @@ async function duplicateSelectedEntry() {
 
 function closeEditor() {
   editingEntryId = "";
+  editingEntryRevision = null;
   editingMultiplyValue = "";
   $("#calendarEditForm").reset();
   $("#calendarEditOverlay").hidden = true;
@@ -729,7 +744,7 @@ async function deleteCalendarEntry() {
   if (!confirm("Delete this time log entry?")) return;
   try {
     setResizeUndo(null);
-    await softDeleteEntry(editingEntryId);
+    await softDeleteEntry(editingEntryId, { expectedRevision: editingEntryRevision });
     closeEditor();
     selectedEntryId = "";
     setStatus("Entry deleted");
@@ -757,7 +772,11 @@ async function saveCalendarEdit(event) {
 
   try {
     setResizeUndo(null);
-    await updateEntry(editingEntryId, readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }));
+    await updateEntry(
+      editingEntryId,
+      readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
+      { expectedRevision: editingEntryRevision }
+    );
     closeEditor();
     setStatus("Entry updated");
     await render();

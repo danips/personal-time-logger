@@ -28,6 +28,7 @@ export function formatError(error) {
   if (code === "OFFLINE") return "offline";
   if (code === "BACKOFF") return message || "waiting after API error";
   if (code === "SYNC_BUSY") return "another sync is already running";
+  if (code === "STORAGE_CONFLICT") return "entry changed in another window; refreshed";
   if (code === "SCOPE_MISSING") return "missing Google permission, sign in again";
   if (code === "AUTH_FAILED") return message ? `auth failure: ${message}` : "auth failure";
   return message || "error";

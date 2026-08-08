@@ -29,7 +29,9 @@ import { setActiveIcon } from "../src/icon.js";
 
 let activeEntries = [];
 let editingId = "";
+let editingRevision = null;
 let editingMultiplyValue = "";
+let mergeTargetRevisions = new Map();
 let ticker = null;
 let unsubscribeEntryEvents = null;
 const expandedRecentGroups = new Set();
@@ -747,6 +749,7 @@ async function showEdit(id) {
   const entry = entries.find((item) => item.id === id);
   if (!entry) return;
   editingId = id;
+  editingRevision = Number(entry.revision || 0);
   editingMultiplyValue = entry.multiply || "";
   $editProjectDot.classList.toggle("hidden", !entry.project);
   $editProjectDot.style.setProperty("--project-color", projectColor(entry));
@@ -777,7 +780,9 @@ function editActiveTimerFromKeyboard(event) {
 
 function hideEdit() {
   editingId = "";
+  editingRevision = null;
   editingMultiplyValue = "";
+  mergeTargetRevisions = new Map();
   $mergeTarget.replaceChildren();
   $mergeEdit.disabled = true;
   $editProjectDot.classList.add("hidden");
@@ -786,6 +791,7 @@ function hideEdit() {
 
 function renderMergeTargets(entry, entries) {
   const candidates = entries.filter((candidate) => canMergeEntries(entry, candidate));
+  mergeTargetRevisions = new Map(candidates.map((candidate) => [candidate.id, Number(candidate.revision || 0)]));
   const options = candidates.map((candidate) => {
     const option = document.createElement("option");
     option.value = candidate.id;
@@ -804,9 +810,21 @@ function renderMergeTargets(entry, entries) {
 
 async function saveEdit() {
   if (!editingId) return;
-  await updateEntry(editingId, readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }));
-  hideEdit();
-  await runSync({ force: false });
+  try {
+    await updateEntry(
+      editingId,
+      readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
+      { expectedRevision: editingRevision }
+    );
+    hideEdit();
+    await runSync({ force: false });
+  } catch (error) {
+    if (error.code === "STORAGE_CONFLICT") {
+      hideEdit();
+      await render();
+    }
+    setStatus($syncStatus, "error", formatError(error));
+  }
 }
 
 function saveEditOnEnter(event) {
@@ -818,9 +836,17 @@ function saveEditOnEnter(event) {
 async function deleteEdit() {
   if (!editingId) return;
   if (!confirm("Delete this time log entry?")) return;
-  await softDeleteEntry(editingId);
-  hideEdit();
-  await runSync({ force: false });
+  try {
+    await softDeleteEntry(editingId, { expectedRevision: editingRevision });
+    hideEdit();
+    await runSync({ force: false });
+  } catch (error) {
+    if (error.code === "STORAGE_CONFLICT") {
+      hideEdit();
+      await render();
+    }
+    setStatus($syncStatus, "error", formatError(error));
+  }
 }
 
 async function mergeEdit() {
@@ -828,10 +854,19 @@ async function mergeEdit() {
   const sourceId = $mergeTarget.value;
   if (!sourceId) return;
   try {
-    await mergeEntries(editingId, sourceId);
+    await mergeEntries(editingId, sourceId, {
+      expectedRevisions: {
+        [editingId]: editingRevision,
+        [sourceId]: mergeTargetRevisions.get(sourceId)
+      }
+    });
     hideEdit();
     await runSync({ force: false });
   } catch (error) {
+    if (error.code === "STORAGE_CONFLICT") {
+      hideEdit();
+      await render();
+    }
     setStatus($syncStatus, "error", formatError(error));
   }
 }

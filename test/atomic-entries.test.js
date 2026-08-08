@@ -68,6 +68,27 @@ describe("atomic entry mutations", () => {
     assert.equal((await db.getEntry("merge-source")).deleted_at, deleted.deleted_at);
   });
 
+  it("rolls back a merge when a later write in its transaction fails", async () => {
+    await db.putEntries([
+      fixture({ id: "rollback-target", revision: 1 }),
+      fixture({
+        id: "rollback-source",
+        start_at: "2026-08-08T10:00:00.000Z",
+        end_at: "2026-08-08T10:30:00.000Z",
+        duration_seconds: 1800,
+        revision: 1
+      })
+    ]);
+    indexedDB._failOnWrite(2);
+
+    await assert.rejects(() => entries.mergeEntries("rollback-target", "rollback-source"), /Injected IndexedDB write failure/);
+
+    assert.equal((await db.getEntry("rollback-target")).duration_seconds, 3600);
+    assert.equal((await db.getEntry("rollback-target")).revision, 1);
+    assert.equal((await db.getEntry("rollback-source")).deleted_at || "", "");
+    assert.equal((await db.getEntry("rollback-source")).revision, 1);
+  });
+
   it("replaces every active timer atomically and makes retries idempotent", async () => {
     await db.putEntries([
       fixture({ id: "active-first", end_at: "", duration_seconds: 0, revision: 2 }),

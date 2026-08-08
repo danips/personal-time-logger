@@ -79,6 +79,7 @@ class FakeTransaction {
     this.finished = false;
     this.operations = [];
     this.processing = false;
+    this.workingRecords = null;
   }
 
   objectStore(name) {
@@ -98,8 +99,20 @@ class FakeTransaction {
 
   start() {
     this.started = true;
+    this.workingRecords = new Map(this.storeNames.map((name) => {
+      const store = this.state.stores.get(name);
+      return [store, new Map([...store.records].map(([key, value]) => [key, clone(value)]))];
+    }));
     this.runNextOperation();
     this.finishWhenIdle();
+  }
+
+  recordsFor(store) {
+    return this.workingRecords?.get(store) || store.records;
+  }
+
+  consumeWriteFailure() {
+    return this.state.consumeWriteFailure();
   }
 
   runNextOperation() {
@@ -133,6 +146,9 @@ class FakeTransaction {
     if (this.finished) return;
     this.finished = true;
     if (success) {
+      if (this.mode !== "readonly") {
+        for (const [store, records] of this.workingRecords || []) store.records = records;
+      }
       this.oncomplete?.({ target: this });
     } else {
       this.onabort?.({ target: this });
@@ -154,25 +170,27 @@ class FakeObjectStore {
   }
 
   get(key) {
-    return this.request(() => clone(this.store.records.get(key)));
+    return this.request(() => clone(this.transaction.recordsFor(this.store).get(key)));
   }
 
   getAll() {
-    return this.request(() => [...this.store.records.values()].map(clone));
+    return this.request(() => [...this.transaction.recordsFor(this.store).values()].map(clone));
   }
 
   put(value) {
     return this.request(() => {
+      if (this.transaction.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
       const key = value[this.store.keyPath];
       if (key === undefined) throw new Error(`Missing key path: ${this.store.keyPath}`);
-      this.store.records.set(key, clone(value));
+      this.transaction.recordsFor(this.store).set(key, clone(value));
       return key;
     });
   }
 
   delete(key) {
     return this.request(() => {
-      this.store.records.delete(key);
+      if (this.transaction.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
+      this.transaction.recordsFor(this.store).delete(key);
       return undefined;
     });
   }
@@ -182,6 +200,14 @@ function createIndexedDB() {
   const databases = new Map();
   const state = {
     transactions: [],
+    writeFailure: null,
+    consumeWriteFailure() {
+      if (!this.writeFailure) return false;
+      this.writeFailure.remaining -= 1;
+      if (this.writeFailure.remaining > 0) return false;
+      this.writeFailure = null;
+      return true;
+    },
     runNextTransaction() {
       const next = this.transactions.find((transaction) => !transaction.started);
       if (!next) return;
@@ -201,6 +227,7 @@ function createIndexedDB() {
         if (!database) {
           database = { version: 0, stores: new Map(), transactions: [] };
           database.runNextTransaction = state.runNextTransaction;
+          database.consumeWriteFailure = state.consumeWriteFailure.bind(state);
           databases.set(name, database);
         }
         if (requestedVersion < database.version) {
@@ -231,6 +258,10 @@ function createIndexedDB() {
 
     _reset() {
       databases.clear();
+    },
+
+    _failOnWrite(writeNumber = 1) {
+      state.writeFailure = { remaining: Math.max(1, Number(writeNumber) || 1) };
     }
   };
 }
