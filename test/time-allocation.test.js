@@ -3,6 +3,10 @@ import { describe, it } from "node:test";
 
 import { allocateEntry, allocateEntryByLocalDay, entryInterval } from "../src/time-allocation.js";
 
+// DST assertions below use Lisbon's civil-day transitions regardless of the
+// machine that runs the tests (GitHub-hosted Linux runners default to UTC).
+process.env.TZ = "Europe/Lisbon";
+
 const entry = {
   id: "crosses-week",
   start_at: "2026-07-26T23:00:00.000Z",
