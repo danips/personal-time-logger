@@ -230,10 +230,16 @@ function isExpiredDeletion(deletedAt) {
   return Number.isFinite(time) && time < addDays(new Date(), -14).getTime();
 }
 
-async function purgeDeletedEntries(local, remoteEntries, rowMap, { interactiveAuth = false } = {}) {
+export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicates = [], { interactiveAuth = false } = {}) {
   const expiredRows = remoteEntries
     .filter((entry) => isExpiredDeletion(entry.deleted_at) && rowMap.has(entry.id))
     .map((entry) => ({ id: entry.id, rowIndex: rowMap.get(entry.id) }));
+  for (const duplicate of duplicates) {
+    if (!duplicate?.entry || !isExpiredDeletion(duplicate.entry.deleted_at)) continue;
+    for (const rowIndex of duplicate.extraRowIndexes || []) {
+      expiredRows.push({ id: duplicate.id, rowIndex });
+    }
+  }
 
   // deleteRemoteRows orders the deletions itself; one request covers every row.
   let blockedIds = new Set();
@@ -431,7 +437,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds);
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
-    const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
+    const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, snapshot.duplicates, { interactiveAuth });
     const configPushed = await syncConfig(snapshot.config, snapshot.configRows, { interactiveAuth });
     // Backfills spreadsheets created before the marker existed, once.
     const markerWritten = await ensureAppMarker(snapshot.config, snapshot.configRows, { interactiveAuth });
