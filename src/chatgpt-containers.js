@@ -3,6 +3,7 @@ import { extractUsageIdentity, normalizeBridgeResult, OFFICIAL_USAGE_URL, UsageE
 import { platform } from "./platform.js";
 
 export const CHATGPT_ACCOUNTS_KEY = "chatgpt_usage_accounts";
+export const CHATGPT_ACCOUNT_GENERATION_KEY = "chatgpt_usage_account_generation";
 export const CHATGPT_PROFILE_SALT_KEY = "chatgpt_usage_profile_salt";
 export const CHATGPT_CACHE_VERSION_KEY = "chatgpt_usage_cache_version";
 export const CHATGPT_SESSION_TOKEN_CONSENT_KEY = "chatgpt_usage_session_token_consent";
@@ -86,16 +87,31 @@ async function readAccounts(deps) {
   return Array.isArray(value) ? value : [];
 }
 
+function accountGeneration(value) {
+  return Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
+}
+
+async function readAccountState(deps) {
+  const [accounts, generation] = await Promise.all([
+    readAccounts(deps),
+    deps.getSetting(CHATGPT_ACCOUNT_GENERATION_KEY, 0)
+  ]);
+  return { accounts, generation: accountGeneration(generation) };
+}
+
 async function mutateAccounts(deps, mutator) {
   let result;
-  await deps.mutateSetting(CHATGPT_ACCOUNTS_KEY, (value) => {
+  await deps.mutateSettings([CHATGPT_ACCOUNTS_KEY, CHATGPT_ACCOUNT_GENERATION_KEY], (settings) => {
+    const value = settings.get(CHATGPT_ACCOUNTS_KEY);
     const accounts = Array.isArray(value) ? value : [];
-    const outcome = mutator(accounts);
+    const generation = accountGeneration(settings.get(CHATGPT_ACCOUNT_GENERATION_KEY));
+    const outcome = mutator(accounts, generation);
     if (!outcome || !Array.isArray(outcome.accounts)) {
       throw new TypeError("Account mutators must return an accounts array");
     }
     result = outcome.result;
-    return outcome.accounts;
+    settings.set(CHATGPT_ACCOUNTS_KEY, outcome.accounts);
+    settings.set(CHATGPT_ACCOUNT_GENERATION_KEY, outcome.generation === undefined ? generation : outcome.generation);
   });
   return result;
 }
@@ -111,14 +127,22 @@ function findAccount(accounts, predicate) {
   return accounts.find(predicate) || null;
 }
 
-async function ensureProfileSalt(deps) {
+async function ensureProfileSalt(deps, expectedGeneration) {
   ensureCrypto(deps.crypto);
-  return deps.mutateSetting(CHATGPT_PROFILE_SALT_KEY, (existing) => {
+  let salt;
+  await deps.mutateSettings([CHATGPT_PROFILE_SALT_KEY, CHATGPT_ACCOUNT_GENERATION_KEY], (settings) => {
+    if (expectedGeneration !== undefined
+      && accountGeneration(settings.get(CHATGPT_ACCOUNT_GENERATION_KEY)) !== expectedGeneration) {
+      throw usageError("account_not_found", "ChatGPT usage data was cleared while this account was refreshing");
+    }
+    const existing = settings.get(CHATGPT_PROFILE_SALT_KEY);
     if (typeof existing === "string" && existing) return existing;
     const bytes = new Uint8Array(32);
     deps.crypto.getRandomValues(bytes);
-    return base64Url(bytes);
+    salt = base64Url(bytes);
+    settings.set(CHATGPT_PROFILE_SALT_KEY, salt);
   });
+  return salt || await deps.getSetting(CHATGPT_PROFILE_SALT_KEY, "");
 }
 
 async function fingerprintAccount(identity, salt, cryptoApi) {
@@ -151,7 +175,7 @@ async function readUsageFromTab(deps, tab, label) {
   return normalizeBridgeResult(result, { label, collectedAt: new Date(deps.now()).toISOString() });
 }
 
-async function saveVerifiedAccount(deps, account, rawBody) {
+async function saveVerifiedAccount(deps, account, rawBody, expectedGeneration) {
   const normalized = normalizeBridgeResult({ status: 200, body: rawBody }, {
     label: account.label,
     collectedAt: new Date(deps.now()).toISOString()
@@ -159,11 +183,14 @@ async function saveVerifiedAccount(deps, account, rawBody) {
   const identity = extractUsageIdentity(rawBody);
   let fingerprint = account.fingerprint || "";
   if (identity) {
-    const salt = await ensureProfileSalt(deps);
+    const salt = await ensureProfileSalt(deps, expectedGeneration);
     fingerprint = await fingerprintAccount(identity, salt, deps.crypto);
   }
 
-  return mutateAccounts(deps, (accounts) => {
+  return mutateAccounts(deps, (accounts, generation) => {
+    if (generation !== expectedGeneration) {
+      throw usageError("account_not_found", "ChatGPT usage data was cleared while this account was being verified");
+    }
     const current = findAccount(accounts, (candidate) => candidate.id === account.id);
     if (!current) throw usageError("account_not_found", "ChatGPT account was disconnected while it was being verified");
     if (fingerprint) {
@@ -222,7 +249,7 @@ export async function createAccountContainer(label, overrides = {}) {
 export async function verifyAccount(cookieStoreId, overrides = {}) {
   const deps = dependencies(overrides);
   await checkAccess(deps);
-  const accounts = await readAccounts(deps);
+  const { accounts, generation } = await readAccountState(deps);
   const account = findAccount(accounts, (candidate) => candidate.cookie_store_id === cookieStoreId);
   if (!account) throw usageError("account_not_found", "Connect this Firefox container before checking it");
   const tabInfo = await openOrCreateTab(deps, cookieStoreId, { active: true });
@@ -230,10 +257,10 @@ export async function verifyAccount(cookieStoreId, overrides = {}) {
   const result = await deps.platform.sendTabMessage(tabInfo.tab.id, { type: CHATGPT_MESSAGE_TYPE });
   if (!result || result.status !== 200 || result.ok === false) normalizeBridgeResult(result, { label: account.label });
   const rawBody = result.body;
-  return saveVerifiedAccount(deps, account, rawBody);
+  return saveVerifiedAccount(deps, account, rawBody, generation);
 }
 
-async function refreshAccountInternal(account, deps) {
+async function refreshAccountInternal(account, generation, deps) {
   await checkAccess(deps);
   const currentContainer = await deps.platform.getContextualIdentity(account.cookie_store_id);
   if (!currentContainer) throw usageError("container_deleted", "The Firefox container for this account no longer exists");
@@ -251,14 +278,17 @@ async function refreshAccountInternal(account, deps) {
     const identity = extractUsageIdentity(result.body);
     let refreshedFingerprint = account.fingerprint || "";
     if (identity) {
-      const salt = await ensureProfileSalt(deps);
+      const salt = await ensureProfileSalt(deps, generation);
       const fingerprint = await fingerprintAccount(identity, salt, deps.crypto);
       if (account.fingerprint && fingerprint !== account.fingerprint) {
         throw usageError("account_mismatch", "The connected Firefox container is signed in to a different ChatGPT account");
       }
       refreshedFingerprint = fingerprint;
     }
-    return mutateAccounts(deps, (accounts) => {
+    return mutateAccounts(deps, (accounts, currentGeneration) => {
+      if (currentGeneration !== generation) {
+        throw usageError("account_not_found", "ChatGPT usage data was cleared while this account was refreshing");
+      }
       const current = findAccount(accounts, (candidate) => candidate.id === account.id);
       if (!current) throw usageError("account_not_found", "ChatGPT account was disconnected while it was refreshing");
       if (current.fingerprint && refreshedFingerprint && current.fingerprint !== refreshedFingerprint) {
@@ -295,18 +325,20 @@ export async function refreshAccount(account, overrides = {}) {
   if (!overrides.ignoreCooldown && deps.now() - lastAttemptAt < cooldownMs) {
     return { ...account, skipped: true, skip_reason: "cooldown" };
   }
+  let refreshGeneration;
   const request = (async () => {
     const attemptedAt = deps.now();
-    const attemptedAccount = await mutateAccounts(deps, (accounts) => {
+    const attempted = await mutateAccounts(deps, (accounts, generation) => {
       const current = findAccount(accounts, (candidate) => candidate.id === account.id);
       if (!current) throw usageError("account_not_found", "ChatGPT account is unavailable");
       const attempted = { ...current, last_attempt_at: attemptedAt };
       return {
         accounts: accounts.map((candidate) => candidate.id === account.id ? attempted : candidate),
-        result: attempted
+        result: { account: attempted, generation }
       };
     });
-    return refreshAccountInternal(attemptedAccount, deps);
+    refreshGeneration = attempted.generation;
+    return refreshAccountInternal(attempted.account, attempted.generation, deps);
   })()
     .catch(async (error) => {
       const safeError = error instanceof UsageError ? error : usageError("service_error", "ChatGPT usage refresh failed");
@@ -315,6 +347,10 @@ export async function refreshAccount(account, overrides = {}) {
         occurred_at: new Date(deps.now()).toISOString(),
         retry_after_seconds: Number.isFinite(safeError.retry_after_seconds) ? safeError.retry_after_seconds : null
       };
+      if (refreshGeneration !== undefined) {
+        const state = await readAccountState(deps);
+        if (state.generation !== refreshGeneration) throw safeError;
+      }
       await mutateAccounts(deps, (accounts) => ({
         accounts: accounts.map((candidate) => candidate.id === account.id
           ? { ...candidate, last_error: failure }
@@ -355,11 +391,16 @@ export async function clearChatGptUsageData(overrides = {}) {
   const deps = dependencies(overrides);
   await deps.mutateSettings([
     CHATGPT_ACCOUNTS_KEY,
+    CHATGPT_ACCOUNT_GENERATION_KEY,
     CHATGPT_PROFILE_SALT_KEY,
     CHATGPT_CACHE_VERSION_KEY,
     CHATGPT_SESSION_TOKEN_CONSENT_KEY
   ], (settings) => {
     settings.delete(CHATGPT_ACCOUNTS_KEY);
+    settings.set(
+      CHATGPT_ACCOUNT_GENERATION_KEY,
+      accountGeneration(settings.get(CHATGPT_ACCOUNT_GENERATION_KEY)) + 1
+    );
     settings.delete(CHATGPT_PROFILE_SALT_KEY);
     settings.delete(CHATGPT_CACHE_VERSION_KEY);
     settings.delete(CHATGPT_SESSION_TOKEN_CONSENT_KEY);

@@ -7,7 +7,13 @@ import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 installFakeIndexedDB();
 
 const db = await import("../src/db.js");
-const { CHATGPT_ACCOUNTS_KEY, refreshAccount } = await import("../src/chatgpt-containers.js");
+const {
+  CHATGPT_ACCOUNTS_KEY,
+  CHATGPT_PROFILE_SALT_KEY,
+  clearChatGptUsageData,
+  disconnectAccount,
+  refreshAccount
+} = await import("../src/chatgpt-containers.js");
 
 function deferred() {
   let resolve;
@@ -83,5 +89,72 @@ describe("atomic ChatGPT account mutations", () => {
       stored.map((item) => [item.id, item.email]).sort(([left], [right]) => left.localeCompare(right)),
       [["first", "first@example.invalid"], ["second", "second@example.invalid"]]
     );
+  });
+
+  it("does not resurrect an account disconnected while its refresh is paused", async () => {
+    const saved = account("disconnecting");
+    await db.setSetting(CHATGPT_ACCOUNTS_KEY, [saved]);
+    const responseBarrier = deferred();
+    const requestStarted = deferred();
+    const overrides = {
+      crypto: webcrypto,
+      now: () => 1_800_000_000_000,
+      platform: {
+        async hasOptionalHostPermission() { return true; },
+        async getContextualIdentity(cookieStoreId) { return { cookieStoreId }; },
+        async queryChatGptTabs() { return []; },
+        async createTab({ cookieStoreId }) { return { id: cookieStoreId, status: "complete" }; },
+        async waitForTabComplete(id) { return { id, status: "complete" }; },
+        async sendTabMessage() {
+          requestStarted.resolve();
+          return responseBarrier.promise;
+        },
+        async removeTab() {}
+      }
+    };
+
+    const refresh = refreshAccount(saved, { ...overrides, ignoreCooldown: true });
+    await requestStarted.promise;
+    await disconnectAccount(saved.id, overrides);
+    responseBarrier.resolve({ status: 200, body: usage("disconnecting@example.invalid") });
+
+    await assert.rejects(refresh, { code: "account_not_found" });
+    assert.deepEqual(await db.getSetting(CHATGPT_ACCOUNTS_KEY), []);
+  });
+
+  it("does not recreate accounts or a profile salt after clear during refresh", async () => {
+    const saved = account("clearing");
+    await db.setSetting(CHATGPT_ACCOUNTS_KEY, [saved]);
+    await db.setSetting(CHATGPT_PROFILE_SALT_KEY, "old-salt");
+    const responseBarrier = deferred();
+    const requestStarted = deferred();
+    const overrides = {
+      crypto: webcrypto,
+      now: () => 1_800_000_000_000,
+      platform: {
+        async hasOptionalHostPermission() { return true; },
+        async getContextualIdentity(cookieStoreId) { return { cookieStoreId }; },
+        async queryChatGptTabs() { return []; },
+        async createTab({ cookieStoreId }) { return { id: cookieStoreId, status: "complete" }; },
+        async waitForTabComplete(id) { return { id, status: "complete" }; },
+        async sendTabMessage() {
+          requestStarted.resolve();
+          return responseBarrier.promise;
+        },
+        async removeTab() {}
+      }
+    };
+
+    const refresh = refreshAccount(saved, { ...overrides, ignoreCooldown: true });
+    await requestStarted.promise;
+    await clearChatGptUsageData(overrides);
+    responseBarrier.resolve({
+      status: 200,
+      body: { ...usage("clearing@example.invalid"), user_id: "user", account_id: "account" }
+    });
+
+    await assert.rejects(refresh, { code: "account_not_found" });
+    assert.equal(await db.getSetting(CHATGPT_ACCOUNTS_KEY), null);
+    assert.equal(await db.getSetting(CHATGPT_PROFILE_SALT_KEY), null);
   });
 });
