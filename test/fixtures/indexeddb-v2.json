@@ -1,0 +1,71 @@
+{
+  "database": "timelogger_db",
+  "version": 2,
+  "stores": {
+    "time_entries": [
+      {
+        "id": "v2-complete-entry",
+        "project": "Migration",
+        "task": "Verify existing data",
+        "description": "A clean, synced entry from an existing profile.",
+        "start_at": "2026-08-01T09:00:00.000Z",
+        "end_at": "2026-08-01T10:00:00.000Z",
+        "duration_seconds": 3600,
+        "status": "ok",
+        "created_at": "2026-08-01T09:00:00.000Z",
+        "updated_at": "2026-08-01T10:00:00.000Z",
+        "deleted_at": "",
+        "device_id": "device-v2",
+        "revision": 3,
+        "multiply": "",
+        "dirty": false,
+        "last_sync_at": "2026-08-01T10:01:00.000Z",
+        "sync_error": ""
+      },
+      {
+        "id": "v2-active-entry",
+        "project": "Migration",
+        "task": "Resume timer",
+        "description": "An active timer has no end time.",
+        "start_at": "2026-08-02T11:00:00.000Z",
+        "end_at": "",
+        "duration_seconds": 0,
+        "status": "ok",
+        "created_at": "2026-08-02T11:00:00.000Z",
+        "updated_at": "2026-08-02T11:00:00.000Z",
+        "deleted_at": "",
+        "device_id": "device-v2",
+        "revision": 1,
+        "multiply": "1.5",
+        "dirty": true,
+        "last_sync_at": "",
+        "sync_error": ""
+      },
+      {
+        "id": "v2-tombstone-entry",
+        "project": "Migration",
+        "task": "Removed work",
+        "description": "A tombstone that must remain available for sync.",
+        "start_at": "2026-08-03T13:00:00.000Z",
+        "end_at": "2026-08-03T13:15:00.000Z",
+        "duration_seconds": 900,
+        "status": "ok",
+        "created_at": "2026-08-03T13:00:00.000Z",
+        "updated_at": "2026-08-04T08:00:00.000Z",
+        "deleted_at": "2026-08-04T08:00:00.000Z",
+        "device_id": "device-v2",
+        "revision": 4,
+        "multiply": "",
+        "dirty": true,
+        "last_sync_at": "",
+        "sync_error": ""
+      }
+    ],
+    "settings": [
+      { "key": "spreadsheet_id", "value": "legacy-sheet-id" },
+      { "key": "device_id", "value": "device-v2" },
+      { "key": "duration_multiplier", "value": "1.5" },
+      { "key": "sync_backoff_seconds", "value": 30 }
+    ]
+  }
+}

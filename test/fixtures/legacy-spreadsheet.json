@@ -1,0 +1,58 @@
+{
+  "spreadsheetId": "legacy-sheet-id",
+  "description": "A spreadsheet created before the config tab and app marker existed.",
+  "tabs": {
+    "time_entries": {
+      "rows": [
+        [
+          "id",
+          "project",
+          "task",
+          "description",
+          "start_at",
+          "end_at",
+          "duration_seconds",
+          "status",
+          "created_at",
+          "updated_at",
+          "deleted_at",
+          "device_id",
+          "revision",
+          "multiply"
+        ],
+        [
+          "legacy-complete-entry",
+          "Legacy project",
+          "Imported task",
+          "A completed entry in the old single-tab layout.",
+          "2026-07-01T09:00:00.000Z",
+          "2026-07-01T10:00:00.000Z",
+          "3600",
+          "ok",
+          "2026-07-01T09:00:00.000Z",
+          "2026-07-01T10:00:00.000Z",
+          "",
+          "legacy-device",
+          "2",
+          ""
+        ],
+        [
+          "legacy-deleted-entry",
+          "Legacy project",
+          "Deleted task",
+          "A tombstone from the old layout.",
+          "2026-07-02T09:00:00.000Z",
+          "2026-07-02T09:30:00.000Z",
+          "1800",
+          "ok",
+          "2026-07-02T09:00:00.000Z",
+          "2026-07-03T09:00:00.000Z",
+          "2026-07-03T09:00:00.000Z",
+          "legacy-device",
+          "3",
+          "2"
+        ]
+      ]
+    }
+  }
+}
