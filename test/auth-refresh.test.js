@@ -57,4 +57,39 @@ describe("token refresh", () => {
     assert.deepEqual(await Promise.all([firstToken, secondToken]), ["fresh-token", "fresh-token"]);
     assert.equal(google.calls.filter((call) => call.pathname === "/token").length, 1);
   });
+
+  it("stores the OAuth expiry reported by Google without extending it", async () => {
+    await db.setSetting("token_data", {
+      access_token: "expired-token",
+      refresh_token: "refresh-token",
+      expires_at: Date.now() - 1
+    });
+    google.enqueue({ method: "POST", pathname: "/token" }, google.json({
+      access_token: "short-lived-token",
+      expires_in: 5
+    }));
+
+    const auth = await authContext("expiry");
+    const before = Date.now();
+    assert.equal(await auth.getAccessToken(), "short-lived-token");
+    const tokenData = await db.getSetting("token_data");
+    assert.ok(tokenData.expires_at >= before + 5_000);
+    assert.ok(tokenData.expires_at < before + 6_000);
+  });
+
+  it("clears a revoked refresh token and requires a new sign-in", async () => {
+    await db.setSetting("token_data", {
+      access_token: "expired-token",
+      refresh_token: "revoked-refresh-token",
+      expires_at: Date.now() - 1
+    });
+    google.enqueue({ method: "POST", pathname: "/token" }, google.status(400, {
+      error: "invalid_grant",
+      error_description: "Token has been expired or revoked."
+    }));
+
+    const auth = await authContext("revoked");
+    await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "AUTH_EXPIRED");
+    assert.equal(await db.getSetting("token_data"), null);
+  });
 });

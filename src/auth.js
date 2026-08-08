@@ -1,4 +1,4 @@
-import { claimLock, getSetting, releaseLock, removeSetting, setSetting } from "./db.js";
+import { claimLock, getSetting, mutateSetting, releaseLock, removeSetting, setSetting } from "./db.js";
 import { getConfig } from "./config-loader.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
@@ -122,7 +122,7 @@ function withExpiry(tokenData) {
   const expiresIn = Number(tokenData.expires_in || 3600);
   return {
     ...tokenData,
-    expires_at: Date.now() + Math.max(60, expiresIn - 60) * 1000
+    expires_at: Date.now() + Math.max(0, expiresIn) * 1000
   };
 }
 
@@ -215,7 +215,20 @@ async function refreshTokenOnce() {
           throw codedError("AUTH_EXPIRED", "Please sign in again");
         }
 
-        const refreshed = await tokenRequest(tokenRefreshParams(config, tokenData.refresh_token));
+        const { response, data: refreshed } = await formRequest(
+          TOKEN_URL,
+          tokenRefreshParams(config, tokenData.refresh_token)
+        );
+        if (!response.ok) {
+          if (refreshed.error === "invalid_grant") {
+            await mutateSetting(TOKEN_KEY, (current) => {
+              if (current && current.refresh_token === tokenData.refresh_token) return undefined;
+              return current;
+            });
+            throw codedError("AUTH_EXPIRED", "Google sign-in expired or was revoked. Please sign in again.");
+          }
+          throw codedError("AUTH_FAILED", tokenError(refreshed, response.status));
+        }
 
         return saveTokenData(withExpiry({
           ...tokenData,
