@@ -62,6 +62,9 @@ describe("spreadsheet provisioning", () => {
     google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/time_entries!A1%3AZ1" }, google.json({
       values: [SHEET_HEADERS]
     }));
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/config!A1%3AZ1" }, google.json({
+      values: [["key", "value", "updated_at"]]
+    }));
     google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/created-sheet/values:batchUpdate" }, google.json({}));
 
     const recovered = await sheets.provisionSpreadsheet();
@@ -88,5 +91,43 @@ describe("spreadsheet provisioning", () => {
 
     await assert.rejects(() => sheets.provisionSpreadsheet(), (error) => error.code === "API_ERROR");
     assert.equal(google.calls.some((call) => call.method === "POST" && call.pathname === "/v4/spreadsheets"), false);
+  });
+
+  it("does not rewrite headers when the header safety read fails", async () => {
+    await sheets.setSpreadsheetId("header-sheet");
+    google.calls.length = 0;
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/header-sheet/values:batchGet" }, google.json({
+      valueRanges: [
+        { range: "time_entries!A:N", values: [["not", "the", "header"]] },
+        { range: "config!A:C", values: [["key", "value", "updated_at"]] }
+      ]
+    }));
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/header-sheet" }, google.json({
+      sheets: [
+        { properties: { title: "time_entries", sheetId: 1 } },
+        { properties: { title: "config", sheetId: 2 } }
+      ]
+    }));
+    google.enqueue(
+      { method: "GET", pathname: "/v4/spreadsheets/header-sheet/values/time_entries!A1%3AZ1" },
+      google.status(403, { error: { message: "The caller does not have permission" } })
+    );
+
+    await assert.rejects(() => sheets.readRemoteSnapshot(), (error) => error.code === "API_ERROR");
+    assert.equal(
+      google.calls.some((call) => call.method === "POST" && call.pathname === "/v4/spreadsheets/header-sheet/values:batchUpdate"),
+      false
+    );
+  });
+
+  it("does not treat an inaccessible Drive file as deleted", async () => {
+    await sheets.setSpreadsheetId("inaccessible-sheet");
+    google.calls.length = 0;
+    google.enqueue(
+      { method: "GET", pathname: "/drive/v3/files/inaccessible-sheet" },
+      google.status(404, { error: { message: "File not found" } })
+    );
+
+    assert.equal(await sheets.isSpreadsheetGone(), false);
   });
 });

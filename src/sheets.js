@@ -292,8 +292,12 @@ export async function isSpreadsheetGone({ interactiveAuth = false } = {}) {
       { interactiveAuth, baseUrl: DRIVE_API_BASE }
     );
     return Boolean(data && (data.trashed || data.explicitlyTrashed));
-  } catch (error) {
-    return /not found|notFound|File not found/i.test(String(error.message || ""));
+  } catch {
+    // Drive can use an indistinguishable 404 for a file the current token can
+    // no longer see. Only an explicit `trashed` response is enough evidence to
+    // replace a spreadsheet; otherwise retain the configured ID and surface the
+    // original sync failure.
+    return false;
   }
 }
 
@@ -333,7 +337,9 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
   const sheetId = sheetIdsByTitle.get(SHEET_NAME);
   if (sheetId != null) await rememberSheetId(spreadsheetId, sheetId);
 
-  await assertHeaderIsSafeToWrite(spreadsheetId, { interactiveAuth });
+  for (const tab of TABS) {
+    await assertHeaderIsSafeToWrite(spreadsheetId, tab, { interactiveAuth });
+  }
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
@@ -357,15 +363,14 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
  * Reads past the current range on purpose: within A:N a wider sheet looks the
  * right width.
  */
-async function assertHeaderIsSafeToWrite(spreadsheetId, { interactiveAuth = false } = {}) {
-  const header = await readHeaderRow(spreadsheetId, `${SHEET_NAME}!A1:Z1`, { interactiveAuth })
-    .catch(() => []);
-  const width = header.filter((cell) => cell !== "").length;
-  if (width === 0 || width === SHEET_HEADERS.length) return;
+async function assertHeaderIsSafeToWrite(spreadsheetId, tab, { interactiveAuth = false } = {}) {
+  const header = await readHeaderRow(spreadsheetId, `${tab.title}!A1:Z1`, { interactiveAuth });
+  const width = header.reduce((lastNonEmpty, cell, index) => (cell === "" ? lastNonEmpty : index + 1), 0);
+  if (width === 0 || width === tab.headers.length) return;
 
   throw codedError(
     "SHEET_MISSING",
-    `The time_entries tab has ${width} columns where ${SHEET_HEADERS.length} are expected, so its rows are not aligned with the current layout. Fix the columns in the spreadsheet, or let the extension create a new one.`
+    `The ${tab.title} tab has ${width} columns where ${tab.headers.length} are expected, so its rows are not aligned with the current layout. Fix the columns in the spreadsheet, or let the extension create a new one.`
   );
 }
 
