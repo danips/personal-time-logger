@@ -1,6 +1,6 @@
 import { getActiveEntries, getDirtyEntries, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { getChatGptAccounts } from "../src/chatgpt-containers.js";
-import { canMergeEntries, createEntry, hasMultiplier, mergeEntries, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
+import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
@@ -716,17 +716,8 @@ async function runSync({ force = false } = {}) {
   await render();
 }
 
-async function stopRunningTimers() {
-  // Starting a timer replaces the running one instead of leaving two active
-  // entries for sync to flag as needing review.
-  for (const entry of await getActiveEntries()) {
-    await stopEntry(entry.id);
-  }
-}
-
 async function startTimer() {
-  await stopRunningTimers();
-  await createEntry(formFields());
+  await replaceActiveTimer(formFields());
   setNewTimerOpen(false);
   await runSync({ force: false });
 }
@@ -734,8 +725,7 @@ async function startTimer() {
 async function restartFromEntry(id) {
   const entry = (await getVisibleEntries()).find((item) => item.id === id);
   if (!entry) return;
-  await stopRunningTimers();
-  await createEntry({
+  await replaceActiveTimer({
     project: entry.project || "",
     task: entry.task || "",
     description: entry.description || "",

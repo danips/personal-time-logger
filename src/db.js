@@ -277,6 +277,49 @@ export async function mutateAllEntries(mutator) {
   });
 }
 
+/**
+ * Mutates the complete entry table and a named set of settings in one
+ * transaction. It is reserved for state transitions, such as replacing the
+ * active timer, that must not expose an intermediate entry/settings state.
+ */
+export async function mutateLocalState(settingKeys, mutator) {
+  if (typeof mutator !== "function") throw new TypeError("A local-state mutator is required");
+  const uniqueKeys = [...new Set(settingKeys)];
+  return stores([ENTRY_STORE, SETTINGS_STORE], "readwrite", async (objectStores) => {
+    const entryStore = objectStores.get(ENTRY_STORE);
+    const settingsStore = objectStores.get(SETTINGS_STORE);
+    const existing = await requestToPromise(entryStore.getAll());
+    const entries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const settings = new Map();
+    for (const key of uniqueKeys) {
+      const record = await requestToPromise(settingsStore.get(key));
+      if (record) settings.set(key, clone(record.value));
+    }
+
+    const result = mutator({ entries, settings });
+    if (result && typeof result.then === "function") {
+      throw new TypeError("Local-state mutators must not return a Promise");
+    }
+
+    const nextIds = new Set(entries.keys());
+    for (const entry of existing) {
+      if (!nextIds.has(entry.id)) await requestToPromise(entryStore.delete(entry.id));
+    }
+    for (const [id, entry] of entries) {
+      if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
+      await requestToPromise(entryStore.put(entry));
+    }
+    for (const key of uniqueKeys) {
+      if (settings.has(key)) {
+        await requestToPromise(settingsStore.put({ key, value: settings.get(key) }));
+      } else {
+        await requestToPromise(settingsStore.delete(key));
+      }
+    }
+    return result;
+  });
+}
+
 export async function getAllEntries() {
   return store(ENTRY_STORE, "readonly", (s) => requestToPromise(s.getAll()));
 }

@@ -67,4 +67,21 @@ describe("atomic entry mutations", () => {
     assert.ok(deleted.deleted_at);
     assert.equal((await db.getEntry("merge-source")).deleted_at, deleted.deleted_at);
   });
+
+  it("replaces every active timer atomically and makes retries idempotent", async () => {
+    await db.putEntries([
+      fixture({ id: "active-first", end_at: "", duration_seconds: 0, revision: 2 }),
+      fixture({ id: "active-second", end_at: "", duration_seconds: 0, revision: 5 })
+    ]);
+
+    const replacement = await entries.replaceActiveTimer({ project: "Replacement" }, { operationId: "start-1" });
+    const retry = await entries.replaceActiveTimer({ project: "Ignored retry" }, { operationId: "start-1" });
+    const active = await db.getActiveEntries();
+
+    assert.equal(retry.id, replacement.id);
+    assert.deepEqual(active.map((entry) => entry.id), [replacement.id]);
+    assert.equal((await db.getEntry("active-first")).revision, 3);
+    assert.equal((await db.getEntry("active-second")).revision, 6);
+    assert.equal((await db.getEntry(replacement.id)).project, "Replacement");
+  });
 });

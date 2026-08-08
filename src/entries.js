@@ -1,4 +1,4 @@
-import { getSetting, mutateEntries, mutateEntry, mutateSetting, putEntry } from "./db.js";
+import { getSetting, mutateEntries, mutateEntry, mutateLocalState, mutateSetting, putEntry } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
 import { durationSeconds, nowIso, uuid } from "./time.js";
 
@@ -135,6 +135,59 @@ export async function createEntry(fields) {
   });
   await putEntry(entry);
   notifyEntriesChanged({ action: "create", ids: [entry.id] });
+  return entry;
+}
+
+/**
+ * Stops every running entry and starts one replacement in a single database
+ * transaction. Retrying with the same operation id returns the already-created
+ * timer without changing any later active entry.
+ */
+export async function replaceActiveTimer(fields, { operationId = uuid() } = {}) {
+  const timestamp = nowIso();
+  const multiply = await selectedMultiplyValue(fields.multiply);
+  const entry = await mutateLocalState(["device_id", "active_timer_operation"], ({ entries, settings }) => {
+    const previousOperation = settings.get("active_timer_operation");
+    if (previousOperation && previousOperation.id === operationId) {
+      const previousEntry = entries.get(previousOperation.entry_id);
+      if (previousEntry) return previousEntry;
+    }
+
+    const deviceId = settings.get("device_id") || uuid();
+    settings.set("device_id", deviceId);
+    for (const existing of entries.values()) {
+      if (existing.deleted_at || existing.end_at) continue;
+      const currentMultiply = normalizeMultiplyValue(existing.multiply);
+      entries.set(existing.id, normalizeEntry({
+        ...existing,
+        end_at: timestamp,
+        duration_seconds: computedDurationSeconds(existing.start_at, timestamp, currentMultiply),
+        updated_at: timestamp,
+        revision: Number(existing.revision || 0) + 1,
+        dirty: true,
+        sync_error: ""
+      }));
+    }
+
+    const next = normalizeEntry({
+      ...fields,
+      id: uuid(),
+      start_at: timestamp,
+      end_at: "",
+      duration_seconds: 0,
+      multiply,
+      status: "ok",
+      created_at: timestamp,
+      updated_at: timestamp,
+      device_id: deviceId,
+      revision: 1,
+      dirty: true
+    });
+    entries.set(next.id, next);
+    settings.set("active_timer_operation", { id: operationId, entry_id: next.id });
+    return next;
+  });
+  notifyEntriesChanged({ action: "replace_active", ids: [entry.id] });
   return entry;
 }
 
