@@ -12,9 +12,9 @@ export function notifyEntriesChanged(detail = {}) {
   const target = getChannel();
   if (!target) return;
   target.postMessage({
+    ...detail,
     type: "entries_changed",
-    timestamp: Date.now(),
-    ...detail
+    timestamp: Date.now()
   });
 }
 
