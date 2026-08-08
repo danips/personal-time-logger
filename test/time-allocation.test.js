@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { allocateEntry, entryInterval } from "../src/time-allocation.js";
+import { allocateEntry, allocateEntryByLocalDay, entryInterval } from "../src/time-allocation.js";
 
 const entry = {
   id: "crosses-week",
@@ -27,5 +27,15 @@ describe("time allocation", () => {
     });
     assert.equal(interval.actualSeconds, 1800);
     assert.equal(interval.effectiveSeconds, 1800);
+  });
+
+  it("gives every local day its proportional effective total", () => {
+    const allocations = allocateEntryByLocalDay({
+      ...entry,
+      start_at: new Date(2026, 6, 27, 23).toISOString(),
+      end_at: new Date(2026, 6, 28, 1).toISOString()
+    });
+
+    assert.deepEqual(allocations.map((allocation) => allocation.effectiveSeconds), [5400, 5400]);
   });
 });

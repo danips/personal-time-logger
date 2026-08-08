@@ -4,6 +4,7 @@ import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softD
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
+import { allocateEntryByLocalDay, entryInterval } from "../src/time-allocation.js";
 import {
   addDays,
   bindMinuteRollover,
@@ -197,56 +198,53 @@ function recentGroupKey(entry) {
 function groupRecentEntries(entries) {
   const weeks = [];
   const weekMap = new Map();
-  const weekTotals = new Map();
-  const dayTotals = new Map();
 
   for (const entry of entries) {
-    const seconds = entryDuration(entry);
-    const weekKey = weekInfo(entry.start_at).key;
-    const dayKey = localDayKey(entry.start_at);
-    weekTotals.set(weekKey, (weekTotals.get(weekKey) || 0) + seconds);
-    dayTotals.set(dayKey, (dayTotals.get(dayKey) || 0) + seconds);
-  }
-
-  for (const entry of entries) {
-    const weekSeed = weekInfo(entry.start_at);
-    if (!weekMap.has(weekSeed.key)) {
-      weekSeed.totalSeconds = weekTotals.get(weekSeed.key) || 0;
-      weekMap.set(weekSeed.key, weekSeed);
-      weeks.push(weekSeed);
-    }
-
-    const week = weekMap.get(weekSeed.key);
-
-    const dayKey = localDayKey(entry.start_at);
-    if (!week.dayMap.has(dayKey)) {
-      const day = {
-        key: dayKey,
-        label: localDayLabel(entry.start_at),
-        totalSeconds: dayTotals.get(dayKey) || 0,
-        groups: [],
-        groupMap: new Map()
+    for (const allocation of allocateEntryByLocalDay(entry)) {
+      const displayEntry = {
+        ...entry,
+        start_at: allocation.start.toISOString(),
+        end_at: allocation.end.toISOString(),
+        duration_seconds: allocation.effectiveSeconds
       };
-      week.dayMap.set(dayKey, day);
-      week.days.push(day);
+      const weekSeed = weekInfo(displayEntry.start_at);
+      if (!weekMap.has(weekSeed.key)) {
+        weekMap.set(weekSeed.key, weekSeed);
+        weeks.push(weekSeed);
+      }
+
+      const week = weekMap.get(weekSeed.key);
+      const dayKey = localDayKey(displayEntry.start_at);
+      if (!week.dayMap.has(dayKey)) {
+        const day = {
+          key: dayKey,
+          label: localDayLabel(displayEntry.start_at),
+          totalSeconds: 0,
+          groups: [],
+          groupMap: new Map()
+        };
+        week.dayMap.set(dayKey, day);
+        week.days.push(day);
+      }
+
+      const day = week.dayMap.get(dayKey);
+      const groupKey = recentGroupKey(displayEntry);
+      if (!day.groupMap.has(groupKey)) {
+        const group = {
+          key: groupKey,
+          entries: [],
+          totalSeconds: 0
+        };
+        day.groupMap.set(groupKey, group);
+        day.groups.push(group);
+      }
+
+      const group = day.groupMap.get(groupKey);
+      group.entries.push(displayEntry);
+      group.totalSeconds += allocation.effectiveSeconds;
+      day.totalSeconds += allocation.effectiveSeconds;
+      week.totalSeconds += allocation.effectiveSeconds;
     }
-
-    const day = week.dayMap.get(dayKey);
-
-    const groupKey = recentGroupKey(entry);
-    if (!day.groupMap.has(groupKey)) {
-      const group = {
-        key: groupKey,
-        entries: [],
-        totalSeconds: 0
-      };
-      day.groupMap.set(groupKey, group);
-      day.groups.push(group);
-    }
-
-    const group = day.groupMap.get(groupKey);
-    group.entries.push(entry);
-    group.totalSeconds += entryDuration(entry);
   }
 
   for (const week of weeks) {
@@ -450,11 +448,16 @@ async function renderRecent() {
     recentWeekCount = Math.max(recentWeekCount, weeksBefore(newest.start_at) + 1);
   }
   const cutoff = addDays(startOfLocalWeek(new Date()), -7 * (recentWeekCount - 1));
-  const cutoffStr = cutoff.toISOString();
-  const entries = allEntries.filter((e) => e.start_at && e.start_at >= cutoffStr);
+  const entries = allEntries.filter((entry) => {
+    const interval = entryInterval(entry);
+    return interval && interval.end >= cutoff;
+  });
   // Undated entries can never come into view by widening the window, so they
   // must not keep the load-more button alive.
-  const hiddenCount = allEntries.filter((e) => e.start_at && e.start_at < cutoffStr).length;
+  const hiddenCount = allEntries.filter((entry) => {
+    const interval = entryInterval(entry);
+    return interval && interval.end < cutoff;
+  }).length;
 
   if (!entries.length) {
     const empty = document.createElement("p");

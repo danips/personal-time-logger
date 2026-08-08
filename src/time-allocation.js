@@ -1,3 +1,5 @@
+import { addDays, startOfLocalDay } from "./time.js";
+
 /**
  * Canonical allocation for totals and exports. Multiplied time belongs to the
  * same real interval as the work that earned it: when a period clips that
@@ -49,4 +51,17 @@ export function allocateEntry(entry, periodStart, periodEnd, options = {}) {
     entryActualSeconds: interval.actualSeconds,
     entryEffectiveSeconds: interval.effectiveSeconds
   };
+}
+
+/** Splits an entry into local civil-day allocations, including DST-length days. */
+export function allocateEntryByLocalDay(entry, options = {}) {
+  const interval = entryInterval(entry, options);
+  if (!interval) return [];
+
+  const allocations = [];
+  for (let dayStart = startOfLocalDay(interval.start); dayStart < interval.end; dayStart = addDays(dayStart, 1)) {
+    const allocation = allocateEntry(entry, dayStart, addDays(dayStart, 1), { now: interval.end });
+    if (allocation) allocations.push(allocation);
+  }
+  return allocations;
 }
