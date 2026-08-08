@@ -130,4 +130,16 @@ describe("spreadsheet provisioning", () => {
 
     assert.equal(await sheets.isSpreadsheetGone(), false);
   });
+
+  it("rejects a malformed successful Sheets response without attempting repair", async () => {
+    await sheets.setSpreadsheetId("malformed-sheet");
+    google.calls.length = 0;
+    google.enqueue(
+      { method: "GET", pathname: "/v4/spreadsheets/malformed-sheet/values:batchGet" },
+      google.malformed("this is not JSON")
+    );
+
+    await assert.rejects(() => sheets.readRemoteSnapshot(), (error) => error.code === "API_ERROR");
+    assert.equal(google.calls.some((call) => call.pathname === "/v4/spreadsheets/malformed-sheet"), false);
+  });
 });

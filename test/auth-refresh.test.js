@@ -92,4 +92,18 @@ describe("token refresh", () => {
     await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "AUTH_EXPIRED");
     assert.equal(await db.getSetting("token_data"), null);
   });
+
+  it("does not persist a malformed successful refresh response", async () => {
+    const tokenData = {
+      access_token: "expired-token",
+      refresh_token: "refresh-token",
+      expires_at: Date.now() - 1
+    };
+    await db.setSetting("token_data", tokenData);
+    google.enqueue({ method: "POST", pathname: "/token" }, google.json({ expires_in: 3600 }));
+
+    const auth = await authContext("malformed-token");
+    await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "AUTH_FAILED");
+    assert.deepEqual(await db.getSetting("token_data"), tokenData);
+  });
 });

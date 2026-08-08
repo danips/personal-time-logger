@@ -115,9 +115,13 @@ async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl =
       try {
         return JSON.parse(text);
       } catch (error) {
+        if (response.ok) throw codedError("API_ERROR", "Google API returned malformed JSON");
         return { error: { message: text } };
       }
     })() : {};
+    if (response.ok && (!data || typeof data !== "object" || Array.isArray(data))) {
+      throw codedError("API_ERROR", "Google API returned an invalid response shape");
+    }
 
     if (response.status !== 401 || !isIdempotentRequest(options) || attempt === 1) break;
     token = await getAccessToken({ interactive: interactiveAuth, forceRefresh: true });
@@ -169,6 +173,7 @@ async function listOwnedSpreadsheets({ interactiveAuth = false } = {}) {
     "pageSize=25"
   ].join("&");
   const data = await apiFetch(`/files?${query}`, {}, { interactiveAuth, baseUrl: DRIVE_API_BASE });
+  if (!Array.isArray(data.files)) throw codedError("API_ERROR", "Google Drive returned an invalid file list");
   return (data.files || []).filter((file) => file && file.id);
 }
 
@@ -186,6 +191,7 @@ async function readHeaderRow(spreadsheetId, range, { interactiveAuth = false } =
     {},
     { interactiveAuth }
   );
+  if (!Array.isArray(data.values)) throw codedError("API_ERROR", "Google Sheets returned an invalid header row");
   const [header = []] = rowsAsText(data.values || []);
   return header;
 }
@@ -316,6 +322,7 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
 
   const metadata = await apiFetch(`/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`, {}, { interactiveAuth });
+  if (!Array.isArray(metadata.sheets)) throw codedError("API_ERROR", "Google Sheets returned invalid spreadsheet metadata");
   const sheetIdsByTitle = new Map((metadata.sheets || [])
     .filter((sheet) => sheet.properties)
     .map((sheet) => [sheet.properties.title, sheet.properties.sheetId]));
@@ -460,6 +467,7 @@ async function readSnapshotOnce(spreadsheetId, { interactiveAuth }) {
     "fields=valueRanges(range,values)"
   ].join("&");
   const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
+  if (!Array.isArray(data.valueRanges)) throw codedError("API_ERROR", "Google Sheets returned an invalid snapshot");
 
   const { entries, rowMap, duplicates } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
   const { config, configRows } = rowsToConfig(valuesForRange(data.valueRanges, CONFIG_SHEET_NAME));

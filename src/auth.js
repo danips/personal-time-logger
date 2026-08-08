@@ -119,7 +119,13 @@ async function pollForDeviceToken(config, deviceCodeData) {
 }
 
 function withExpiry(tokenData) {
-  const expiresIn = Number(tokenData.expires_in || 3600);
+  if (!tokenData || typeof tokenData.access_token !== "string" || !tokenData.access_token) {
+    throw codedError("AUTH_FAILED", "Google token response was missing an access token");
+  }
+  const expiresIn = tokenData.expires_in === undefined ? 3600 : Number(tokenData.expires_in);
+  if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw codedError("AUTH_FAILED", "Google token response had an invalid expiry");
+  }
   return {
     ...tokenData,
     expires_at: Date.now() + Math.max(0, expiresIn) * 1000
@@ -228,6 +234,9 @@ async function refreshTokenOnce({ force }) {
             throw codedError("AUTH_EXPIRED", "Google sign-in expired or was revoked. Please sign in again.");
           }
           throw codedError("AUTH_FAILED", tokenError(refreshed, response.status));
+        }
+        if (typeof refreshed.access_token !== "string" || !refreshed.access_token) {
+          throw codedError("AUTH_FAILED", "Google token response was missing an access token");
         }
 
         return saveTokenData(withExpiry({
