@@ -819,8 +819,13 @@ async function changeWeek(nextStart) {
 }
 
 function exportDisplayedWeek() {
-  const weekEnd = addDays(weekStart, DAY_COUNT - 1);
-  downloadCsv(renderedEntries, `time-entries-${localDateKey(weekStart)}-to-${localDateKey(weekEnd)}.csv`);
+  const weekEnd = addDays(weekStart, DAY_COUNT);
+  const finalDay = addDays(weekStart, DAY_COUNT - 1);
+  downloadCsv(
+    renderedEntries,
+    `time-entries-${localDateKey(weekStart)}-to-${localDateKey(finalDay)}.csv`,
+    { periodStart: weekStart, periodEnd: weekEnd }
+  );
 }
 
 function bindEvents() {

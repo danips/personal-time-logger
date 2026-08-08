@@ -20,7 +20,7 @@ const columns = (line) => line.split(",");
 describe("entriesToCsv", () => {
   it("always emits a header row", () => {
     const [header] = rows(entriesToCsv([]));
-    assert.match(header, /^Project,Task,Description/);
+    assert.match(header, /^Entry ID,Allocation Start \(ISO\),Allocation End \(ISO\),Project,Task,Description/);
     assert.match(header, /Status$/);
   });
 
@@ -38,11 +38,11 @@ describe("entriesToCsv", () => {
     const cells = columns(rows(csv)[1]);
 
     assert.equal(cells.at(-1), "running");
-    // End Date and End Time sit at indexes 5 and 6.
-    assert.equal(cells[5], "");
-    assert.equal(cells[6], "");
-    // The multiplied duration is unknown until the timer stops.
+    // End Date and End Time sit at indexes 8 and 9.
     assert.equal(cells[8], "");
+    assert.equal(cells[9], "");
+    // The multiplied duration is unknown until the timer stops.
+    assert.equal(cells[11], "");
   });
 
   it("labels completed and review entries", () => {
@@ -55,8 +55,8 @@ describe("entriesToCsv", () => {
 
   it("reports both actual and multiplied hours", () => {
     const cells = columns(rows(entriesToCsv([fixture({ duration_seconds: 5400 })]))[1]);
-    assert.equal(cells[7], "1.00");
-    assert.equal(cells[8], "1.50");
+    assert.equal(cells[10], "1.00");
+    assert.equal(cells[11], "1.50");
   });
 
   it("quotes values containing a comma, quote or newline", () => {
@@ -66,5 +66,36 @@ describe("entriesToCsv", () => {
     assert.match(line, /"A,B"/);
     assert.match(line, /"say ""hi"""/);
     assert.match(line, /"one\ntwo"/);
+  });
+
+  it("exports only the proportional allocation inside a requested period", () => {
+    const csv = entriesToCsv([fixture({
+      start_at: "2026-07-26T23:00:00.000Z",
+      end_at: "2026-07-27T01:00:00.000Z",
+      duration_seconds: 10_800,
+      multiply: "1.5"
+    })], {
+      periodStart: "2026-07-27T00:00:00.000Z",
+      periodEnd: "2026-08-03T00:00:00.000Z"
+    });
+    const cells = columns(rows(csv)[1]);
+
+    assert.equal(cells[0], "entry-1");
+    assert.equal(cells[1], "2026-07-27T00:00:00.000Z");
+    assert.equal(cells[2], "2026-07-27T01:00:00.000Z");
+    assert.equal(cells[10], "1.00");
+    assert.equal(cells[11], "1.50");
+  });
+
+  it("neutralizes spreadsheet formula fields", () => {
+    const csv = entriesToCsv([fixture({
+      project: "=SUM(A1:A2)",
+      task: "+1+1",
+      description: "\tunsafe"
+    })]);
+
+    assert.match(csv, /'=SUM\(A1:A2\)/);
+    assert.match(csv, /'\+1\+1/);
+    assert.match(csv, /'\tunsafe/);
   });
 });
