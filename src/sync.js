@@ -266,7 +266,7 @@ async function purgeDeletedEntries(local, remoteEntries, rowMap, { interactiveAu
  */
 async function reseedForNewSpreadsheet(local) {
   const reseeded = local.all()
-    .filter((entry) => !entry.deleted_at && !entry.dirty)
+    .filter((entry) => !entry.dirty)
     .map((entry) => ({ ...entry, dirty: true, sync_error: "" }));
 
   await putEntries(reseeded);
