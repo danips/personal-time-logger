@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const MODULE_DIRECTORIES = ["src", "popup", "calendar", "options", "reconcile", "background"];
+const MODULE_DIRECTORIES = ["src", "popup", "calendar", "options", "reconcile", "background", "usage", "content"];
 
 function jsFiles(directory) {
   return readdirSync(join(root, directory))

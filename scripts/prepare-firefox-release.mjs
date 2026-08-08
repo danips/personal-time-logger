@@ -33,7 +33,7 @@ manifest.browser_specific_settings.gecko.update_url = `${baseUrl}/updates.json`;
 await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
-for (const directory of ["background", "calendar", "icons", "options", "popup", "reconcile", "src"]) {
+for (const directory of ["background", "calendar", "content", "icons", "options", "popup", "reconcile", "src", "usage"]) {
   await cp(path.join(projectRoot, directory), path.join(outputDirectory, directory), { recursive: true });
 }
 

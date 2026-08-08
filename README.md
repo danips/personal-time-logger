@@ -16,7 +16,29 @@ A browser extension for local-first time tracking with Google Sheets sync. It is
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
 - Refresh-token-capable Google device OAuth flow for both Chromium and Firefox.
+- Experimental ChatGPT plan-usage page for separate Firefox container accounts.
 - Unit tests over the pure logic, run with `npm test`.
+
+## ChatGPT Usage Limits (Experimental)
+
+The popup header has a **ChatGPT usage limits** gauge button. This Firefox-only feature keeps each connected ChatGPT account in its own extension-created Firefox container, so two accounts can stay signed in at the same time. Mozilla's [Multi-Account Containers extension](https://addons.mozilla.org/en-US/firefox/addon/multi-account-containers/) is optional; Firefox's built-in contextual identities are sufficient, but the add-on can make container management easier.
+
+The feature reads the current session's usage response from ChatGPT's private, undocumented `backend-api/wham/usage` endpoint. It is experimental and may stop working after a ChatGPT update. On Firefox, an isolated content-script request is attempted first. If it returns HTTP 401, the ChatGPT page-context fallback reads that container's session access token in memory and uses it only for the same fixed usage request; the token never reaches extension storage, logs, URLs, exports, or Firefox Sync. `chatgpt.com` can observe or interfere with data flowing through this fallback. The page always links to ChatGPT's official Usage page as a fallback and fails explicitly when permission, sign-in, network, endpoint, or schema problems occur.
+
+The primary value is labelled **Weekly usage remaining** / **Plan usage remaining** in the account card. The allowance is the shared plan usage described by the observed ChatGPT UI across Codex, Work, Workspace Agents, and ChatGPT for Excel; it is not ordinary ChatGPT conversation usage. The two account percentages are shown independently and are never averaged.
+
+### ChatGPT setup
+
+1. Use Firefox and reload the extension from `about:debugging#/runtime/this-firefox` if it is already installed as a temporary add-on.
+2. Open the popup and click the **ChatGPT usage limits** gauge button.
+3. Click **Grant ChatGPT access** and approve the optional `chatgpt.com` host permission. This permission is used only for the fixed usage request; it does not grant access to passwords, chats, prompts, or cookie values.
+4. Enter a local label such as `Account 1` and click **Add account**. Firefox opens the official ChatGPT page in a new extension-created container.
+5. Sign in manually in that ChatGPT tab. Return to the extension usage page and click **Check signed-in account**.
+6. Add the second account with another label and repeat in its different container. Do not log the first account out.
+
+The page displays each account's percentage remaining, percentage used, reset date and countdown, plan/status flags, collection time, and stale state. **Refresh all** refreshes accounts independently. A failed refresh leaves the last successful snapshot visible and marks it stale when appropriate. A revoked permission disables refresh until it is granted again. A deleted container, expired session, or changed endpoint schema is reported on that account without deleting other account data.
+
+Disconnecting removes the local account binding, fingerprint, and cached snapshot but does not delete the Firefox container or clear its session. **Clear ChatGPT usage data** removes all local ChatGPT records and the duplicate-check salt without touching containers. Passwords, session cookies, access tokens, raw account IDs, raw user IDs, and raw endpoint responses are never stored or synchronized.
 
 ## Load In Chromium
 

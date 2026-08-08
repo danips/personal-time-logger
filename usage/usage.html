@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ChatGPT usage limits</title>
+    <link rel="stylesheet" href="usage.css">
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <h1>ChatGPT usage limits</h1>
+          <p id="pageStatus" class="status" role="status" aria-live="polite">Checking ChatGPT access…</p>
+        </div>
+      </header>
+
+      <section class="panel" aria-labelledby="aboutHeading">
+        <h2 id="aboutHeading">Experimental account usage</h2>
+        <p>This feature keeps each signed-in ChatGPT account in its own Firefox container and reads the current plan allowance from ChatGPT.</p>
+        <p class="notice"><strong>Private endpoint:</strong> ChatGPT does not document this endpoint, so it may stop working after a ChatGPT update. When Firefox's isolated request cannot use the container session, a fixed request runs in the ChatGPT page context and reads the current session's access token in memory only to authenticate that request. The token is never returned to the extension, stored, logged, synchronized, or shown. ChatGPT can observe or modify that page-context data flow.</p>
+        <p><a href="https://chatgpt.com/codex/cloud/settings/analytics#usage" target="_blank" rel="noreferrer">Open the official ChatGPT Usage page</a></p>
+        <label class="consent-row"><input id="sessionTokenConsent" type="checkbox"> I understand and enable this in-memory session-token use for ChatGPT usage checks.</label>
+        <p class="container-note"><strong>Optional:</strong> Firefox’s built-in containers are sufficient. If you do not already use Mozilla’s <a href="https://addons.mozilla.org/en-US/firefox/addon/multi-account-containers/" target="_blank" rel="noreferrer">Multi-Account Containers extension</a>, you may install it to make container management easier.</p>
+        <div class="actions">
+          <button id="grantAccess" type="button">Grant ChatGPT access</button>
+        </div>
+      </section>
+
+      <section id="setupPanel" class="panel" aria-labelledby="setupHeading" hidden>
+        <h2 id="setupHeading">Connect an account</h2>
+        <p>Each account needs its own extension-created Firefox container. After you add one, sign in in the tab Firefox opens, then return here.</p>
+        <label for="accountLabel">Local account label</label>
+        <input id="accountLabel" maxlength="80" autocomplete="off">
+        <div class="actions">
+          <button id="addAccount" type="button">Add account</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="accountsHeading">
+        <div class="panel-heading">
+          <h2 id="accountsHeading">Configured accounts</h2>
+          <div class="actions panel-actions">
+            <button id="refreshAll" type="button" hidden>Refresh all</button>
+            <button id="clearData" class="danger" type="button">Clear ChatGPT usage data</button>
+          </div>
+        </div>
+        <div id="accounts" class="account-list" aria-live="polite"></div>
+      </section>
+    </main>
+    <script type="module" src="usage.js"></script>
+  </body>
+</html>

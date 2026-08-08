@@ -5,11 +5,38 @@
   "version": "0.1.24",
   "permissions": [
     "alarms",
-    "storage"
+    "storage",
+    "contextualIdentities",
+    "cookies"
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",
     "https://oauth2.googleapis.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content/chatgpt-usage-page.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content/chatgpt-usage.js"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
   ],
   "background": {
     "scripts": [
@@ -43,7 +70,9 @@
       "strict_min_version": "142.0",
       "data_collection_permissions": {
         "required": [
-          "authenticationInfo"
+          "authenticationInfo",
+          "personallyIdentifyingInfo",
+          "websiteContent"
         ]
       }
     }

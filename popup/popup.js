@@ -1,4 +1,5 @@
 import { getActiveEntries, getDirtyEntries, getVisibleEntries } from "../src/db.js";
+import { getChatGptAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, createEntry, hasMultiplier, mergeEntries, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
@@ -61,6 +62,8 @@ const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
 const $newTimerSection = $("#newTimerSection");
 const $newTimerDivider = $("#newTimerDivider");
+const $chatGptUsageSummary = $("#chatGptUsageSummary");
+const $chatGptUsageValues = $("#chatGptUsageValues");
 
 let renderedActiveId;
 
@@ -496,8 +499,43 @@ async function renderDirtyBadge() {
   $dirtyBadge.classList.toggle("hidden", count === 0);
 }
 
+function compactPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) return null;
+  return `${Math.round(numeric * 10) / 10}%`;
+}
+
+async function renderChatGptUsageSummary() {
+  const summaries = (await getChatGptAccounts())
+    .map((account) => ({
+      label: account.email || account.label || "ChatGPT account",
+      remaining: compactPercent(account.snapshot?.primary_window?.remaining_percent),
+      resetAt: account.snapshot?.primary_window?.reset_at || "",
+      collectedAt: account.snapshot?.collected_at || account.last_success_at || ""
+    }))
+    .filter((account) => account.remaining);
+
+  $chatGptUsageSummary.classList.toggle("hidden", summaries.length === 0);
+  if (!summaries.length) return;
+
+  const values = summaries.map((account) => {
+    const nextRefresh = shortDateTime(account.resetAt) || "not provided";
+    const lastUpdate = shortDateTime(account.collectedAt) || "not available";
+    const detail = `Account: ${account.label}\nNext allowance refresh: ${nextRefresh}\nLast update: ${lastUpdate}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chatgpt-usage-value";
+    button.textContent = account.remaining;
+    button.title = detail;
+    button.setAttribute("aria-label", `Open ChatGPT usage limits. ${detail.replaceAll("\n", ". ")}`);
+    return button;
+  });
+  $chatGptUsageValues.replaceChildren(...values);
+}
+
 async function render() {
   await renderActive();
+  await renderChatGptUsageSummary();
   await renderDirtyBadge();
   await renderRecent();
 }
@@ -662,6 +700,10 @@ function bindEvents() {
   });
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html"));
   $("#openReconcile").addEventListener("click", () => platform.openExtensionPage("reconcile/reconcile.html"));
+  $("#openCodexUsage").addEventListener("click", () => platform.openExtensionPage("usage/usage.html"));
+  $chatGptUsageValues.addEventListener("click", (event) => {
+    if (event.target.closest(".chatgpt-usage-value")) platform.openExtensionPage("usage/usage.html");
+  });
   $("#openOptions").addEventListener("click", () => platform.openOptionsPage());
   $("#saveEdit").addEventListener("click", saveEdit);
   $("#mergeEdit").addEventListener("click", mergeEdit);

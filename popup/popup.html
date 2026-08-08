@@ -19,12 +19,18 @@
         <div class="header-actions">
           <button id="openCalendar" class="icon-button" title="Calendar" aria-label="Calendar" type="button">▦</button>
           <button id="openReconcile" class="icon-button" title="Reconcile with spreadsheet" aria-label="Reconcile with spreadsheet" type="button">⇄</button>
+          <button id="openCodexUsage" class="icon-button" title="ChatGPT usage limits" aria-label="ChatGPT usage limits" type="button">◔</button>
           <button id="headerSyncButton" class="icon-button" title="Sync now" aria-label="Sync now" type="button">↻</button>
           <button id="openOptions" class="icon-button" title="Options" aria-label="Options" type="button">...</button>
         </div>
       </header>
 
       <section id="activeWarning" class="warning hidden"></section>
+
+      <section id="chatGptUsageSummary" class="chatgpt-usage-summary hidden" aria-label="ChatGPT usage">
+        <span class="chatgpt-usage-label">ChatGPT usage</span>
+        <span id="chatGptUsageValues" class="chatgpt-usage-values"></span>
+      </section>
 
       <section class="active-panel" aria-label="No active timer">
         <div class="active-copy">
