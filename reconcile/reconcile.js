@@ -117,7 +117,7 @@ function renderDifferent(items) {
       rowHeading(item.local, badges),
       differenceTable(item.differences),
       actionRow([
-        { label: "Keep this device", action: () => keepLocal(item.id) },
+        { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision }) },
         { label: "Keep spreadsheet", action: () => keepRemote(item.remote) }
       ])
     );
@@ -169,7 +169,7 @@ function renderLocalOnly(items) {
     row.append(
       rowHeading(item.local, item.local.dirty ? ["pending upload"] : []),
       actionRow([
-        { label: "Upload to spreadsheet", action: () => keepLocal(item.id) },
+        { label: "Upload to spreadsheet", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision }) },
         { label: "Delete", action: () => deleteEverywhere(item.id), danger: true }
       ])
     );
@@ -294,12 +294,16 @@ function bindEvents() {
   $("#deleteAllDuplicates").addEventListener("click", () => resolve(() => confirmDeleteRows(
     report.duplicates.flatMap((item) => item.extraRowIndexes)
   )));
-  $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different, (item) => keepLocal(item.id)));
+  $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different, (item) => (
+    keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
+  )));
   $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different, (item) => keepRemote(item.remote)));
   $("#keepAllNewest").addEventListener("click", () => resolveMany(report.different, (item) => (
-    item.newer === "remote" ? keepRemote(item.remote) : keepLocal(item.id)
+    item.newer === "remote" ? keepRemote(item.remote) : keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
   )));
-  $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly, (item) => keepLocal(item.id)));
+  $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly, (item) => (
+    keepLocal(item.id, null, { expectedRevision: item.local.revision })
+  )));
   $("#importAllRemote").addEventListener("click", () => resolveMany(report.remoteOnly, (item) => keepRemote(item.remote)));
 }
 

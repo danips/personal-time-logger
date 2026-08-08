@@ -1,4 +1,4 @@
-import { claimLock, deleteEntry, getAllEntries, getEntry, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
+import { claimLock, deleteEntry, getAllEntries, getEntry, mutateSettings, putEntry, putEntries, releaseLock, setSetting, getSetting } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -12,6 +12,7 @@ import {
   updateRemoteEntries
 } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
+import { entryFingerprint, RECONCILIATION_INTENTS_KEY } from "./reconcile.js";
 import { isRemoteNewer, normalizeEntry } from "./entries.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
@@ -102,7 +103,7 @@ function localState(entries) {
  * All row rewrites go in one request and all new rows in another, so the cost is
  * two calls regardless of how many entries are pending.
  */
-async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth }) {
+async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth, forcedIds = new Set() }) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const updates = [];
   const appends = [];
@@ -110,7 +111,7 @@ async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth 
   for (const entry of local.all()) {
     if (!entry.dirty) continue;
     const remote = remoteById.get(entry.id);
-    if (remote && isRemoteNewer(remote, entry)) continue;
+    if (remote && isRemoteNewer(remote, entry) && !forcedIds.has(entry.id)) continue;
     if (rowMap.has(entry.id)) {
       updates.push({ rowIndex: rowMap.get(entry.id), entry });
     } else {
@@ -134,6 +135,34 @@ async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth 
   }
 
   return pushedIds;
+}
+
+async function verifiedLocalResolutionIds(local, remoteEntries) {
+  const intents = await getSetting(RECONCILIATION_INTENTS_KEY, []);
+  if (!Array.isArray(intents) || !intents.length) return new Set();
+  const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
+  const localById = new Map(local.all().map((entry) => [entry.id, entry]));
+  const verified = new Set();
+  for (const intent of intents) {
+    if (!intent || intent.chosen_side !== "local") continue;
+    const localEntry = localById.get(intent.entry_id);
+    const remoteEntry = remoteById.get(intent.entry_id);
+    if (!localEntry || !remoteEntry) continue;
+    if (Number(localEntry.revision || 0) !== Number(intent.local_revision)) continue;
+    if (entryFingerprint(remoteEntry) !== intent.remote_fingerprint) continue;
+    verified.add(intent.entry_id);
+  }
+  return verified;
+}
+
+async function clearCompletedResolutions(ids) {
+  if (!ids.size) return;
+  await mutateSettings([RECONCILIATION_INTENTS_KEY], (settings) => {
+    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+      ? settings.get(RECONCILIATION_INTENTS_KEY)
+      : [];
+    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => !ids.has(intent?.entry_id)));
+  });
 }
 
 async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set()) {
@@ -369,7 +398,12 @@ async function runSyncCycle({ interactiveAuth, force }) {
       snapshot = await readRemoteSnapshot({ interactiveAuth });
     }
 
-    const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, { interactiveAuth });
+    const forcedResolutionIds = await verifiedLocalResolutionIds(local, snapshot.entries);
+    const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, {
+      interactiveAuth,
+      forcedIds: forcedResolutionIds
+    });
+    await clearCompletedResolutions(new Set([...forcedResolutionIds].filter((id) => pushedIds.has(id))));
     const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds);
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.

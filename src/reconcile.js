@@ -1,4 +1,4 @@
-import { getAllEntries, getEntry, putEntry } from "./db.js";
+import { getAllEntries, getEntry, mutateLocalState, putEntry, StorageConflictError } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry, softDeleteEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
@@ -7,6 +7,11 @@ import { nowIso } from "./time.js";
 // Only the columns that live in the sheet are compared. dirty, last_sync_at and
 // sync_error are local bookkeeping, so a difference there is not a divergence.
 const COMPARED_FIELDS = SHEET_HEADERS.filter((field) => field !== "id");
+export const RECONCILIATION_INTENTS_KEY = "reconciliation_intents";
+
+export function entryFingerprint(entry) {
+  return entryToRow(entry).join("\u0000");
+}
 
 /**
  * Fields where a local entry and its remote row disagree, compared through the
@@ -114,11 +119,39 @@ export async function deleteDuplicateRows(extraRowIndexes, { interactiveAuth = f
  * revision stay put, so choosing a side never looks like a fresh edit to the
  * other devices.
  */
-export async function keepLocal(id) {
-  const existing = await getEntry(id);
-  if (!existing) throw new Error("Entry not found");
-  const entry = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
-  await putEntry(entry);
+export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {}) {
+  const entry = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
+    const existing = entries.get(id);
+    if (!existing) throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
+    if (expectedRevision !== undefined && Number(existing.revision || 0) !== Number(expectedRevision)) {
+      throw new StorageConflictError("Entry was changed in another context", {
+        id,
+        reason: "revision_mismatch",
+        expectedRevision: Number(expectedRevision),
+        actualRevision: Number(existing.revision || 0)
+      });
+    }
+
+    const next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
+    entries.set(id, next);
+    if (remoteEntry) {
+      const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+        ? settings.get(RECONCILIATION_INTENTS_KEY)
+        : [];
+      const intent = {
+        entry_id: id,
+        chosen_side: "local",
+        local_revision: Number(existing.revision || 0),
+        remote_fingerprint: entryFingerprint(remoteEntry),
+        resolution_id: `${id}:${existing.revision}:${remoteEntry.updated_at || ""}`
+      };
+      settings.set(RECONCILIATION_INTENTS_KEY, [
+        ...intents.filter((candidate) => candidate && candidate.entry_id !== id),
+        intent
+      ]);
+    }
+    return next;
+  });
   notifyEntriesChanged({ action: "reconcile", ids: [id] });
   return entry;
 }
