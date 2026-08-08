@@ -118,7 +118,7 @@ function renderDifferent(items) {
       differenceTable(item.differences),
       actionRow([
         { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision }) },
-        { label: "Keep spreadsheet", action: () => keepRemote(item.remote) }
+        { label: "Keep spreadsheet", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) }
       ])
     );
     return row;
@@ -171,7 +171,7 @@ function renderLocalOnly(items) {
       rowHeading(item.local, item.local.dirty ? ["pending upload"] : []),
       actionRow([
         { label: "Upload to spreadsheet", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision }) },
-        { label: "Delete", action: () => deleteEverywhere(item.id), danger: true }
+        { label: "Delete", action: () => deleteEverywhere(item.id, null, { expectedLocalRevision: item.local.revision }), danger: true }
       ])
     );
     return row;
@@ -298,9 +298,9 @@ function bindEvents() {
   $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different, (item) => (
     keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
   )));
-  $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different, (item) => keepRemote(item.remote)));
+  $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different, (item) => keepRemote(item.remote, { expectedLocalRevision: item.local.revision })));
   $("#keepAllNewest").addEventListener("click", () => resolveMany(report.different, (item) => (
-    item.newer === "remote" ? keepRemote(item.remote) : keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
+    item.newer === "remote" ? keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) : keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
   )));
   $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly, (item) => (
     keepLocal(item.id, null, { expectedRevision: item.local.revision })

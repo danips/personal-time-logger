@@ -1,5 +1,5 @@
-import { getAllEntries, getEntry, mutateLocalState, putEntry, StorageConflictError } from "./db.js";
-import { SHEET_HEADERS, entryToRow, normalizeEntry, softDeleteEntry } from "./entries.js";
+import { getAllEntries, mutateEntries, mutateLocalState, StorageConflictError } from "./db.js";
+import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
 import { nowIso } from "./time.js";
@@ -156,30 +156,56 @@ export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {
   return entry;
 }
 
+async function verifyReconciliationRemote(id, expectedRemoteFingerprint, { interactiveAuth = false } = {}) {
+  const snapshot = await readRemoteSnapshot({ interactiveAuth });
+  const current = snapshot.entries.find((entry) => entry.id === id) || null;
+  if (expectedRemoteFingerprint) {
+    if (!current || entryFingerprint(current) !== expectedRemoteFingerprint) {
+      throw new StorageConflictError("Spreadsheet row changed since reconciliation", { id, reason: "remote_fingerprint_mismatch" });
+    }
+  } else if (current) {
+    throw new StorageConflictError("Spreadsheet row appeared since reconciliation", { id, reason: "remote_unexpected" });
+  }
+  return current;
+}
+
 /**
  * Overwrites the local copy with the remote row and marks it clean, which is also
  * how a remote-only row is imported.
  */
-export async function keepRemote(remoteEntry) {
-  const entry = normalizeEntry({
-    ...remoteEntry,
-    dirty: false,
-    last_sync_at: nowIso(),
-    sync_error: ""
+export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedRemoteFingerprint = entryFingerprint(remoteEntry) } = {}) {
+  const verifiedRemote = await verifyReconciliationRemote(remoteEntry.id, expectedRemoteFingerprint);
+  const entry = await mutateEntries([remoteEntry.id], expectedLocalRevision, (entries) => {
+    const existing = entries.get(remoteEntry.id);
+    if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
+      throw new StorageConflictError("Entry changed since reconciliation", { id: remoteEntry.id, reason: "revision_mismatch" });
+    }
+    const next = normalizeEntry({ ...verifiedRemote, dirty: false, last_sync_at: nowIso(), sync_error: "" });
+    entries.set(next.id, next);
+    return next;
   });
-  await putEntry(entry);
   notifyEntriesChanged({ action: "reconcile", ids: [entry.id] });
   return entry;
 }
 
 /**
- * Removes an entry from both sides. A remote-only row has to be imported first so
- * there is a local record to carry the tombstone that sync then pushes.
+ * Removes an entry from both sides by transactionally creating a local tombstone
+ * that sync then pushes. A remote-only row is never persisted as a clean import.
  */
-export async function deleteEverywhere(id, remoteEntry = null) {
-  if (!await getEntry(id)) {
-    if (!remoteEntry) throw new Error("Entry not found");
-    await keepRemote(remoteEntry);
-  }
-  return softDeleteEntry(id);
+export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRevision, expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "" } = {}) {
+  const verifiedRemote = await verifyReconciliationRemote(id, expectedRemoteFingerprint);
+  const entry = await mutateEntries([id], expectedLocalRevision, (entries) => {
+    const existing = entries.get(id);
+    if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
+      throw new StorageConflictError("Entry changed since reconciliation", { id, reason: "revision_mismatch" });
+    }
+    const source = existing || verifiedRemote;
+    if (!source) throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
+    const timestamp = nowIso();
+    const next = normalizeEntry({ ...source, deleted_at: timestamp, updated_at: timestamp, revision: Number(source.revision || 0) + 1, dirty: true, sync_error: "" });
+    entries.set(id, next);
+    return next;
+  });
+  notifyEntriesChanged({ action: "reconcile", ids: [id] });
+  return entry;
 }
