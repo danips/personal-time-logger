@@ -1,4 +1,4 @@
-import { getAllEntries, mutateEntries, mutateLocalState, StorageConflictError } from "./db.js";
+import { getAllEntries, mutateEntries, mutateLocalState, mutateSettings, StorageConflictError } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
@@ -8,9 +8,68 @@ import { nowIso } from "./time.js";
 // sync_error are local bookkeeping, so a difference there is not a divergence.
 const COMPARED_FIELDS = SHEET_HEADERS.filter((field) => field !== "id");
 export const RECONCILIATION_INTENTS_KEY = "reconciliation_intents";
+export const STALE_RECONCILIATION_INTENTS_KEY = "stale_reconciliation_intents";
+export const RECONCILIATION_INTENT_PENDING = "pending_remote_push";
+export const RECONCILIATION_INTENT_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_STALE_RECONCILIATION_INTENTS = 20;
 
 export function entryFingerprint(entry) {
   return entryToRow(entry).join("\u0000");
+}
+
+function localResolutionIntent(entry, remoteEntry, now = Date.now()) {
+  return {
+    entry_id: entry.id,
+    chosen_side: "local",
+    state: RECONCILIATION_INTENT_PENDING,
+    local_revision: Number(entry.revision || 0),
+    remote_fingerprint: entryFingerprint(remoteEntry),
+    resolution_id: `${entry.id}:${entry.revision}:${remoteEntry.updated_at || ""}`,
+    created_at: new Date(now).toISOString(),
+    expires_at: now + RECONCILIATION_INTENT_TTL_MS
+  };
+}
+
+export function isPendingReconciliationIntent(intent, now = Date.now()) {
+  return Boolean(intent
+    && intent.chosen_side === "local"
+    && intent.state === RECONCILIATION_INTENT_PENDING
+    && typeof intent.resolution_id === "string"
+    && Number.isFinite(Number(intent.expires_at))
+    && Number(intent.expires_at) > now);
+}
+
+/** Moves expired/legacy intents to a small local diagnostic record. */
+export async function pruneExpiredReconciliationIntents({ now = Date.now() } = {}) {
+  return mutateSettings([RECONCILIATION_INTENTS_KEY, STALE_RECONCILIATION_INTENTS_KEY], (settings) => {
+    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+      ? settings.get(RECONCILIATION_INTENTS_KEY)
+      : [];
+    const active = [];
+    const stale = [];
+    for (const intent of intents) {
+      if (isPendingReconciliationIntent(intent, now)) active.push(intent);
+      else if (intent?.entry_id || intent?.resolution_id) {
+        stale.push({
+          entry_id: String(intent.entry_id || ""),
+          resolution_id: String(intent.resolution_id || ""),
+          state: String(intent.state || "legacy"),
+          expired_at: new Date(now).toISOString()
+        });
+      }
+    }
+    settings.set(RECONCILIATION_INTENTS_KEY, active);
+    if (stale.length) {
+      const previous = Array.isArray(settings.get(STALE_RECONCILIATION_INTENTS_KEY))
+        ? settings.get(STALE_RECONCILIATION_INTENTS_KEY)
+        : [];
+      settings.set(STALE_RECONCILIATION_INTENTS_KEY, [
+        ...previous,
+        ...stale
+      ].slice(-MAX_STALE_RECONCILIATION_INTENTS));
+    }
+    return stale;
+  });
 }
 
 /**
@@ -134,22 +193,12 @@ export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {
 
     const next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
     entries.set(id, next);
-    if (remoteEntry) {
-      const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
-        ? settings.get(RECONCILIATION_INTENTS_KEY)
-        : [];
-      const intent = {
-        entry_id: id,
-        chosen_side: "local",
-        local_revision: Number(existing.revision || 0),
-        remote_fingerprint: entryFingerprint(remoteEntry),
-        resolution_id: `${id}:${existing.revision}:${remoteEntry.updated_at || ""}`
-      };
-      settings.set(RECONCILIATION_INTENTS_KEY, [
-        ...intents.filter((candidate) => candidate && candidate.entry_id !== id),
-        intent
-      ]);
-    }
+    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+      ? settings.get(RECONCILIATION_INTENTS_KEY)
+      : [];
+    const nextIntents = intents.filter((candidate) => candidate && candidate.entry_id !== id);
+    if (remoteEntry) nextIntents.push(localResolutionIntent(existing, remoteEntry));
+    settings.set(RECONCILIATION_INTENTS_KEY, nextIntents);
     return next;
   });
   notifyEntriesChanged({ action: "reconcile", ids: [id] });
@@ -267,13 +316,7 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
         next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
         entries.set(resolution.id, next);
         if (verifiedRemote) {
-          nextIntents.push({
-            entry_id: resolution.id,
-            chosen_side: "local",
-            local_revision: Number(existing.revision || 0),
-            remote_fingerprint: resolution.expectedRemoteFingerprint,
-            resolution_id: `${resolution.id}:${existing.revision}:${verifiedRemote.updated_at || ""}`
-          });
+          nextIntents.push(localResolutionIntent(existing, verifiedRemote));
         }
       } else if (resolution.action === "keepRemote") {
         assertBatchLocalRevision(existing, resolution.id, resolution.expectedLocalRevision, {
@@ -327,13 +370,17 @@ async function verifyReconciliationRemote(id, expectedRemoteFingerprint, { inter
  */
 export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedRemoteFingerprint = entryFingerprint(remoteEntry) } = {}) {
   const verifiedRemote = await verifyReconciliationRemote(remoteEntry.id, expectedRemoteFingerprint);
-  const entry = await mutateEntries([remoteEntry.id], expectedLocalRevision, (entries) => {
+  const entry = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
     const existing = entries.get(remoteEntry.id);
     if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
       throw new StorageConflictError("Entry changed since reconciliation", { id: remoteEntry.id, reason: "revision_mismatch" });
     }
     const next = normalizeEntry({ ...verifiedRemote, dirty: false, last_sync_at: nowIso(), sync_error: "" });
     entries.set(next.id, next);
+    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+      ? settings.get(RECONCILIATION_INTENTS_KEY)
+      : [];
+    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => intent?.entry_id !== remoteEntry.id));
     return next;
   });
   notifyEntriesChanged({ action: "reconcile", ids: [entry.id] });
@@ -346,7 +393,7 @@ export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedR
  */
 export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRevision, expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "" } = {}) {
   const verifiedRemote = await verifyReconciliationRemote(id, expectedRemoteFingerprint);
-  const entry = await mutateEntries([id], expectedLocalRevision, (entries) => {
+  const entry = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
     const existing = entries.get(id);
     if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
       throw new StorageConflictError("Entry changed since reconciliation", { id, reason: "revision_mismatch" });
@@ -356,6 +403,10 @@ export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRe
     const timestamp = nowIso();
     const next = normalizeEntry({ ...source, deleted_at: timestamp, updated_at: timestamp, revision: Number(source.revision || 0) + 1, dirty: true, sync_error: "" });
     entries.set(id, next);
+    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+      ? settings.get(RECONCILIATION_INTENTS_KEY)
+      : [];
+    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => intent?.entry_id !== id));
     return next;
   });
   notifyEntriesChanged({ action: "reconcile", ids: [id] });

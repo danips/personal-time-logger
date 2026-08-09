@@ -38,13 +38,23 @@ describe("reconciliation intent", () => {
     const intents = await db.getSetting(reconcile.RECONCILIATION_INTENTS_KEY);
 
     assert.equal(chosen.dirty, true);
-    assert.deepEqual(intents, [{
+    assert.equal(intents.length, 1);
+    assert.deepEqual({
+      entry_id: intents[0].entry_id,
+      chosen_side: intents[0].chosen_side,
+      state: intents[0].state,
+      local_revision: intents[0].local_revision,
+      remote_fingerprint: intents[0].remote_fingerprint,
+      resolution_id: intents[0].resolution_id
+    }, {
       entry_id: local.id,
       chosen_side: "local",
+      state: reconcile.RECONCILIATION_INTENT_PENDING,
       local_revision: 2,
       remote_fingerprint: reconcile.entryFingerprint(remote),
       resolution_id: `${local.id}:2:${remote.updated_at}`
-    }]);
+    });
+    assert.equal(reconcile.isPendingReconciliationIntent(intents[0]), true);
   });
 
   it("refuses to record a choice made from a stale reconciliation screen", async () => {
@@ -53,5 +63,18 @@ describe("reconciliation intent", () => {
       () => reconcile.keepLocal("stale-entry", { ...local, id: "stale-entry" }, { expectedRevision: 2 }),
       (error) => error.code === "STORAGE_CONFLICT" && error.reason === "revision_mismatch"
     );
+  });
+
+  it("moves expired and legacy intents into a bounded stale diagnostic record", async () => {
+    await db.setSetting(reconcile.RECONCILIATION_INTENTS_KEY, [
+      { entry_id: "expired", resolution_id: "expired-1", chosen_side: "local", state: reconcile.RECONCILIATION_INTENT_PENDING, expires_at: 1 },
+      { entry_id: "legacy", resolution_id: "legacy-1", chosen_side: "local" }
+    ]);
+
+    const stale = await reconcile.pruneExpiredReconciliationIntents({ now: 2 });
+
+    assert.deepEqual(stale.map((intent) => intent.entry_id), ["expired", "legacy"]);
+    assert.deepEqual(await db.getSetting(reconcile.RECONCILIATION_INTENTS_KEY), []);
+    assert.deepEqual((await db.getSetting(reconcile.STALE_RECONCILIATION_INTENTS_KEY)).map((intent) => intent.entry_id), ["expired", "legacy"]);
   });
 });

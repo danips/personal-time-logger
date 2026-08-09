@@ -8,6 +8,7 @@ globalThis.BroadcastChannel = undefined;
 
 const db = await import("../src/db.js");
 const { markMultipleActiveTimers, purgeDeletedEntries, reseedForNewSpreadsheet } = await import("../src/sync.js");
+const { RECONCILIATION_INTENTS_KEY } = await import("../src/reconcile.js");
 
 const entry = (over = {}) => ({
   id: "maintenance-entry",
@@ -78,5 +79,21 @@ describe("sync maintenance transactions", () => {
 
     assert.equal(await reseedForNewSpreadsheet(local), 0);
     assert.deepEqual(await db.getEntry(snapshot.id), localEdit);
+  });
+
+  it("clears remote-specific reconciliation intents while replacing a spreadsheet", async () => {
+    const snapshot = entry({ id: "reseed-clears-intent" });
+    await db.putEntry(snapshot);
+    await db.setSetting(RECONCILIATION_INTENTS_KEY, [{
+      entry_id: snapshot.id,
+      resolution_id: "old-sheet-resolution",
+      state: "pending_remote_push"
+    }]);
+    await db.setSetting("remote_modified_time", "2026-08-08T12:00:00.000Z");
+
+    await reseedForNewSpreadsheet(localState([snapshot]));
+
+    assert.deepEqual(await db.getSetting(RECONCILIATION_INTENTS_KEY), []);
+    assert.equal(await db.getSetting("remote_modified_time"), "");
   });
 });

@@ -1,4 +1,4 @@
-import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
+import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateEntries, mutateLocalState, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -12,7 +12,12 @@ import {
   updateRemoteEntries
 } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
-import { entryFingerprint, RECONCILIATION_INTENTS_KEY } from "./reconcile.js";
+import {
+  entryFingerprint,
+  isPendingReconciliationIntent,
+  pruneExpiredReconciliationIntents,
+  RECONCILIATION_INTENTS_KEY
+} from "./reconcile.js";
 import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry } from "./entries.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
@@ -225,32 +230,34 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
   return pushedIds;
 }
 
-async function verifiedLocalResolutionIds(local, remoteEntries) {
+async function verifiedLocalResolutions(local, remoteEntries) {
   const intents = await getSetting(RECONCILIATION_INTENTS_KEY, []);
-  if (!Array.isArray(intents) || !intents.length) return new Set();
+  if (!Array.isArray(intents) || !intents.length) return new Map();
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const localById = new Map(local.all().map((entry) => [entry.id, entry]));
-  const verified = new Set();
+  const verified = new Map();
   for (const intent of intents) {
-    if (!intent || intent.chosen_side !== "local") continue;
+    if (!isPendingReconciliationIntent(intent)) continue;
     const localEntry = localById.get(intent.entry_id);
     const remoteEntry = remoteById.get(intent.entry_id);
     if (!localEntry || !remoteEntry) continue;
     if (Number(localEntry.revision || 0) !== Number(intent.local_revision)) continue;
     if (entryFingerprint(remoteEntry) !== intent.remote_fingerprint) continue;
-    verified.add(intent.entry_id);
+    verified.set(intent.entry_id, intent.resolution_id);
   }
   return verified;
 }
 
-async function clearCompletedResolutions(ids, { lease } = {}) {
-  if (!ids.size) return;
+async function clearCompletedResolutions(resolutionIds, { lease } = {}) {
+  if (!resolutionIds.size) return;
   await lease?.assert();
   await mutateSettings([RECONCILIATION_INTENTS_KEY], (settings) => {
     const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
       ? settings.get(RECONCILIATION_INTENTS_KEY)
       : [];
-    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => !ids.has(intent?.entry_id)));
+    // A newer choice for the same entry can be recorded while the Sheets write
+    // is in flight. Clear only the resolution this cycle actually verified.
+    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => !resolutionIds.has(intent?.resolution_id)));
   });
 }
 
@@ -394,11 +401,12 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
  */
 export async function reseedForNewSpreadsheet(local, { lease } = {}) {
   await lease?.assert();
-  const reseeded = await mutateEntries(local.all().map((entry) => entry.id), (entries) => {
+  const candidateIds = new Set(local.all().map((entry) => entry.id));
+  const reseeded = await mutateLocalState([RECONCILIATION_INTENTS_KEY, REMOTE_MODIFIED_KEY], ({ entries, settings }) => {
     const applied = [];
-    for (const [id, current] of entries) {
+    for (const id of candidateIds) {
+      const current = entries.get(id);
       if (!current) {
-        entries.delete(id);
         continue;
       }
       if (current.dirty && !current.sync_error) continue;
@@ -406,11 +414,13 @@ export async function reseedForNewSpreadsheet(local, { lease } = {}) {
       entries.set(id, next);
       applied.push(next);
     }
+    // Intent fingerprints name the previous remote snapshot. They cannot prove
+    // anything about a replacement sheet, so discard them with the reseed.
+    settings.set(RECONCILIATION_INTENTS_KEY, []);
+    settings.set(REMOTE_MODIFIED_KEY, "");
     return applied;
   });
   local.apply(reseeded);
-  await lease?.assert();
-  await setSetting(REMOTE_MODIFIED_KEY, "");
   return reseeded.length;
 }
 
@@ -546,6 +556,8 @@ async function runSyncCycle({ interactiveAuth, force }) {
     await lease.assert();
     const local = localState(await getAllEntries());
     await lease.assert();
+    await pruneExpiredReconciliationIntents();
+    await lease.assert();
     // A timer left running overnight stays running. Only genuinely competing
     // timers are flagged, and that is done before the push so the markers travel
     // in the same pass.
@@ -598,13 +610,16 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
     await lease.assert();
 
-    const forcedResolutionIds = await verifiedLocalResolutionIds(local, snapshot.entries);
+    const forcedResolutions = await verifiedLocalResolutions(local, snapshot.entries);
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, {
       interactiveAuth,
-      forcedIds: forcedResolutionIds,
+      forcedIds: new Set(forcedResolutions.keys()),
       lease
     });
-    await clearCompletedResolutions(new Set([...forcedResolutionIds].filter((id) => pushedIds.has(id))), { lease });
+    const completedResolutionIds = new Set([...forcedResolutions]
+      .filter(([id]) => pushedIds.has(id))
+      .map(([, resolutionId]) => resolutionId));
+    await clearCompletedResolutions(completedResolutionIds, { lease });
     const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { lease });
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
