@@ -1,7 +1,15 @@
 import { getSetting, setSetting } from "../src/db.js";
 import { clearRemoteReadMarker, nextSyncDelayMinutes, syncNow } from "../src/sync.js";
-import { NEXT_DUE_KEY, scheduleSyncHeartbeat, SYNC_ALARM } from "../src/background-schedule.js";
+import {
+  MIN_SYNC_INTERVAL_SECONDS,
+  NEXT_DUE_KEY,
+  scheduleSyncHeartbeat,
+  scheduleWithFallback,
+  SYNC_ALARM
+} from "../src/background-schedule.js";
 import { platform } from "../src/platform.js";
+
+const SCHEDULE_ERROR_KEY = "background_schedule_error";
 
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
@@ -27,22 +35,54 @@ async function runBackgroundSync() {
 }
 
 async function scheduleHeartbeat() {
-  const configured = await getSetting("sync_interval_seconds", 60);
-  return scheduleSyncHeartbeat(configured);
+  return scheduleWithFallback({
+    async schedule() {
+      const configured = await getSetting("sync_interval_seconds", 60);
+      return scheduleSyncHeartbeat(configured);
+    },
+    scheduleFallback() {
+      return scheduleSyncHeartbeat(MIN_SYNC_INTERVAL_SECONDS);
+    },
+    saveDiagnostic(diagnostic) {
+      return setSetting(SCHEDULE_ERROR_KEY, diagnostic);
+    }
+  });
+}
+
+async function runAlarmLifecycle() {
+  try {
+    await runBackgroundSync();
+  } catch {
+    // Sync failures are expected and are handled by syncNow's backoff state.
+  } finally {
+    // This must be awaited so a failed due-time or sync operation cannot strand
+    // future periodic work without attempting a conservative fallback alarm.
+    await scheduleHeartbeat();
+  }
 }
 
 platform.onAlarm((alarm) => {
   if (alarm.name !== SYNC_ALARM) return;
-  runBackgroundSync().then(scheduleHeartbeat);
+  void runAlarmLifecycle();
 });
 
 // A new version may need to see the spreadsheet to migrate or repair it, so the
 // read gate is cleared and the next sync brought forward.
-platform.onInstalled(({ reason }) => {
+async function handleInstalled({ reason }) {
   if (reason !== "install" && reason !== "update") return;
-  clearRemoteReadMarker()
-    .then(() => setSetting(NEXT_DUE_KEY, 0))
-    .catch(() => {});
+  try {
+    await clearRemoteReadMarker();
+    await setSetting(NEXT_DUE_KEY, 0);
+  } catch {
+    // The guaranteed scheduling attempt in finally still gives this context a
+    // chance to recover once IndexedDB is available again.
+  } finally {
+    await scheduleHeartbeat();
+  }
+}
+
+platform.onInstalled((details) => {
+  void handleInstalled(details);
 });
 
-scheduleHeartbeat();
+void scheduleHeartbeat();
