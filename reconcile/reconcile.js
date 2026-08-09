@@ -12,10 +12,12 @@ import { reconciliationActionDisabled, reconciliationActionEligibility } from ".
 import { syncNow } from "../src/sync.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
 import { $, entryTitle, formatError } from "../src/ui-helpers.js";
+import { runPageTask, startPage } from "../src/page-runtime.js";
 
 let report = null;
 let busy = false;
 let unsubscribeEntryEvents = null;
+let eventsBound = false;
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -311,6 +313,8 @@ async function runSync() {
 }
 
 function bindEvents() {
+  if (eventsBound) return;
+  eventsBound = true;
   $("#rescanButton").addEventListener("click", () => scan());
   $("#syncButton").addEventListener("click", runSync);
   $("#deleteAllDuplicates").addEventListener("click", () => resolve(() => confirmDeleteRows(
@@ -347,11 +351,20 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  unsubscribeEntryEvents = onEntriesChanged((detail) => {
-    // A sync started elsewhere can invalidate the comparison on screen.
-    if (busy || detail.action === "reconcile") return;
-    scan({ quiet: true }).catch(() => {});
-  });
+  if (!unsubscribeEntryEvents) {
+    unsubscribeEntryEvents = onEntriesChanged((detail) => {
+      // A sync started elsewhere can invalidate the comparison on screen.
+      if (busy || detail.action === "reconcile") return;
+      void runPageTask({
+        page: "reconcile",
+        phase: "entries-changed",
+        task: () => scan({ quiet: true }),
+        onError(error) {
+          setStatus(`Could not refresh: ${formatError(error)}`);
+        }
+      });
+    });
+  }
   await scan();
 }
 
@@ -359,4 +372,4 @@ window.addEventListener("pagehide", () => {
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
 });
 
-init();
+startPage({ page: "reconcile", title: "Reconcile", init });

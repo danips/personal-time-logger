@@ -27,6 +27,7 @@ import {
   statusFromError
 } from "../src/ui-helpers.js";
 import { platform } from "../src/platform.js";
+import { runPageTask, startPage } from "../src/page-runtime.js";
 import { setActiveIcon } from "../src/icon.js";
 import {
   MAX_WINDOW_SIZE,
@@ -41,6 +42,7 @@ let editingMultiplyValue = "";
 let mergeTargetRevisions = new Map();
 let ticker = null;
 let unsubscribeEntryEvents = null;
+let eventsBound = false;
 const expandedRecentGroups = new Set();
 const RECENT_PAGE_SIZE = 200;
 let recentEntryLimit = RECENT_PAGE_SIZE;
@@ -866,6 +868,8 @@ async function mergeEdit() {
 }
 
 function bindEvents() {
+  if (eventsBound) return;
+  eventsBound = true;
   bindMinuteRollover($editStart);
   bindMinuteRollover($editEnd);
   $editStart.addEventListener("keydown", saveEditOnEnter);
@@ -977,16 +981,34 @@ function bindEvents() {
 async function init() {
   bindEvents();
   await loadWindowSizes();
-  unsubscribeEntryEvents = onEntriesChanged(() => {
-    render().catch((error) => {
-      setStatus($syncStatus, "error", formatError(error));
+  if (!unsubscribeEntryEvents) {
+    unsubscribeEntryEvents = onEntriesChanged(() => {
+      void runPageTask({
+        page: "popup",
+        phase: "entries-changed",
+        task: render,
+        onError(error) {
+          setStatus($syncStatus, "error", formatError(error));
+        }
+      });
     });
-  });
+  }
   await render();
   // Periodic syncing belongs to the background alarm; its notifyEntriesChanged
   // broadcast re-renders this popup, so no local poller is needed.
   await runSync({ force: false });
-  ticker = setInterval(updateElapsed, 1000);
+  if (!ticker) {
+    ticker = setInterval(() => {
+      void runPageTask({
+        page: "popup",
+        phase: "elapsed-tick",
+        task: updateElapsed,
+        onError(error) {
+          setStatus($syncStatus, "error", formatError(error));
+        }
+      });
+    }, 1000);
+  }
 }
 
 window.addEventListener("pagehide", () => {
@@ -994,4 +1016,4 @@ window.addEventListener("pagehide", () => {
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
 });
 
-init();
+startPage({ page: "popup", title: "Time Logger", init });

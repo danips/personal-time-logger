@@ -18,6 +18,7 @@ import {
   weekdayDayMonth
 } from "../src/time.js";
 import { $, entryTitle, formatError, projectColor, statusFromError } from "../src/ui-helpers.js";
+import { runPageTask, startPage } from "../src/page-runtime.js";
 import {
   DAY_COUNT,
   MINUTES_PER_DAY,
@@ -56,6 +57,7 @@ let editingEntryId = "";
 let editingEntryRevision = null;
 let editingMultiplyValue = "";
 let unsubscribeEntryEvents = null;
+let eventsBound = false;
 let lastResizeUndo = null;
 let renderGeneration = 0;
 
@@ -854,6 +856,8 @@ function exportDisplayedWeek() {
 }
 
 function bindEvents() {
+  if (eventsBound) return;
+  eventsBound = true;
   bindMinuteRollover($("#calendarEditStart"));
   bindMinuteRollover($("#calendarEditEnd"));
   $("#prevWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, -DAY_COUNT)), { button: event.currentTarget }));
@@ -882,17 +886,33 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  unsubscribeEntryEvents = onEntriesChanged(() => {
-    render().catch((error) => {
-      setStatus(formatError(error));
+  if (!unsubscribeEntryEvents) {
+    unsubscribeEntryEvents = onEntriesChanged(() => {
+      void runPageTask({
+        page: "calendar",
+        phase: "entries-changed",
+        task: render,
+        onError(error) {
+          setStatus(formatError(error));
+        }
+      });
     });
-  });
+  }
   await render();
   setStatus("Ready");
   runCalendarAction("initial-sync", () => runSync({ force: false }));
-  refreshTimer = setInterval(() => {
-    render().catch((error) => setStatus(formatError(error)));
-  }, 60000);
+  if (!refreshTimer) {
+    refreshTimer = setInterval(() => {
+      void runPageTask({
+        page: "calendar",
+        phase: "periodic-render",
+        task: render,
+        onError(error) {
+          setStatus(formatError(error));
+        }
+      });
+    }, 60000);
+  }
 }
 
 window.addEventListener("pagehide", () => {
@@ -902,4 +922,4 @@ window.addEventListener("pagehide", () => {
   window.removeEventListener("resize", syncScrollbarGutter);
 });
 
-init();
+startPage({ page: "calendar", title: "Calendar", init });

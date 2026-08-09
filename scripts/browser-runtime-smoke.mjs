@@ -50,12 +50,20 @@ async function webdriver(baseUrl, method, pathname, body = undefined) {
 }
 
 async function waitForPage(baseUrl, sessionId, selectors) {
-  const script = `return ${JSON.stringify(selectors)}.every((selector) => document.querySelector(selector));`;
+  const script = `return {
+    ready: document.documentElement.dataset.pageRuntime === "ready"
+      && ${JSON.stringify(selectors)}.every((selector) => document.querySelector(selector))
+      && document.querySelector("#pageFatalPanel")?.hidden !== false,
+    state: document.documentElement.dataset.pageRuntime || "not started",
+    fatal: document.querySelector("#pageFatalMessage")?.textContent || ""
+  };`;
+  let lastState = { state: "not started", fatal: "" };
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, { script, args: [] })) return;
+    lastState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, { script, args: [] });
+    if (lastState.ready) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`Page did not render expected controls: ${selectors.join(", ")}`);
+  throw new Error(`Page did not render expected controls: ${selectors.join(", ")} (runtime ${lastState.state}: ${lastState.fatal || "no fatal panel"})`);
 }
 
 async function extensionOriginFromFirefox(baseUrl, sessionId) {
@@ -130,7 +138,8 @@ try {
     ["popup/popup.html", ["#recentEntries", "#syncStatus"]],
     ["calendar/calendar.html", ["#calendarGrid", "#statusLine"]],
     ["reconcile/reconcile.html", ["#summary", "#syncButton"]],
-    ["options/options.html", ["#diagnosticsSummary", "#saveSettings"]]
+    ["options/options.html", ["#diagnosticsSummary", "#saveSettings"]],
+    ["usage/usage.html", ["#accounts", "#pageStatus"]]
   ];
   for (const [page, selectors] of pages) {
     await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/${page}` });
@@ -146,7 +155,7 @@ try {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await extensionLock(baseUrl, sessionId, "popup", true);
 
-  console.log("Browser runtime smoke passed: popup, calendar, reconcile, options, and cross-context lock.");
+  console.log("Browser runtime smoke passed: popup, calendar, reconcile, options, usage, and cross-context lock.");
 } finally {
   if (sessionId) await webdriver(baseUrl, "DELETE", `/session/${sessionId}`).catch(() => {});
   if (driver && !driver.killed) driver.kill("SIGTERM");

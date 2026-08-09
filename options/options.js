@@ -11,10 +11,12 @@ import {
   spreadsheetUrl
 } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
+import { runPageTask, startPage } from "../src/page-runtime.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 
 let diagnostics = [];
+let eventsBound = false;
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -80,7 +82,14 @@ async function saveSettings() {
   } catch (error) {
     setStatus(`Settings saved, but could not reset the schedule: ${formatError(error)}`);
   }
-  syncNow({ force: true }).catch(() => {});
+  void runPageTask({
+    page: "options",
+    phase: "settings-sync",
+    task: () => syncNow({ force: true }),
+    onError(error) {
+      setStatus(`Settings saved, but sync could not start: ${formatError(error)}`);
+    }
+  });
   await refresh();
 }
 
@@ -294,6 +303,8 @@ async function clearDiagnosticsClicked() {
 }
 
 function bindEvents() {
+  if (eventsBound) return;
+  eventsBound = true;
   $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
   $("#reconnectSpreadsheet").addEventListener("click", (event) => runOptionsAction("reconnect-spreadsheet", reconnectSpreadsheetClicked, event.currentTarget));
@@ -315,4 +326,4 @@ async function init() {
   setStatus("Ready");
 }
 
-init();
+startPage({ page: "options", title: "Options", init });

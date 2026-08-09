@@ -13,6 +13,7 @@ import { runAction } from "../src/action-runner.js";
 import { getSetting, setSetting } from "../src/db.js";
 import { OFFICIAL_USAGE_URL, UsageError } from "../src/codex-usage.js";
 import { platform } from "../src/platform.js";
+import { startPage } from "../src/page-runtime.js";
 
 const AUTO_REFRESH_AFTER_MS = 5 * 60 * 1000;
 const STALE_AFTER_MS = 15 * 60 * 1000;
@@ -30,6 +31,7 @@ const $sessionTokenConsent = $("#sessionTokenConsent");
 const retryTimers = new Map();
 let sessionTokenConsent = false;
 let renderGeneration = 0;
+let eventsBound = false;
 
 function messageFor(error) {
   if (error?.code === "sign_in_required" && error.http_status === 401) {
@@ -360,7 +362,11 @@ async function render({ autoRefresh = true } = {}) {
   }
 }
 
-$grant.addEventListener("click", () => runUsageAction("grant-chatgpt-access", async () => {
+function bindEvents() {
+  if (eventsBound) return;
+  eventsBound = true;
+
+  $grant.addEventListener("click", () => runUsageAction("grant-chatgpt-access", async () => {
   if (!sessionTokenConsent) return consentRequired();
   $status.textContent = "Requesting ChatGPT access…";
   try {
@@ -370,9 +376,9 @@ $grant.addEventListener("click", () => runUsageAction("grant-chatgpt-access", as
   } catch (error) {
     $status.textContent = messageFor(error);
   }
-}, $grant));
+  }, $grant));
 
-$("#addAccount").addEventListener("click", () => runUsageAction("add-chatgpt-account", async () => {
+  $("#addAccount").addEventListener("click", () => runUsageAction("add-chatgpt-account", async () => {
   if (!sessionTokenConsent) return consentRequired();
   const button = $("#addAccount");
   button.disabled = true;
@@ -386,9 +392,9 @@ $("#addAccount").addEventListener("click", () => runUsageAction("add-chatgpt-acc
   } finally {
     button.disabled = false;
   }
-}, $("#addAccount")));
+  }, $("#addAccount")));
 
-$refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-accounts", async () => {
+  $refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-accounts", async () => {
   if (!sessionTokenConsent) return consentRequired();
   try {
     const results = await refreshAllAccounts(await getChatGptAccounts());
@@ -397,20 +403,24 @@ $refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-
   } catch (error) {
     $status.textContent = messageFor(error);
   }
-}, $refreshAll));
+  }, $refreshAll));
 
-$clearData.addEventListener("click", () => runUsageAction("clear-chatgpt-data", async () => {
+  $clearData.addEventListener("click", () => runUsageAction("clear-chatgpt-data", async () => {
   if (!confirm("Clear all local ChatGPT usage bindings, snapshots, fingerprints, and the profile salt? Firefox containers and sessions will remain.")) return;
   await clearChatGptUsageData();
   await render({ autoRefresh: false });
-}, $clearData));
+  }, $clearData));
 
-$sessionTokenConsent.addEventListener("change", () => runUsageAction("save-chatgpt-consent", async () => {
+  $sessionTokenConsent.addEventListener("change", () => runUsageAction("save-chatgpt-consent", async () => {
   sessionTokenConsent = $sessionTokenConsent.checked;
   await setSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, sessionTokenConsent);
   await render({ autoRefresh: false });
-}, $sessionTokenConsent));
+  }, $sessionTokenConsent));
+}
 
-render().catch((error) => {
-  $status.textContent = messageFor(error);
-});
+async function init() {
+  bindEvents();
+  await render();
+}
+
+startPage({ page: "usage", title: "ChatGPT usage limits", init });
