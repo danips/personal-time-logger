@@ -98,4 +98,38 @@ describe("remote row fencing", () => {
       expectedFingerprint: sheets.rowFingerprint(entryToRow(original))
     }]), { code: "REMOTE_ROW_STALE" });
   });
+
+  it("uses bounded contiguous reads for a large row-verification batch", async () => {
+    const originals = Array.from({ length: 300 }, (_, index) => fixture({
+      id: `large-batch-${index + 1}`,
+      task: `Original ${index + 1}`
+    }));
+    const updates = originals.map((original, index) => ({
+      rowIndex: index + 2,
+      entry: fixture({
+        id: original.id,
+        task: `Updated ${index + 1}`,
+        revision: 2,
+        updated_at: "2026-07-27T11:00:00.000Z"
+      }),
+      expectedFingerprint: sheets.rowFingerprint(entryToRow(original))
+    }));
+    google.calls.length = 0;
+    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, ...originals.map(entryToRow)] }));
+    google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/sheet-1/values:batchUpdate" }, google.json({}));
+    google.enqueue(entryRowsPath, google.json({ values: [
+      SHEET_HEADERS,
+      ...updates.map(({ entry }) => entryToRow(entry))
+    ] }));
+
+    await sheets.updateRemoteEntries(updates);
+
+    const verificationReads = google.calls.filter((call) => call.method === "GET"
+      && call.pathname.endsWith("/values/time_entries!A%3AN"));
+    assert.equal(verificationReads.length, 2);
+    assert.equal(verificationReads.every((call) => !call.search.includes("ranges=")), true);
+    const mutation = google.calls.find((call) => call.method === "POST"
+      && call.pathname.endsWith("/values:batchUpdate"));
+    assert.equal(JSON.parse(mutation.body).data.length, 300);
+  });
 });
