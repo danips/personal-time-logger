@@ -135,6 +135,7 @@ class FakeTransaction {
     this.finished = false;
     this.operations = [];
     this.processing = false;
+    this.commitPaused = false;
     this.workingRecords = null;
   }
 
@@ -192,14 +193,27 @@ class FakeTransaction {
   }
 
   finishWhenIdle() {
-    if (!this.started || this.finished || !this.hasOperations || this.pending !== 0) return;
+    if (!this.started || this.finished || this.commitPaused || !this.hasOperations || this.pending !== 0) return;
     setTimeout(() => {
       if (this.pending === 0) this.finish(true);
     }, 0);
   }
 
   finish(success) {
-    if (this.finished) return;
+    if (this.finished || this.commitPaused) return;
+    if (success) {
+      const gate = this.state.takeCommitGate();
+      if (gate) {
+        this.commitPaused = true;
+        gate.reached.resolve();
+        gate.resume = () => {
+          if (!this.commitPaused) return;
+          this.commitPaused = false;
+          this.finish(true);
+        };
+        return;
+      }
+    }
     this.finished = true;
     if (success) {
       if (this.mode !== "readonly") {
@@ -326,6 +340,7 @@ function createIndexedDB() {
   const databases = new Map();
   const state = {
     transactions: [],
+    commitGates: [],
     writeFailure: null,
     consumeWriteFailure() {
       if (!this.writeFailure) return false;
@@ -354,6 +369,7 @@ function createIndexedDB() {
           database = { version: 0, stores: new Map(), transactions: [] };
           database.runNextTransaction = state.runNextTransaction;
           database.consumeWriteFailure = state.consumeWriteFailure.bind(state);
+          database.takeCommitGate = () => state.commitGates.shift();
           databases.set(name, database);
         }
         if (requestedVersion < database.version) {
@@ -389,10 +405,26 @@ function createIndexedDB() {
 
     _reset() {
       databases.clear();
+      state.commitGates = [];
     },
 
     _failOnWrite(writeNumber = 1) {
       state.writeFailure = { remaining: Math.max(1, Number(writeNumber) || 1) };
+    },
+
+    _pauseNextCommit() {
+      let resolveReached;
+      const reached = new Promise((resolve) => { resolveReached = resolve; });
+      const gate = { reached: { resolve: resolveReached }, resume: null };
+      state.commitGates.push(gate);
+      return {
+        waitForCommit() {
+          return reached;
+        },
+        release() {
+          gate.resume?.();
+        }
+      };
     }
   };
 }

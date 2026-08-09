@@ -111,6 +111,42 @@ export function createGoogleApiMock() {
       };
     },
 
+    /** Delivers response headers, then holds the body until the test releases it. */
+    bodyBarrier(label = "response body") {
+      const requested = deferred();
+      const body = deferred();
+      let request = null;
+      const pendingResponse = {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        async text() {
+          const nextResponse = await body.promise;
+          return nextResponse.text();
+        },
+        async json() {
+          return JSON.parse(await this.text());
+        }
+      };
+      return {
+        label,
+        async respond(nextRequest) {
+          request = nextRequest;
+          requested.resolve(nextRequest);
+          return pendingResponse;
+        },
+        waitForRequest() {
+          return requested.promise;
+        },
+        release(nextResponse = mock.json({})) {
+          body.resolve(typeof nextResponse === "function" ? nextResponse(request) : nextResponse);
+        },
+        fail(error = new Error(`Mock Google API body barrier failed: ${label}`)) {
+          body.reject(error);
+        }
+      };
+    },
+
     timeout(label = "request") {
       const timeout = this.barrier(label);
       return {

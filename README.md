@@ -287,7 +287,7 @@ The calendar exports clipped allocations for the displayed week. Deleted entries
 - OAuth uses Google device flow so setup is the same in Chromium and Firefox.
 - The cross-browser refresh-token path uses Google device flow and stores personal OAuth credentials in the local extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
-- Tests cover the pure logic only. Sync against the live Sheets and Drive APIs is not covered.
+- Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live Sheets or Drive.
 - No external runtime dependencies. The only development dependency is Node for the tests and packaging scripts.
 - Manifest V3 support in Firefox can vary by version; if a browser rejects the manifest, use a current Firefox release.
 - SVG icons are in `icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
@@ -298,9 +298,15 @@ The calendar exports clipped allocations for the displayed week. Deleted entries
 npm test
 ```
 
-Runs the Node test runner over `test/`. There is nothing to install: the tests use only the standard library, and the extension itself has no dependencies.
+Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic Google API barriers before response, response body, and commit acknowledgement. There is nothing to install: the tests use only the standard library, and the extension itself has no dependencies.
 
-They cover the pure logic, which is where the bugs have actually been: date and week boundaries, entry normalization and multiplier handling, row serialization round-trips, merge eligibility, conflict comparison, duplicate-row resolution, the reconcile classification, and CSV formatting. Anything needing IndexedDB, the network, or a DOM is out of scope.
+For an opt-in Firefox WebDriver smoke test of popup, calendar, reconcile, options, and an extension-context lock, install Firefox, `geckodriver`, and `zip`, then run:
+
+```bash
+npm run test:browser
+```
+
+Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. This smoke test uses a temporary unsigned extension and never contacts Google APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
 
 GitHub Actions runs them on every push and pull request, and the release workflow runs them before signing, so a failing test blocks a release.
 
