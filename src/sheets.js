@@ -34,7 +34,11 @@ function encodeRange(range) {
 }
 
 function headersMatch(row) {
-  return SHEET_HEADERS.length === row.length && SHEET_HEADERS.every((header, index) => row[index] === header);
+  return headersMatchFor(SHEET_HEADERS, row);
+}
+
+function headersMatchFor(expected, row) {
+  return expected.length === row.length && expected.every((header, index) => row[index] === header);
 }
 
 const SHEET_ID_SETTING = "time_entries_sheet_id";
@@ -348,40 +352,39 @@ async function repairSheetLayout(spreadsheetId, { interactiveAuth = false } = {}
   const sheetId = sheetIdsByTitle.get(SHEET_NAME);
   if (sheetId != null) await rememberSheetId(spreadsheetId, sheetId);
 
+  const headersToWrite = [];
   for (const tab of TABS) {
-    await assertHeaderIsSafeToWrite(spreadsheetId, tab, { interactiveAuth });
+    if (await assertHeaderIsSafeToWrite(spreadsheetId, tab, { interactiveAuth })) headersToWrite.push(tab);
   }
 
-  await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({
-      valueInputOption: "RAW",
-      data: TABS.map((tab) => ({ range: tab.headerRange, values: [tab.headers] }))
-    })
-  }, { interactiveAuth });
+  if (headersToWrite.length) {
+    await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({
+        valueInputOption: "RAW",
+        data: headersToWrite.map((tab) => ({ range: tab.headerRange, values: [tab.headers] }))
+      })
+    }, { interactiveAuth });
+  }
 
   return sheetId;
 }
 
 /**
- * Refuses to rewrite the header when the existing one is a different width.
- *
- * Repairing a header assumes the data below it is still aligned, which holds for a
- * renamed or cleared header row but not for a layout with extra columns, such as a
- * pre-migration backup restored from Drive. Rewriting in that case would silently
- * misalign every row, so it reports the problem instead.
- *
- * Reads past the current range on purpose: within A:N a wider sheet looks the
- * right width.
+ * Only an entirely empty tab can receive a fresh header automatically. A
+ * populated tab must already use the exact known schema; otherwise a repair
+ * could reinterpret its rows under new column names.
  */
 async function assertHeaderIsSafeToWrite(spreadsheetId, tab, { interactiveAuth = false } = {}) {
-  const header = await readHeaderRow(spreadsheetId, `${tab.title}!A1:Z1`, { interactiveAuth });
-  const width = header.reduce((lastNonEmpty, cell, index) => (cell === "" ? lastNonEmpty : index + 1), 0);
-  if (width === 0 || width === tab.headers.length) return;
+  const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${tab.title}!A:Z`)}?fields=values`, {}, { interactiveAuth });
+  const rows = rowsAsText(data.values || []);
+  const header = rows[0] || [];
+  if (headersMatchFor(tab.headers, header)) return false;
+  if (!rows.some((row) => row.some((cell) => cell !== ""))) return true;
 
   throw codedError(
-    "SHEET_MISSING",
-    `The ${tab.title} tab has ${width} columns where ${tab.headers.length} are expected, so its rows are not aligned with the current layout. Fix the columns in the spreadsheet, or let the extension create a new one.`
+    "SHEET_SCHEMA_UNSUPPORTED",
+    `The ${tab.title} tab has a populated, unrecognized schema. No data was changed. Restore the exact header or move the data to a new spreadsheet before syncing.`
   );
 }
 

@@ -59,13 +59,12 @@ describe("spreadsheet provisioning", () => {
         { properties: { title: "config", sheetId: 2 } }
       ]
     }));
-    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/time_entries!A1%3AZ1" }, google.json({
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/time_entries!A%3AZ" }, google.json({
       values: [SHEET_HEADERS]
     }));
-    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/config!A1%3AZ1" }, google.json({
+    google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet/values/config!A%3AZ" }, google.json({
       values: [["key", "value", "updated_at"]]
     }));
-    google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/created-sheet/values:batchUpdate" }, google.json({}));
 
     const recovered = await sheets.provisionSpreadsheet();
     assert.deepEqual(recovered, {
@@ -109,7 +108,7 @@ describe("spreadsheet provisioning", () => {
       ]
     }));
     google.enqueue(
-      { method: "GET", pathname: "/v4/spreadsheets/header-sheet/values/time_entries!A1%3AZ1" },
+      { method: "GET", pathname: "/v4/spreadsheets/header-sheet/values/time_entries!A%3AZ" },
       google.status(403, { error: { message: "The caller does not have permission" } })
     );
 
