@@ -105,4 +105,51 @@ describe("reconciliation actions", () => {
 
     assert.deepEqual(await db.getEntry(remote.id), local);
   });
+
+  it("prevalidates every remote row before changing any selected local entry", async () => {
+    const firstLocal = fixture({ id: "batch-first", task: "First local", dirty: false });
+    const secondLocal = fixture({ id: "batch-second", task: "Second local", dirty: false });
+    const firstRemote = fixture({ id: firstLocal.id, task: "First spreadsheet" });
+    const scannedSecondRemote = fixture({ id: secondLocal.id, task: "Second spreadsheet" });
+    const changedSecondRemote = fixture({
+      id: secondLocal.id,
+      task: "Second spreadsheet changed",
+      updated_at: "2026-08-08T11:00:00.000Z"
+    });
+    await db.putEntries([firstLocal, secondLocal]);
+    enqueueSnapshot([firstRemote, changedSecondRemote]);
+
+    await assert.rejects(
+      () => reconcile.resolveReconciliationBatch([
+        { action: "keepLocal", id: firstLocal.id, remoteEntry: firstRemote, expectedRevision: firstLocal.revision },
+        { action: "keepLocal", id: secondLocal.id, remoteEntry: scannedSecondRemote, expectedRevision: secondLocal.revision }
+      ]),
+      (error) => error.code === "STORAGE_CONFLICT" && error.reason === "remote_fingerprint_mismatch"
+    );
+    assert.equal((await db.getEntry(firstLocal.id)).dirty, false);
+    assert.equal((await db.getEntry(secondLocal.id)).dirty, false);
+  });
+
+  it("applies compatible bulk choices in one snapshot and returns each result", async () => {
+    const firstLocal = fixture({ id: "batch-apply-first", task: "First local", dirty: false });
+    const secondLocal = fixture({ id: "batch-apply-second", task: "Second local", dirty: false });
+    const firstRemote = fixture({ id: firstLocal.id, task: "First spreadsheet" });
+    const secondRemote = fixture({ id: secondLocal.id, task: "Second spreadsheet" });
+    await db.putEntries([firstLocal, secondLocal]);
+    google.calls.length = 0;
+    enqueueSnapshot([firstRemote, secondRemote]);
+
+    const outcome = await reconcile.resolveReconciliationBatch([
+      { action: "keepLocal", id: firstLocal.id, remoteEntry: firstRemote, expectedRevision: firstLocal.revision },
+      { action: "keepLocal", id: secondLocal.id, remoteEntry: secondRemote, expectedRevision: secondLocal.revision }
+    ]);
+
+    assert.deepEqual(outcome.results.map(({ id, action, status }) => ({ id, action, status })), [
+      { id: firstLocal.id, action: "keepLocal", status: "applied" },
+      { id: secondLocal.id, action: "keepLocal", status: "applied" }
+    ]);
+    assert.equal((await db.getEntry(firstLocal.id)).dirty, true);
+    assert.equal((await db.getEntry(secondLocal.id)).dirty, true);
+    assert.equal(google.calls.filter((call) => call.pathname === snapshotPath.pathname).length, 1);
+  });
 });

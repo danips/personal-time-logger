@@ -156,6 +156,158 @@ export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {
   return entry;
 }
 
+function batchResolutionError(message) {
+  const error = new TypeError(message);
+  error.code = "RECONCILIATION_BATCH_INVALID";
+  return error;
+}
+
+function normalizeBatchResolution(resolution) {
+  const action = String(resolution?.action || "");
+  const remoteEntry = resolution?.remoteEntry || null;
+  const id = String(resolution?.id || remoteEntry?.id || "");
+  if (!["keepLocal", "keepRemote", "deleteEverywhere"].includes(action) || !id) {
+    throw batchResolutionError("Each bulk reconciliation item needs an action and entry id.");
+  }
+  if (remoteEntry && remoteEntry.id !== id) {
+    throw batchResolutionError("A bulk reconciliation item has mismatched local and remote ids.");
+  }
+  if ((action === "keepRemote" || action === "deleteEverywhere") && !remoteEntry) {
+    throw batchResolutionError(`${action} requires the remote entry shown in the reconciliation report.`);
+  }
+  if (action === "keepLocal" && resolution.expectedRevision === undefined) {
+    throw batchResolutionError("Bulk local resolutions require the revision shown in the reconciliation report.");
+  }
+  return {
+    action,
+    id,
+    remoteEntry,
+    expectedRevision: resolution.expectedRevision,
+    expectedLocalRevision: resolution.expectedLocalRevision,
+    expectedRemoteFingerprint: resolution.expectedRemoteFingerprint
+      || (remoteEntry ? entryFingerprint(remoteEntry) : "")
+  };
+}
+
+async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = false } = {}) {
+  const snapshot = await readRemoteSnapshot({ interactiveAuth });
+  const remoteById = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
+  for (const resolution of resolutions) {
+    const current = remoteById.get(resolution.id) || null;
+    if (resolution.expectedRemoteFingerprint) {
+      if (!current || entryFingerprint(current) !== resolution.expectedRemoteFingerprint) {
+        throw new StorageConflictError("Spreadsheet row changed since reconciliation", {
+          id: resolution.id,
+          reason: "remote_fingerprint_mismatch"
+        });
+      }
+    } else if (current) {
+      throw new StorageConflictError("Spreadsheet row appeared since reconciliation", {
+        id: resolution.id,
+        reason: "remote_unexpected"
+      });
+    }
+  }
+  return remoteById;
+}
+
+function assertBatchLocalRevision(existing, id, expectedRevision, { absentOnly = false } = {}) {
+  if (absentOnly) {
+    if (!existing) return;
+    throw new StorageConflictError("Entry changed since reconciliation", {
+      id,
+      reason: "revision_mismatch",
+      expectedRevision: undefined,
+      actualRevision: Number(existing.revision || 0)
+    });
+  }
+  if (!existing) {
+    throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
+  }
+  if (Number(existing.revision || 0) !== Number(expectedRevision)) {
+    throw new StorageConflictError("Entry changed since reconciliation", {
+      id,
+      reason: "revision_mismatch",
+      expectedRevision: Number(expectedRevision),
+      actualRevision: Number(existing.revision || 0)
+    });
+  }
+}
+
+/**
+ * Applies a set of choices from one reconciliation report. The remote rows are
+ * all checked from one snapshot before a single local transaction validates the
+ * displayed revisions and records every local consequence. Remote state can
+ * still change after the snapshot, so the returned result is explicit per id;
+ * the forced sync that follows remains responsible for the remote commit.
+ */
+export async function resolveReconciliationBatch(items, { interactiveAuth = false } = {}) {
+  const resolutions = items.map(normalizeBatchResolution);
+  if (!resolutions.length) return { results: [] };
+  const ids = new Set();
+  for (const resolution of resolutions) {
+    if (ids.has(resolution.id)) throw batchResolutionError(`Entry ${resolution.id} was selected more than once.`);
+    ids.add(resolution.id);
+  }
+
+  const remoteById = await verifyBatchRemoteResolutions(resolutions, { interactiveAuth });
+  const results = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
+    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+      ? settings.get(RECONCILIATION_INTENTS_KEY)
+      : [];
+    const nextIntents = intents.filter((intent) => !ids.has(intent?.entry_id));
+    const applied = [];
+
+    for (const resolution of resolutions) {
+      const existing = entries.get(resolution.id);
+      const verifiedRemote = remoteById.get(resolution.id) || null;
+      let next;
+      if (resolution.action === "keepLocal") {
+        assertBatchLocalRevision(existing, resolution.id, resolution.expectedRevision);
+        next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
+        entries.set(resolution.id, next);
+        if (verifiedRemote) {
+          nextIntents.push({
+            entry_id: resolution.id,
+            chosen_side: "local",
+            local_revision: Number(existing.revision || 0),
+            remote_fingerprint: resolution.expectedRemoteFingerprint,
+            resolution_id: `${resolution.id}:${existing.revision}:${verifiedRemote.updated_at || ""}`
+          });
+        }
+      } else if (resolution.action === "keepRemote") {
+        assertBatchLocalRevision(existing, resolution.id, resolution.expectedLocalRevision, {
+          absentOnly: resolution.expectedLocalRevision === undefined
+        });
+        next = normalizeEntry({ ...verifiedRemote, dirty: false, last_sync_at: nowIso(), sync_error: "" });
+        entries.set(resolution.id, next);
+      } else {
+        if (resolution.expectedLocalRevision === undefined) {
+          assertBatchLocalRevision(existing, resolution.id, undefined, { absentOnly: true });
+        } else {
+          assertBatchLocalRevision(existing, resolution.id, resolution.expectedLocalRevision);
+        }
+        const source = existing || verifiedRemote;
+        const timestamp = nowIso();
+        next = normalizeEntry({
+          ...source,
+          deleted_at: timestamp,
+          updated_at: timestamp,
+          revision: Number(source.revision || 0) + 1,
+          dirty: true,
+          sync_error: ""
+        });
+        entries.set(resolution.id, next);
+      }
+      applied.push({ id: resolution.id, action: resolution.action, status: "applied", entry: next });
+    }
+    settings.set(RECONCILIATION_INTENTS_KEY, nextIntents);
+    return applied;
+  });
+  notifyEntriesChanged({ action: "reconcile", ids: [...ids] });
+  return { results };
+}
+
 async function verifyReconciliationRemote(id, expectedRemoteFingerprint, { interactiveAuth = false } = {}) {
   const snapshot = await readRemoteSnapshot({ interactiveAuth });
   const current = snapshot.entries.find((entry) => entry.id === id) || null;

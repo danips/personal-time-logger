@@ -3,7 +3,8 @@ import {
   deleteEverywhere,
   keepLocal,
   keepRemote,
-  loadReconciliation
+  loadReconciliation,
+  resolveReconciliationBatch
 } from "../src/reconcile.js";
 import { onEntriesChanged } from "../src/events.js";
 import { reconciliationActionDisabled, reconciliationActionEligibility } from "../src/reconcile-ui-state.js";
@@ -268,12 +269,13 @@ async function scan({ quiet = false } = {}) {
  * follows is what carries the decision to the spreadsheet, so one code path owns
  * all remote writes.
  */
-async function resolve(action) {
+async function resolve(action, status = "Applying...") {
   if (busy) return;
   setBusy(true);
   try {
-    setStatus("Applying...");
-    await action();
+    setStatus(status);
+    const outcome = await action();
+    if (outcome?.results) setStatus(`Applied ${outcome.results.length} selected entr${outcome.results.length === 1 ? "y" : "ies"}; syncing...`);
     await syncNow({ force: true });
     await scan({ quiet: true });
   } catch (error) {
@@ -282,10 +284,11 @@ async function resolve(action) {
   }
 }
 
-function resolveMany(items, pick) {
-  return resolve(async () => {
-    for (const item of items) await pick(item);
-  });
+function resolveMany(items) {
+  return resolve(
+    () => resolveReconciliationBatch(items, { interactiveAuth: false }),
+    `Prevalidating and applying ${items.length} selected entr${items.length === 1 ? "y" : "ies"}...`
+  );
 }
 
 async function runSync() {
@@ -308,17 +311,33 @@ function bindEvents() {
   $("#deleteAllDuplicates").addEventListener("click", () => resolve(() => confirmDeleteRows(
     report.duplicates.flatMap((item) => item.extraRows)
   )));
-  $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different, (item) => (
-    keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
-  )));
-  $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different, (item) => keepRemote(item.remote, { expectedLocalRevision: item.local.revision })));
-  $("#keepAllNewest").addEventListener("click", () => resolveMany(report.different, (item) => (
-    item.newer === "remote" ? keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) : keepLocal(item.id, item.remote, { expectedRevision: item.local.revision })
-  )));
-  $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly, (item) => (
-    keepLocal(item.id, null, { expectedRevision: item.local.revision })
-  )));
-  $("#importAllRemote").addEventListener("click", () => resolveMany(report.remoteOnly, (item) => keepRemote(item.remote)));
+  $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different.map((item) => ({
+    action: "keepLocal",
+    id: item.id,
+    remoteEntry: item.remote,
+    expectedRevision: item.local.revision
+  }))));
+  $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different.map((item) => ({
+    action: "keepRemote",
+    id: item.id,
+    remoteEntry: item.remote,
+    expectedLocalRevision: item.local.revision
+  }))));
+  $("#keepAllNewest").addEventListener("click", () => resolveMany(report.different.map((item) => (
+    item.newer === "remote"
+      ? { action: "keepRemote", id: item.id, remoteEntry: item.remote, expectedLocalRevision: item.local.revision }
+      : { action: "keepLocal", id: item.id, remoteEntry: item.remote, expectedRevision: item.local.revision }
+  ))));
+  $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly.map((item) => ({
+    action: "keepLocal",
+    id: item.id,
+    expectedRevision: item.local.revision
+  }))));
+  $("#importAllRemote").addEventListener("click", () => resolveMany(report.remoteOnly.map((item) => ({
+    action: "keepRemote",
+    id: item.id,
+    remoteEntry: item.remote
+  }))));
 }
 
 async function init() {
