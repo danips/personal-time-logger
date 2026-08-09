@@ -6,6 +6,7 @@ import {
   loadReconciliation,
   resolveReconciliationBatch
 } from "../src/reconcile.js";
+import { runAction } from "../src/action-runner.js";
 import { onEntriesChanged } from "../src/events.js";
 import { reconciliationActionDisabled, reconciliationActionEligibility } from "../src/reconcile-ui-state.js";
 import { syncNow } from "../src/sync.js";
@@ -247,9 +248,9 @@ function render() {
   applyControlState();
 }
 
-async function scan({ quiet = false } = {}) {
+async function scan({ quiet = false, manageBusy = true } = {}) {
   if (!quiet) setStatus("Comparing this device with the spreadsheet...");
-  setBusy(true);
+  if (manageBusy) setBusy(true);
   try {
     report = await loadReconciliation({ interactiveAuth: false });
     render();
@@ -260,7 +261,7 @@ async function scan({ quiet = false } = {}) {
   } catch (error) {
     setStatus(`Could not compare: ${formatError(error)}`);
   } finally {
-    setBusy(false);
+    if (manageBusy) setBusy(false);
   }
 }
 
@@ -269,19 +270,23 @@ async function scan({ quiet = false } = {}) {
  * follows is what carries the decision to the spreadsheet, so one code path owns
  * all remote writes.
  */
-async function resolve(action, status = "Applying...") {
+function resolve(action, status = "Applying...") {
   if (busy) return;
-  setBusy(true);
-  try {
+  return runAction("reconciliation-resolution", async () => {
     setStatus(status);
     const outcome = await action();
     if (outcome?.results) setStatus(`Applied ${outcome.results.length} selected entr${outcome.results.length === 1 ? "y" : "ies"}; syncing...`);
     await syncNow({ force: true });
-    await scan({ quiet: true });
-  } catch (error) {
-    setStatus(`Could not apply: ${formatError(error)}`);
-    setBusy(false);
-  }
+    await scan({ quiet: true, manageBusy: false });
+  }, {
+    setBusy,
+    onError(error) {
+      setStatus(`Could not apply: ${formatError(error)}`);
+    },
+    onFinally() {
+      applyControlState();
+    }
+  });
 }
 
 function resolveMany(items) {

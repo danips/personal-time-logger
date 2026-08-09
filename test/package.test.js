@@ -29,6 +29,7 @@ const expectedFiles = [
   "reconcile/reconcile.css",
   "reconcile/reconcile.html",
   "reconcile/reconcile.js",
+  "src/action-runner.js",
   "src/auth.js",
   "src/background-schedule.js",
   "src/calendar-layout.js",

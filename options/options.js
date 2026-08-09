@@ -1,4 +1,5 @@
 import { getAllEntries, getSetting, mutateSettings } from "../src/db.js";
+import { runAction } from "../src/action-runner.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
@@ -14,6 +15,20 @@ import { nowIso } from "../src/time.js";
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
+}
+
+function runOptionsAction(key, action, button) {
+  return runAction(key, action, {
+    setBusy(next) {
+      if (button) button.disabled = next;
+    },
+    onError(error) {
+      setStatus(formatError(error));
+    },
+    onFinally() {
+      return refresh().catch((error) => setStatus(formatError(error)));
+    }
+  });
 }
 
 function setDeviceAuthPanel(details = null) {
@@ -241,15 +256,15 @@ async function createReplacementSpreadsheetClicked() {
 }
 
 function bindEvents() {
-  $("#saveSettings").addEventListener("click", saveSettings);
+  $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
-  $("#reconnectSpreadsheet").addEventListener("click", reconnectSpreadsheetClicked);
-  $("#connectSpreadsheet").addEventListener("click", connectSpreadsheetClicked);
-  $("#createReplacementSpreadsheet").addEventListener("click", createReplacementSpreadsheetClicked);
+  $("#reconnectSpreadsheet").addEventListener("click", (event) => runOptionsAction("reconnect-spreadsheet", reconnectSpreadsheetClicked, event.currentTarget));
+  $("#connectSpreadsheet").addEventListener("click", (event) => runOptionsAction("connect-spreadsheet", connectSpreadsheetClicked, event.currentTarget));
+  $("#createReplacementSpreadsheet").addEventListener("click", (event) => runOptionsAction("create-replacement-spreadsheet", createReplacementSpreadsheetClicked, event.currentTarget));
 
-  $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
-  $("#signInButton").addEventListener("click", signInClicked);
-  $("#signOutButton").addEventListener("click", signOutClicked);
+  $("#saveGoogleCredentials").addEventListener("click", (event) => runOptionsAction("save-google-credentials", saveGoogleCredentials, event.currentTarget));
+  $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));
+  $("#signOutButton").addEventListener("click", (event) => runOptionsAction("google-sign-out", signOutClicked, event.currentTarget));
 
 }
 

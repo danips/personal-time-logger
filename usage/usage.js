@@ -9,6 +9,7 @@ import {
   verifyAccount,
   clearChatGptUsageData
 } from "../src/chatgpt-containers.js";
+import { runAction } from "../src/action-runner.js";
 import { getSetting, setSetting } from "../src/db.js";
 import { OFFICIAL_USAGE_URL, UsageError } from "../src/codex-usage.js";
 import { platform } from "../src/platform.js";
@@ -108,6 +109,22 @@ function errorCode(account) {
 function consentRequired() {
   $status.textContent = "Confirm the in-memory session-token notice before checking ChatGPT usage.";
   $sessionTokenConsent.focus();
+}
+
+function runUsageAction(key, action, button = null) {
+  return runAction(key, action, {
+    setBusy(next) {
+      if (button) button.disabled = next;
+    },
+    onError(error) {
+      $status.textContent = messageFor(error);
+    },
+    onFinally() {
+      return render({ autoRefresh: false }).catch((error) => {
+        $status.textContent = messageFor(error);
+      });
+    }
+  });
 }
 
 async function retryTransient(account) {
@@ -258,20 +275,20 @@ function accountCard(account, enabled) {
   refresh.textContent = "Refresh";
   refresh.disabled = !enabled;
   refresh.title = enabled ? "Refresh this account" : "Grant ChatGPT access and confirm the session-token notice to refresh";
-  refresh.addEventListener("click", () => refreshOne(account));
+  refresh.addEventListener("click", () => runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account), refresh));
   actions.append(refresh);
 
   const openUsage = document.createElement("button");
   openUsage.type = "button";
   openUsage.textContent = "Open ChatGPT Usage";
-  openUsage.addEventListener("click", () => usageTab(account));
+  openUsage.addEventListener("click", () => usageTab(account).catch((error) => { $status.textContent = messageFor(error); }));
   actions.append(openUsage);
 
   if (account.pending_setup || storedError === "sign_in_required" || storedError === "account_mismatch") {
     const signIn = document.createElement("button");
     signIn.type = "button";
     signIn.textContent = "Sign in";
-    signIn.addEventListener("click", () => usageTab(account));
+    signIn.addEventListener("click", () => usageTab(account).catch((error) => { $status.textContent = messageFor(error); }));
     actions.append(signIn);
   }
 
@@ -280,9 +297,8 @@ function accountCard(account, enabled) {
     check.type = "button";
     check.textContent = "Check signed-in account";
     check.disabled = !enabled;
-    check.addEventListener("click", async () => {
+    check.addEventListener("click", () => runUsageAction(`verify-account:${account.id}`, async () => {
       if (!sessionTokenConsent) return consentRequired();
-      check.disabled = true;
       $status.textContent = `Checking ${account.label}…`;
       try {
         await verifyAccount(account.cookie_store_id);
@@ -290,20 +306,19 @@ function accountCard(account, enabled) {
         await render({ autoRefresh: false });
       } catch (error) {
         $status.textContent = `${account.label}: ${messageFor(error)}`;
-        check.disabled = false;
       }
-    });
+    }, check));
     actions.append(check);
   }
 
   const disconnect = document.createElement("button");
   disconnect.type = "button";
   disconnect.textContent = "Disconnect";
-  disconnect.addEventListener("click", async () => {
+  disconnect.addEventListener("click", () => runUsageAction(`disconnect-account:${account.id}`, async () => {
     if (!confirm(`Disconnect ${account.label}? The Firefox container will remain.`)) return;
     await disconnectAccount(account.id);
     await render({ autoRefresh: false });
-  });
+  }, disconnect));
   actions.append(disconnect);
   card.append(actions);
   return card;
@@ -341,13 +356,12 @@ async function render({ autoRefresh = true } = {}) {
   }
   if (autoRefresh && enabled) {
     const due = accounts.filter((account) => account.snapshot && (snapshotAge(account.snapshot) > AUTO_REFRESH_AFTER_MS || isExpired(account.snapshot)));
-    for (const account of due) refreshOne(account, { automatic: true });
+    for (const account of due) runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account, { automatic: true }));
   }
 }
 
-$grant.addEventListener("click", async () => {
+$grant.addEventListener("click", () => runUsageAction("grant-chatgpt-access", async () => {
   if (!sessionTokenConsent) return consentRequired();
-  $grant.disabled = true;
   $status.textContent = "Requesting ChatGPT access…";
   try {
     const granted = await platform.requestOptionalHostPermission(CHATGPT_HOST_PERMISSION);
@@ -355,11 +369,10 @@ $grant.addEventListener("click", async () => {
     await render({ autoRefresh: false });
   } catch (error) {
     $status.textContent = messageFor(error);
-    $grant.disabled = false;
   }
-});
+}, $grant));
 
-$("#addAccount").addEventListener("click", async () => {
+$("#addAccount").addEventListener("click", () => runUsageAction("add-chatgpt-account", async () => {
   if (!sessionTokenConsent) return consentRequired();
   const button = $("#addAccount");
   button.disabled = true;
@@ -373,34 +386,30 @@ $("#addAccount").addEventListener("click", async () => {
   } finally {
     button.disabled = false;
   }
-});
+}, $("#addAccount")));
 
-$refreshAll.addEventListener("click", async () => {
+$refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-accounts", async () => {
   if (!sessionTokenConsent) return consentRequired();
-  $refreshAll.disabled = true;
   try {
     const results = await refreshAllAccounts(await getChatGptAccounts());
     const succeeded = results.filter((result) => result.ok).length;
     $status.textContent = `${succeeded} of ${results.length} account refreshes succeeded.`;
   } catch (error) {
     $status.textContent = messageFor(error);
-  } finally {
-    $refreshAll.disabled = false;
-    await render({ autoRefresh: false });
   }
-});
+}, $refreshAll));
 
-$clearData.addEventListener("click", async () => {
+$clearData.addEventListener("click", () => runUsageAction("clear-chatgpt-data", async () => {
   if (!confirm("Clear all local ChatGPT usage bindings, snapshots, fingerprints, and the profile salt? Firefox containers and sessions will remain.")) return;
   await clearChatGptUsageData();
   await render({ autoRefresh: false });
-});
+}, $clearData));
 
-$sessionTokenConsent.addEventListener("change", async () => {
+$sessionTokenConsent.addEventListener("change", () => runUsageAction("save-chatgpt-consent", async () => {
   sessionTokenConsent = $sessionTokenConsent.checked;
   await setSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, sessionTokenConsent);
   await render({ autoRefresh: false });
-});
+}, $sessionTokenConsent));
 
 render().catch((error) => {
   $status.textContent = messageFor(error);

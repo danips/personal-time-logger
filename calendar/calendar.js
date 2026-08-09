@@ -1,4 +1,5 @@
 import { getVisibleEntries } from "../src/db.js";
+import { isActionRunning, runAction } from "../src/action-runner.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { downloadCsv } from "../src/csv.js";
@@ -61,6 +62,21 @@ let renderGeneration = 0;
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
+}
+
+function runCalendarAction(key, action, { button = null, expectedRevision } = {}) {
+  return runAction(key, action, {
+    expectedRevision,
+    setBusy(next) {
+      if (button) button.disabled = next;
+    },
+    onError(error) {
+      setStatus(formatError(error));
+    },
+    onFinally() {
+      return render().catch((error) => setStatus(formatError(error)));
+    }
+  });
 }
 
 function setResizeUndo(action) {
@@ -416,7 +432,7 @@ function beginDrag(event) {
   const entry = getEntryById(block.dataset.entryId);
   // A running timer has no settled duration and must stay anchored to its
   // original start time while it is active.
-  if (!entry || !entry.end_at) return;
+  if (!entry || !entry.end_at || isActionRunning(`drag-entry:${entry.id}`)) return;
 
   event.preventDefault();
   const rect = block.getBoundingClientRect();
@@ -430,10 +446,13 @@ function beginDrag(event) {
     active: false,
     target: null
   };
+  dragState.finish = () => runCalendarAction(`drag-entry:${entry.id}`, endDrag, {
+    expectedRevision: entry.revision
+  });
   block.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveDrag);
-  window.addEventListener("pointerup", endDrag, { once: true });
-  window.addEventListener("pointercancel", endDrag, { once: true });
+  window.addEventListener("pointerup", dragState.finish, { once: true });
+  window.addEventListener("pointercancel", dragState.finish, { once: true });
 }
 
 function resizeTargetFromPointer(clientX, clientY) {
@@ -466,7 +485,7 @@ function beginResize(event) {
   const handle = event.currentTarget;
   const block = handle.closest(".entry-block");
   const entry = block && getEntryById(block.dataset.entryId);
-  if (!entry || !entry.end_at || entry.id !== selectedEntryId) return;
+  if (!entry || !entry.end_at || entry.id !== selectedEntryId || isActionRunning(`resize-entry:${entry.id}`)) return;
 
   event.preventDefault();
   event.stopPropagation();
@@ -481,10 +500,13 @@ function beginResize(event) {
     active: false,
     target: null
   };
+  dragState.finish = () => runCalendarAction(`resize-entry:${entry.id}`, endResize, {
+    expectedRevision: entry.revision
+  });
   handle.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveResize);
-  window.addEventListener("pointerup", endResize, { once: true });
-  window.addEventListener("pointercancel", endResize, { once: true });
+  window.addEventListener("pointerup", dragState.finish, { once: true });
+  window.addEventListener("pointercancel", dragState.finish, { once: true });
 }
 
 function moveResize(event) {
@@ -528,8 +550,8 @@ async function endResize() {
   const state = dragState;
   dragState = null;
   window.removeEventListener("pointermove", moveResize);
-  window.removeEventListener("pointerup", endResize);
-  window.removeEventListener("pointercancel", endResize);
+  window.removeEventListener("pointerup", state.finish);
+  window.removeEventListener("pointercancel", state.finish);
   state.block.classList.remove("resize-source");
   if (preview) {
     preview.remove();
@@ -591,8 +613,8 @@ async function endDrag() {
   const state = dragState;
   dragState = null;
   window.removeEventListener("pointermove", moveDrag);
-  window.removeEventListener("pointerup", endDrag);
-  window.removeEventListener("pointercancel", endDrag);
+  window.removeEventListener("pointerup", state.finish);
+  window.removeEventListener("pointercancel", state.finish);
   state.block.classList.remove("drag-source");
   if (preview) {
     preview.remove();
@@ -835,22 +857,25 @@ function exportDisplayedWeek() {
 function bindEvents() {
   bindMinuteRollover($("#calendarEditStart"));
   bindMinuteRollover($("#calendarEditEnd"));
-  $("#prevWeek").addEventListener("click", () => changeWeek(addDays(weekStart, -DAY_COUNT)));
-  $("#nextWeek").addEventListener("click", () => changeWeek(addDays(weekStart, DAY_COUNT)));
-  $("#todayButton").addEventListener("click", () => changeWeek(new Date()));
+  $("#prevWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, -DAY_COUNT)), { button: event.currentTarget }));
+  $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
+  $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
   $("#exportButton").addEventListener("click", exportDisplayedWeek);
-  $("#syncButton").addEventListener("click", () => runSync({ force: true }));
-  $("#undoResizeButton").addEventListener("click", undoResize);
-  $("#duplicateEntryButton").addEventListener("click", duplicateSelectedEntry);
-  $("#calendarMergeButton").addEventListener("click", mergeSelectedEntry);
-  $("#calendarEditForm").addEventListener("submit", saveCalendarEdit);
-  $("#cancelCalendarEditButton").addEventListener("click", clearSelection);
+  $("#syncButton").addEventListener("click", (event) => runCalendarAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
+  $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, { button: event.currentTarget, expectedRevision: lastResizeUndo?.revision }));
+  $("#duplicateEntryButton").addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));
+  $("#calendarMergeButton").addEventListener("click", (event) => runCalendarAction(`merge-entry:${selectedEntryId}`, mergeSelectedEntry, { button: event.currentTarget }));
+  $("#calendarEditForm").addEventListener("submit", (event) => runCalendarAction(`save-entry:${editingEntryId}`, () => saveCalendarEdit(event), { expectedRevision: editingEntryRevision }));
+  $("#cancelCalendarEditButton").addEventListener("click", () => clearSelection().catch((error) => setStatus(formatError(error))));
 
-  $("#deleteCalendarEntry").addEventListener("click", deleteCalendarEntry);
+  $("#deleteCalendarEntry").addEventListener("click", (event) => runCalendarAction(`delete-entry:${editingEntryId}`, deleteCalendarEntry, {
+    button: event.currentTarget,
+    expectedRevision: editingEntryRevision
+  }));
   bindPopupDrag($(".edit-popup"));
-  $("#weekPicker").addEventListener("change", async (event) => {
+  $("#weekPicker").addEventListener("change", (event) => {
     const parsed = weekStartFromInput(event.target.value);
-    if (parsed) await changeWeek(parsed);
+    if (parsed) runCalendarAction("change-week", () => changeWeek(parsed), { button: event.currentTarget });
   });
   document.addEventListener("pointerdown", handleOutsidePointerDown);
   window.addEventListener("resize", syncScrollbarGutter);
@@ -865,8 +890,10 @@ async function init() {
   });
   await render();
   setStatus("Ready");
-  runSync({ force: false });
-  refreshTimer = setInterval(render, 60000);
+  runCalendarAction("initial-sync", () => runSync({ force: false }));
+  refreshTimer = setInterval(() => {
+    render().catch((error) => setStatus(formatError(error)));
+  }, 60000);
 }
 
 window.addEventListener("pagehide", () => {

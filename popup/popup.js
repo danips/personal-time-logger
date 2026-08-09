@@ -1,4 +1,5 @@
 import { getActiveEntries, getDirtyEntries, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
+import { runAction } from "../src/action-runner.js";
 import { getChatGptAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
@@ -733,6 +734,21 @@ async function runSync({ force = false } = {}) {
   await render();
 }
 
+function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
+  return runAction(key, action, {
+    expectedRevision,
+    setBusy(next) {
+      if (button) button.disabled = next;
+    },
+    onError(error) {
+      setStatus($syncStatus, "error", formatError(error));
+    },
+    onFinally() {
+      return render().catch((error) => setStatus($syncStatus, "error", formatError(error)));
+    }
+  });
+}
+
 async function startTimer() {
   await replaceActiveTimer(formFields());
   setNewTimerOpen(false);
@@ -752,10 +768,10 @@ async function restartFromEntry(id) {
   await runSync({ force: false });
 }
 
-async function stopTimer() {
+async function stopTimer({ expectedRevision } = {}) {
   const active = await getActiveEntries();
   if (!active.length) return;
-  await stopEntry(active[0].id);
+  await stopEntry(active[0].id, { expectedRevision: expectedRevision ?? active[0].revision });
   await runSync({ force: false });
 }
 
@@ -783,7 +799,7 @@ function editActiveTimer(event) {
     $("#project").focus();
     return;
   }
-  showEdit(latest.id);
+  showEdit(latest.id).catch((error) => setStatus($syncStatus, "error", formatError(error)));
 }
 
 function editActiveTimerFromKeyboard(event) {
@@ -845,7 +861,7 @@ async function saveEdit() {
 function saveEditOnEnter(event) {
   if (event.key !== "Enter" || event.isComposing || event.repeat) return;
   event.preventDefault();
-  saveEdit();
+  runPopupAction(`save-entry:${editingId}`, saveEdit, { expectedRevision: editingRevision });
 }
 
 async function deleteEdit() {
@@ -892,28 +908,33 @@ function bindEvents() {
   $editStart.addEventListener("keydown", saveEditOnEnter);
   $editEnd.addEventListener("keydown", saveEditOnEnter);
   $newTimerToggle.addEventListener("click", toggleNewTimer);
-  $("#startButton").addEventListener("click", startTimer);
-  $("#stopButton").addEventListener("click", stopTimer);
+  $("#startButton").addEventListener("click", (event) => runPopupAction("start-timer", startTimer, { button: event.currentTarget }));
+  $("#stopButton").addEventListener("click", (event) => runPopupAction("stop-timer", stopTimer, {
+    button: event.currentTarget,
+    expectedRevision: activeEntries[0]?.revision
+  }));
   $activePanel.addEventListener("click", editActiveTimer);
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
-  $("#headerSyncButton").addEventListener("click", () => runSync({ force: true }));
+  $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
   $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
     render().catch((error) => {
       setStatus($syncStatus, "error", formatError(error));
     });
   });
-  $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html"));
-  $("#openReconcile").addEventListener("click", () => platform.openExtensionPage("reconcile/reconcile.html"));
-  $("#openCodexUsage").addEventListener("click", () => platform.openExtensionPage("usage/usage.html"));
+  $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
+  $("#openReconcile").addEventListener("click", () => platform.openExtensionPage("reconcile/reconcile.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
+  $("#openCodexUsage").addEventListener("click", () => platform.openExtensionPage("usage/usage.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
   $windowSizePresets.addEventListener("click", (event) => {
     const button = event.target.closest("[data-window-width]");
     if (!button) return;
-    resizeBrowserWindow(
-      Number(button.dataset.windowWidth),
-      Number(button.dataset.windowHeight),
-      button.dataset.windowMode === "true"
-    );
+    runPopupAction(`resize-window:${button.dataset.windowWidth}x${button.dataset.windowHeight}:${button.dataset.windowMode}`, () => (
+      resizeBrowserWindow(
+        Number(button.dataset.windowWidth),
+        Number(button.dataset.windowHeight),
+        button.dataset.windowMode === "true"
+      )
+    ), { button });
   });
   $("#editWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(!windowSizeEditorOpen));
   $("#addWindowSize").addEventListener("click", () => {
@@ -928,18 +949,27 @@ function bindEvents() {
     editingWindowSizes.splice(Number(remove.dataset.removeWindowSize), 1);
     renderWindowSizeEditor();
   });
-  $("#saveWindowSizes").addEventListener("click", () => {
-    saveWindowSizes().catch((error) => setStatus($syncStatus, "error", formatError(error)));
-  });
+  $("#saveWindowSizes").addEventListener("click", (event) => runPopupAction("save-window-sizes", saveWindowSizes, { button: event.currentTarget }));
   $("#cancelWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(false));
   $chatGptUsageValues.addEventListener("click", (event) => {
-    if (event.target.closest(".chatgpt-usage-value")) platform.openExtensionPage("usage/usage.html");
+    if (event.target.closest(".chatgpt-usage-value")) {
+      platform.openExtensionPage("usage/usage.html").catch((error) => setStatus($syncStatus, "error", formatError(error)));
+    }
   });
-  $("#openOptions").addEventListener("click", () => platform.openOptionsPage());
-  $("#saveEdit").addEventListener("click", saveEdit);
-  $("#mergeEdit").addEventListener("click", mergeEdit);
+  $("#openOptions").addEventListener("click", () => platform.openOptionsPage().catch((error) => setStatus($syncStatus, "error", formatError(error))));
+  $("#saveEdit").addEventListener("click", (event) => runPopupAction(`save-entry:${editingId}`, saveEdit, {
+    button: event.currentTarget,
+    expectedRevision: editingRevision
+  }));
+  $("#mergeEdit").addEventListener("click", (event) => runPopupAction(`merge-entry:${editingId}`, mergeEdit, {
+    button: event.currentTarget,
+    expectedRevision: editingRevision
+  }));
   $("#cancelEdit").addEventListener("click", hideEdit);
-  $("#deleteEdit").addEventListener("click", deleteEdit);
+  $("#deleteEdit").addEventListener("click", (event) => runPopupAction(`delete-entry:${editingId}`, deleteEdit, {
+    button: event.currentTarget,
+    expectedRevision: editingRevision
+  }));
   $recentEntries.addEventListener("click", (event) => {
     const groupButton = event.target.closest("[data-toggle-group]");
     if (groupButton) {
@@ -960,13 +990,15 @@ function bindEvents() {
 
     const restartButton = event.target.closest("[data-restart-id]");
     if (restartButton) {
-      restartFromEntry(restartButton.dataset.restartId);
+      runPopupAction(`restart-entry:${restartButton.dataset.restartId}`, () => restartFromEntry(restartButton.dataset.restartId), {
+        button: restartButton
+      });
       return;
     }
 
     const row = event.target.closest(".entry-row[data-edit-id]");
     if (row) {
-      showEdit(row.dataset.editId);
+      showEdit(row.dataset.editId).catch((error) => setStatus($syncStatus, "error", formatError(error)));
     }
   });
   $recentEntries.addEventListener("keydown", (event) => {
@@ -975,7 +1007,7 @@ function bindEvents() {
     const row = event.target.closest(".entry-row[data-edit-id]");
     if (!row) return;
     event.preventDefault();
-    showEdit(row.dataset.editId);
+    showEdit(row.dataset.editId).catch((error) => setStatus($syncStatus, "error", formatError(error)));
   });
 }
 
