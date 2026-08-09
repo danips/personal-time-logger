@@ -111,22 +111,22 @@ async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl =
           ...(options.headers || {})
         }
       });
+      const text = await response.text();
+      data = text ? (() => {
+        try {
+          return JSON.parse(text);
+        } catch (error) {
+          if (response.ok) throw codedError("API_ERROR", "Google API returned malformed JSON");
+          return { error: { message: text } };
+        }
+      })() : {};
     } catch (error) {
       if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google API request timed out");
-      throw error;
+      if (error && error.code) throw error;
+      throw codedError("API_NETWORK", error.message || "Google API network request failed");
     } finally {
       clearTimeout(timeout);
     }
-
-    const text = await response.text();
-    data = text ? (() => {
-      try {
-        return JSON.parse(text);
-      } catch (error) {
-        if (response.ok) throw codedError("API_ERROR", "Google API returned malformed JSON");
-        return { error: { message: text } };
-      }
-    })() : {};
     if (response.ok && (!data || typeof data !== "object" || Array.isArray(data))) {
       throw codedError("API_ERROR", "Google API returned an invalid response shape");
     }
