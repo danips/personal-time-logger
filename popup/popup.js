@@ -899,7 +899,7 @@ function bindEvents() {
   $("#headerSyncButton").addEventListener("click", () => runSync({ force: true }));
   $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
-    renderRecent().catch((error) => {
+    render().catch((error) => {
       setStatus($syncStatus, "error", formatError(error));
     });
   });
