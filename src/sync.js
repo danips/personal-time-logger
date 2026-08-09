@@ -34,6 +34,9 @@ const MAX_IDLE_INTERVAL_MINUTES = 15;
 // calendar page, background). Used as the sync lock holder.
 const CONTEXT_ID = uuid();
 let inFlightSync = null;
+let inFlightOptions = null;
+let queuedSync = null;
+let queuedOptions = null;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -675,10 +678,26 @@ export async function nextSyncDelayMinutes() {
 export async function syncNow({ interactiveAuth = false, force = false } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
   // while a user action is still syncing.
-  if (inFlightSync) return inFlightSync;
+  if (inFlightSync) {
+    const stronger = force && !inFlightOptions.force || interactiveAuth && !inFlightOptions.interactiveAuth;
+    if (!stronger) return queuedSync || inFlightSync;
+    queuedOptions = {
+      force: force || queuedOptions?.force || false,
+      interactiveAuth: interactiveAuth || queuedOptions?.interactiveAuth || false
+    };
+    if (!queuedSync) {
+      queuedSync = inFlightSync.catch(() => undefined).then(() => runSyncCycle(queuedOptions)).finally(() => {
+        queuedSync = null;
+        queuedOptions = null;
+      });
+    }
+    return queuedSync;
+  }
 
+  inFlightOptions = { interactiveAuth, force };
   inFlightSync = runSyncCycle({ interactiveAuth, force }).finally(() => {
     inFlightSync = null;
+    inFlightOptions = null;
   });
   return inFlightSync;
 }
