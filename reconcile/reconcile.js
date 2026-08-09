@@ -6,6 +6,7 @@ import {
   loadReconciliation
 } from "../src/reconcile.js";
 import { onEntriesChanged } from "../src/events.js";
+import { reconciliationActionDisabled, reconciliationActionEligibility } from "../src/reconcile-ui-state.js";
 import { syncNow } from "../src/sync.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
 import { $, entryTitle, formatError } from "../src/ui-helpers.js";
@@ -20,7 +21,24 @@ function setStatus(message) {
 
 function setBusy(next) {
   busy = next;
-  for (const button of document.querySelectorAll("button")) button.disabled = next;
+  applyControlState();
+}
+
+function setStaticActionDisabled(selector, eligible) {
+  $(selector).disabled = reconciliationActionDisabled(busy, eligible);
+}
+
+function applyControlState() {
+  $("#rescanButton").disabled = busy;
+  $("#syncButton").disabled = busy;
+  const eligibility = reconciliationActionEligibility(report);
+  setStaticActionDisabled("#deleteAllDuplicates", eligibility.deleteAllDuplicates);
+  setStaticActionDisabled("#keepAllLocal", eligibility.keepAllLocal);
+  setStaticActionDisabled("#keepAllRemote", eligibility.keepAllRemote);
+  setStaticActionDisabled("#keepAllNewest", eligibility.keepAllNewest);
+  setStaticActionDisabled("#pushAllLocal", eligibility.pushAllLocal);
+  setStaticActionDisabled("#importAllRemote", eligibility.importAllRemote);
+  for (const button of document.querySelectorAll("[data-resolution-action]")) button.disabled = busy;
 }
 
 function describe(entry) {
@@ -91,6 +109,7 @@ function actionRow(buttons) {
   for (const { label, action, danger } of buttons) {
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.resolutionAction = "true";
     button.textContent = label;
     if (danger) button.classList.add("danger");
     button.addEventListener("click", () => resolve(action));
@@ -216,8 +235,6 @@ function render() {
 
   $("#duplicateHeading").textContent = `Duplicate rows in the spreadsheet (${report.duplicates.length})`;
   $("#duplicateList").replaceChildren(...renderDuplicates(report.duplicates));
-  $("#deleteAllDuplicates").disabled = !report.duplicates.length;
-
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
   $("#remoteOnlyHeading").textContent = `Only in the spreadsheet (${report.remoteOnly.length})`;
@@ -226,11 +243,7 @@ function render() {
   $("#localOnlyList").replaceChildren(...renderLocalOnly(report.localOnly));
   $("#remoteOnlyList").replaceChildren(...renderRemoteOnly(report.remoteOnly));
 
-  $("#keepAllLocal").disabled = !report.different.length;
-  $("#keepAllRemote").disabled = !report.different.length;
-  $("#keepAllNewest").disabled = !report.different.length;
-  $("#pushAllLocal").disabled = !report.localOnly.length;
-  $("#importAllRemote").disabled = !report.remoteOnly.length;
+  applyControlState();
 }
 
 async function scan({ quiet = false } = {}) {
@@ -262,7 +275,6 @@ async function resolve(action) {
     setStatus("Applying...");
     await action();
     await syncNow({ force: true });
-    setBusy(false);
     await scan({ quiet: true });
   } catch (error) {
     setStatus(`Could not apply: ${formatError(error)}`);
