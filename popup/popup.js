@@ -28,6 +28,11 @@ import {
 } from "../src/ui-helpers.js";
 import { platform } from "../src/platform.js";
 import { setActiveIcon } from "../src/icon.js";
+import {
+  MAX_WINDOW_SIZE,
+  normalizeWindowSizePreset,
+  resizeCurrentWindow
+} from "../src/window-resize.js";
 
 let activeEntries = [];
 let editingId = "";
@@ -46,7 +51,6 @@ const DEFAULT_WINDOW_SIZES = [
   { width: 1500, height: 1000, isWindow: false },
   { width: 1300, height: 900, isWindow: false }
 ];
-const MAX_WINDOW_SIZE = 10000;
 let windowSizes = DEFAULT_WINDOW_SIZES.map((size) => ({ ...size }));
 let editingWindowSizes = [];
 let windowSizeEditorOpen = false;
@@ -516,14 +520,8 @@ function compactPercent(value) {
 function normalizeWindowSizes(value) {
   if (!Array.isArray(value)) return null;
   return value
-    .map((size) => ({
-      width: Number(size?.width),
-      height: Number(size?.height),
-      isWindow: size?.isWindow === true || size?.isWindow === "true"
-    }))
-    .filter((size) => Number.isInteger(size.width) && Number.isInteger(size.height)
-      && size.width > 0 && size.width <= MAX_WINDOW_SIZE
-      && size.height > 0 && size.height <= MAX_WINDOW_SIZE);
+    .map(normalizeWindowSizePreset)
+    .filter(Boolean);
 }
 
 function windowSizeLabel(size) {
@@ -625,20 +623,7 @@ function readWindowSizeEditor() {
 
 async function resizeBrowserWindow(width, height, isWindow) {
   try {
-    const target = await platform.getCurrentWindow();
-    if (!target?.id) throw new Error("No browser window is available");
-    let windowWidth = width;
-    let windowHeight = height;
-    if (!isWindow) {
-      const tab = await platform.getCurrentTab(target.id);
-      if (!Number.isFinite(tab?.width) || !Number.isFinite(tab?.height)) {
-        throw new Error("Could not read the current tab viewport size");
-      }
-      // Preserve the current window-to-viewport chrome offset.
-      windowWidth += target.width - tab.width;
-      windowHeight += target.height - tab.height;
-    }
-    await platform.resizeWindow(target.id, windowWidth, windowHeight);
+    await resizeCurrentWindow({ width, height, isWindow }, platform);
   } catch (error) {
     setStatus($syncStatus, "error", formatError(error));
   }
@@ -646,14 +631,12 @@ async function resizeBrowserWindow(width, height, isWindow) {
 
 async function saveWindowSizes() {
   const sizes = readWindowSizeEditor();
-  const valid = sizes.every((size) => Number.isInteger(size.width) && Number.isInteger(size.height)
-    && size.width > 0 && size.width <= MAX_WINDOW_SIZE
-    && size.height > 0 && size.height <= MAX_WINDOW_SIZE);
-  if (!valid) {
+  const normalized = sizes.map(normalizeWindowSizePreset);
+  if (normalized.some((size) => !size)) {
     setStatus($syncStatus, "error", `Window sizes must be whole numbers from 1 to ${MAX_WINDOW_SIZE}`);
     return;
   }
-  windowSizes = sizes;
+  windowSizes = normalized;
   await setSetting(WINDOW_SIZE_SETTING, windowSizes);
   setWindowSizeEditorOpen(false);
   renderWindowSizePresets();

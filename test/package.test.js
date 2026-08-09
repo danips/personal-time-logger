@@ -51,6 +51,7 @@ const expectedFiles = [
   "src/time-allocation.js",
   "src/time.js",
   "src/ui-helpers.js",
+  "src/window-resize.js",
   "usage/usage.css",
   "usage/usage.html",
   "usage/usage.js"
