@@ -44,6 +44,7 @@ const expectedFiles = [
   "src/error-registry.js",
   "src/events.js",
   "src/icon.js",
+  "src/operation-states.js",
   "src/page-runtime.js",
   "src/platform.js",
   "src/reconcile-ui-state.js",

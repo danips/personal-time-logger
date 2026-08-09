@@ -1,6 +1,7 @@
 import { recordDiagnostic } from "./diagnostics.js";
 import { userErrorMessage } from "./error-registry.js";
 import { platform } from "./platform.js";
+import { PAGE_RUNTIME_STATE } from "./operation-states.js";
 
 const RECOVERY = "Use Retry to restart this page, or open Options diagnostics for details.";
 
@@ -134,20 +135,20 @@ export async function runPageTask({ page, phase, task, onError } = {}) {
 export function startPage({ page, title, init } = {}) {
   const start = async () => {
     let failed = false;
-    setPageRuntimeState("starting");
+    setPageRuntimeState(PAGE_RUNTIME_STATE.STARTING);
     const result = await runPageTask({
       page,
       phase: "startup",
       task: init,
       onError(error) {
         failed = true;
-        setPageRuntimeState("failed");
+        setPageRuntimeState(PAGE_RUNTIME_STATE.FAILED);
         showFatalPanel({ title, error, retry: start });
       }
     });
     if (!failed) {
       hideFatalPanel();
-      setPageRuntimeState("ready");
+      setPageRuntimeState(PAGE_RUNTIME_STATE.READY);
     }
     return result;
   };
