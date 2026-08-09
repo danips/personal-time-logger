@@ -68,12 +68,21 @@ function rowsAsText(rows) {
   return (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
 }
 
+// The Sheets values API omits trailing blank cells. Keep every entry row at the
+// sheet schema width so an intentionally blank final `multiply` cell does not
+// look like a truncated record.
+function entryRowCells(row) {
+  const cells = rowsAsText([row])[0] || [];
+  return SHEET_HEADERS.map((_, index) => cells[index] || "");
+}
+
 export function rowFingerprint(row) {
-  return rowsAsText([row])[0].slice(0, SHEET_HEADERS.length).join("\u0000");
+  return entryRowCells(row).join("\u0000");
 }
 
 function decodeRemoteRow(row, rowIndex) {
-  const values = Object.fromEntries(SHEET_HEADERS.map((header, index) => [header, row[index] || ""]));
+  const cells = entryRowCells(row);
+  const values = Object.fromEntries(SHEET_HEADERS.map((header, index) => [header, cells[index]]));
   const validDate = (value) => Boolean(value) && Number.isFinite(new Date(value).getTime());
   const validOptionalDate = (value) => !value || Number.isFinite(new Date(value).getTime());
   const revision = Number(values.revision);
@@ -83,7 +92,7 @@ function decodeRemoteRow(row, rowIndex) {
     || !Number.isInteger(revision) || revision < 1 || !Number.isFinite(duration) || duration < 0) {
     return { entry: null, quarantine: { rowIndex, id: values.id, reason: "invalid_entry", row } };
   }
-  return { entry: rowToEntry(row), quarantine: null };
+  return { entry: rowToEntry(cells), quarantine: null };
 }
 
 // The numeric sheet id is needed to delete rows. It is cached in memory and in

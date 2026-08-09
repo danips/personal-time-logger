@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "../src/entries.js";
-import { rowsToEntries } from "../src/sheets.js";
+import { rowFingerprint, rowsToEntries } from "../src/sheets.js";
 
 const fixture = (over = {}) => normalizeEntry({
   id: "entry-1",
@@ -45,6 +45,20 @@ describe("rowsToEntries", () => {
     rows[1][durationIndex] = 3600;
     const { entries } = rowsToEntries(rows);
     assert.equal(entries[0].duration_seconds, 3600);
+  });
+
+  it("treats an omitted trailing multiply cell as blank", () => {
+    const entry = fixture({ multiply: "" });
+    const rows = sheet([entry]);
+    // Google Sheets omits trailing blank cells from its values API response.
+    rows[1].pop();
+
+    const { entries, quarantined } = rowsToEntries(rows);
+
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].multiply, "");
+    assert.deepEqual(quarantined, []);
+    assert.equal(rowFingerprint(rows[1]), entryToRow(entry).join("\u0000"));
   });
 
   it("keeps the most recently updated of duplicated rows, whatever their order", () => {
