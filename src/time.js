@@ -68,7 +68,10 @@ export function localTime(value) {
 }
 
 export function formatElapsed(seconds) {
-  const total = Math.max(0, Number(seconds) || 0);
+  const numeric = Number(seconds);
+  // Elapsed displays advance only after a full second has passed. Flooring
+  // also keeps fractional inputs from leaking into a HH:MM:SS string.
+  const total = Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;

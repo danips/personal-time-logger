@@ -86,6 +86,12 @@ describe("formatElapsed", () => {
   it("clamps negative and unusable values to zero", () => {
     assert.equal(formatElapsed(-10), "00:00:00");
     assert.equal(formatElapsed(undefined), "00:00:00");
+    assert.equal(formatElapsed(Infinity), "00:00:00");
+  });
+
+  it("floors fractional elapsed seconds", () => {
+    assert.equal(formatElapsed(59.999), "00:00:59");
+    assert.equal(formatElapsed(3600.75), "01:00:00");
   });
 });
 
