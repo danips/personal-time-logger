@@ -128,7 +128,7 @@ describe("IndexedDB repository", () => {
     assert.equal(await db.isLockCurrent("generation-lock", "second-holder", second.generation, 120_000), true);
   });
 
-  it("uses indexes for dirty, deleted, status, active, and interval queries", async () => {
+  it("filters dirty entries portably and indexes deleted, status, active, and interval queries", async () => {
     const entries = [
       {
         id: "index-completed", dirty: true, deleted_at: "", status: "ok",

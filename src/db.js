@@ -423,7 +423,11 @@ async function entriesFromIndex(name, { range = null, direction = "next", limit 
 }
 
 export async function getDirtyEntries() {
-  return entriesFromIndex(ENTRY_INDEX.DIRTY, { range: keyRange("only", true) });
+  // Boolean values are not valid IndexedDB keys in Firefox. They may be used
+  // as an indexed property, but a boolean IDBKeyRange throws before the query
+  // runs. Keep this small status query portable rather than blocking page
+  // startup on an unsupported range.
+  return (await getAllEntries()).filter((entry) => entry.dirty === true);
 }
 
 /**
