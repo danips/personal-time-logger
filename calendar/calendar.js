@@ -60,6 +60,7 @@ let unsubscribeEntryEvents = null;
 let eventsBound = false;
 let lastResizeUndo = null;
 let renderGeneration = 0;
+let clampEditorToViewport = () => {};
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -256,6 +257,11 @@ function syncScrollbarGutter() {
 
   const gutter = Math.max(0, scroll.offsetWidth - scroll.clientWidth);
   shell.style.setProperty("--scrollbar-gutter", `${gutter}px`);
+}
+
+function handleViewportResize() {
+  syncScrollbarGutter();
+  if (!$("#calendarEditOverlay").hidden) clampEditorToViewport();
 }
 
 async function render() {
@@ -763,6 +769,7 @@ function openSelectedEntryEditor() {
   // reports no height.
   $("#calendarEditOverlay").hidden = false;
   positionPopupForEntry(entry.id);
+  clampEditorToViewport();
   $("#calendarEditProject").focus();
 }
 
@@ -875,13 +882,13 @@ function bindEvents() {
     button: event.currentTarget,
     expectedRevision: editingEntryRevision
   }));
-  bindPopupDrag($(".edit-popup"));
+  clampEditorToViewport = bindPopupDrag($(".edit-popup"));
   $("#weekPicker").addEventListener("change", (event) => {
     const parsed = weekStartFromInput(event.target.value);
     if (parsed) runCalendarAction("change-week", () => changeWeek(parsed), { button: event.currentTarget });
   });
   document.addEventListener("pointerdown", handleOutsidePointerDown);
-  window.addEventListener("resize", syncScrollbarGutter);
+  window.addEventListener("resize", handleViewportResize);
 }
 
 async function init() {
@@ -919,7 +926,7 @@ window.addEventListener("pagehide", () => {
   if (refreshTimer) clearInterval(refreshTimer);
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
   document.removeEventListener("pointerdown", handleOutsidePointerDown);
-  window.removeEventListener("resize", syncScrollbarGutter);
+  window.removeEventListener("resize", handleViewportResize);
 });
 
 startPage({ page: "calendar", title: "Calendar", init });
