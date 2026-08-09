@@ -130,6 +130,68 @@ describe("spreadsheet provisioning", () => {
     assert.equal(await sheets.isSpreadsheetGone(), false);
   });
 
+  it("retries transient Drive metadata errors after a cooldown and keeps their diagnostic", async () => {
+    await sheets.setSpreadsheetId("metadata-sheet");
+    google.calls.length = 0;
+    const originalNow = Date.now;
+    const now = originalNow();
+    await db.setSetting("token_data", {
+      access_token: "test-access-token",
+      expires_at: now + 120_000
+    });
+    Date.now = () => now;
+    try {
+      google.enqueue(
+        { method: "GET", pathname: "/drive/v3/files/metadata-sheet" },
+        google.status(500, { error: { message: "temporary Drive failure" } })
+      );
+      assert.equal(await sheets.getRemoteModifiedTime(), "");
+      assert.deepEqual(sheets.getDriveGateDiagnostics(), {
+        unavailable: false,
+        retryAt: now + 60_000,
+        lastError: {
+          code: "API_ERROR",
+          message: "temporary Drive failure",
+          at: sheets.getDriveGateDiagnostics().lastError.at
+        }
+      });
+      assert.equal(google.calls.length, 1);
+
+      // The cooldown avoids repeated Drive failures on every sync cycle.
+      assert.equal(await sheets.getRemoteModifiedTime(), "");
+      assert.equal(google.calls.length, 1);
+
+      Date.now = () => now + 60_000;
+      google.enqueue(
+        { method: "GET", pathname: "/drive/v3/files/metadata-sheet" },
+        google.json({ modifiedTime: "2026-08-09T10:00:00.000Z" })
+      );
+      assert.equal(await sheets.getRemoteModifiedTime(), "2026-08-09T10:00:00.000Z");
+      assert.deepEqual(sheets.getDriveGateDiagnostics(), {
+        unavailable: false,
+        retryAt: 0,
+        lastError: null
+      });
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  it("permanently disables only a confirmed missing Drive scope", async () => {
+    await sheets.setSpreadsheetId("scope-sheet");
+    google.calls.length = 0;
+    google.enqueue(
+      { method: "GET", pathname: "/drive/v3/files/scope-sheet" },
+      google.status(403, { error: { message: "Insufficient authentication scopes." } })
+    );
+
+    assert.equal(await sheets.getRemoteModifiedTime(), "");
+    assert.equal(sheets.getDriveGateDiagnostics().unavailable, true);
+    assert.equal(sheets.getDriveGateDiagnostics().lastError.code, "SCOPE_MISSING");
+    assert.equal(await sheets.getRemoteModifiedTime(), "");
+    assert.equal(google.calls.length, 1);
+  });
+
   it("only adopts a selected spreadsheet after validating its time_entries header", async () => {
     await sheets.setSpreadsheetId("former-sheet");
     google.calls.length = 0;

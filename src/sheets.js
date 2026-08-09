@@ -22,6 +22,7 @@ const APP_MARKER_VALUE = "personal-time-logger";
 // files cannot turn setup into a long serial crawl.
 const MAX_CANDIDATES = 25;
 const API_TIMEOUT_MS = 30_000;
+const DRIVE_GATE_RETRY_MS = 60_000;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -85,15 +86,27 @@ function decodeRemoteRow(row, rowIndex) {
 // extension context.
 let cachedSheetIdSpreadsheet = "";
 let cachedSheetId = null;
-// Set once Drive refuses the metadata lookup. Without it a permanent refusal
-// would cost a wasted request on every cycle on top of the read it fails to
-// avoid. Cleared when the spreadsheet changes, and on the next context load.
+// Set only when Drive confirms this context cannot use the metadata gate. A
+// transient failure merely pauses metadata requests for a short cooldown.
 let driveGateUnavailable = false;
+let driveGateRetryAt = 0;
+let driveGateLastError = null;
 
 function resetSheetCache() {
   cachedSheetIdSpreadsheet = "";
   cachedSheetId = null;
   driveGateUnavailable = false;
+  driveGateRetryAt = 0;
+  driveGateLastError = null;
+}
+
+/** The current Drive-gate state, for diagnostics and recovery UI. */
+export function getDriveGateDiagnostics() {
+  return {
+    unavailable: driveGateUnavailable,
+    retryAt: driveGateRetryAt,
+    lastError: driveGateLastError && { ...driveGateLastError }
+  };
 }
 
 function isIdempotentRequest(options) {
@@ -517,7 +530,7 @@ export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, 
  * the project. Callers must then read unconditionally.
  */
 export async function getRemoteModifiedTime({ interactiveAuth = false } = {}) {
-  if (driveGateUnavailable) return "";
+  if (driveGateUnavailable || driveGateRetryAt > Date.now()) return "";
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
 
@@ -527,13 +540,25 @@ export async function getRemoteModifiedTime({ interactiveAuth = false } = {}) {
       {},
       { interactiveAuth, baseUrl: DRIVE_API_BASE }
     );
+    driveGateLastError = null;
+    driveGateRetryAt = 0;
     return data && data.modifiedTime ? String(data.modifiedTime) : "";
   } catch (error) {
+    driveGateLastError = {
+      code: error.code || "API_ERROR",
+      message: error.message || "Drive metadata lookup failed",
+      at: nowIso()
+    };
     if (error.code === "AUTH_EXPIRED" || error.code === "OFFLINE" || error.code === "RATE_LIMIT") throw error;
-    // Missing scope, a spreadsheet drive.file does not cover, a disabled Drive
-    // API, or an unexpected shape. Stop asking and read unconditionally instead
-    // of failing the sync.
-    driveGateUnavailable = true;
+    // A scope refusal or the disabled-API response are stable capabilities of
+    // this context. Other errors can be transient (including 5xx, timeout,
+    // malformed JSON, or an inaccessible file) and get another chance later.
+    if (error.code === "SCOPE_MISSING" || /(?:drive\s+api.*(?:disabled|not\s+enabled)|api\s+has\s+not\s+been\s+used|access\s+not\s+configured)/i.test(error.message || "")) {
+      driveGateUnavailable = true;
+      driveGateRetryAt = 0;
+      return "";
+    }
+    driveGateRetryAt = Date.now() + DRIVE_GATE_RETRY_MS;
     return "";
   }
 }
