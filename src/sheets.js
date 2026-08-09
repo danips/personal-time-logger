@@ -20,7 +20,7 @@ const APP_MARKER_KEY = "app";
 const APP_MARKER_VALUE = "personal-time-logger";
 // Validating a candidate costs one read each, so a Drive full of app-created
 // files cannot turn setup into a long serial crawl.
-const MAX_CANDIDATES = 5;
+const MAX_CANDIDATES = 25;
 const API_TIMEOUT_MS = 30_000;
 
 function codedError(code, message) {
@@ -260,11 +260,20 @@ export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
 
   const candidates = await listOwnedSpreadsheets({ interactiveAuth });
 
+  let candidateError = null;
   for (const candidate of candidates.slice(0, MAX_CANDIDATES)) {
-    if (!await hasTimeEntriesHeader(candidate.id, { interactiveAuth })) continue;
-    await setSpreadsheetId(candidate.id);
-    return { spreadsheetId: candidate.id, name: candidate.name || "", adopted: true };
+    try {
+      if (!await hasTimeEntriesHeader(candidate.id, { interactiveAuth })) continue;
+      await setSpreadsheetId(candidate.id);
+      return { spreadsheetId: candidate.id, name: candidate.name || "", adopted: true };
+    } catch (error) {
+      // A single stale or inaccessible Drive result must not hide a later
+      // candidate the extension can still read.
+      candidateError = candidateError || error;
+    }
   }
+
+  if (candidateError) throw candidateError;
 
   const spreadsheetId = await createOwnedSpreadsheet({ interactiveAuth });
   return { spreadsheetId, name: SPREADSHEET_TITLE, adopted: false };
