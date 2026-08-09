@@ -80,8 +80,8 @@ describe("normalizeEntry", () => {
   });
 
   it("only keeps a positive numeric multiplier", () => {
-    assert.equal(normalizeEntry({ multiply: "1.5" }).multiply, "1.5");
-    assert.equal(normalizeEntry({ multiply: "1,5" }).multiply, "1.5");
+    assert.equal(normalizeEntry({ multiply: "1.5" }).multiply, "1.500");
+    assert.equal(normalizeEntry({ multiply: "1,5" }).multiply, "1.500");
     assert.equal(normalizeEntry({ multiply: "0" }).multiply, "");
     assert.equal(normalizeEntry({ multiply: "-2" }).multiply, "");
     assert.equal(normalizeEntry({ multiply: "abc" }).multiply, "");
@@ -93,7 +93,7 @@ describe("normalizeEntry", () => {
 
 describe("normalizeMultiplierText", () => {
   it("normalizes a comma decimal separator", () => {
-    assert.equal(normalizeMultiplierText("1,25"), "1.25");
+    assert.equal(normalizeMultiplierText("1,25"), "1.250");
   });
 
   it("rejects values that are not positive numbers", () => {
@@ -101,6 +101,9 @@ describe("normalizeMultiplierText", () => {
     assert.equal(normalizeMultiplierText("-1"), "");
     assert.equal(normalizeMultiplierText(""), "");
     assert.equal(normalizeMultiplierText("x"), "");
+    assert.equal(normalizeMultiplierText("0.999"), "");
+    assert.equal(normalizeMultiplierText("5.002"), "");
+    assert.equal(normalizeMultiplierText("1.0001"), "");
   });
 });
 

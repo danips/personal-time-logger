@@ -92,7 +92,7 @@ describe("atomic entry mutations", () => {
 
     assert.equal(merged.start_at, "2026-08-08T12:00:00.000Z");
     assert.equal(merged.end_at, "2026-08-08T13:30:00.000Z");
-    assert.equal(merged.multiply, "2");
+    assert.equal(merged.multiply, "2.000");
     assert.equal(merged.duration_seconds, 10_800);
     assert.equal(merged.status, "ok");
   });

@@ -30,9 +30,10 @@ async function getDurationMultiplier() {
 export function normalizeMultiplierText(value) {
   const text = String(value == null ? "" : value).trim().replace(",", ".");
   if (!text) return "";
+  if (!/^\d+(?:\.\d{1,3})?$/.test(text)) return "";
   const numeric = Number(text);
-  if (!Number.isFinite(numeric) || numeric <= 0) return "";
-  return text;
+  if (!Number.isFinite(numeric) || numeric < 1 || numeric > 5.001) return "";
+  return numeric.toFixed(3);
 }
 
 /**
