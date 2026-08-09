@@ -33,6 +33,7 @@ export async function recordDiagnostic({ subsystem, phase, code, error, entryCou
     subsystem: text(subsystem, "extension"),
     phase: text(phase, "unknown"),
     code: text(code || error?.code, "UNEXPECTED_ERROR"),
+    cause_code: text(error?.cause?.code, ""),
     entry_count: count(entryCount),
     retry_at: normalizedRetryAt(retryAt),
     recovery: text(recovery, "Retry the operation.")
@@ -66,6 +67,7 @@ export function diagnosticsText(records) {
       record.subsystem,
       record.phase,
       record.code,
+      record.cause_code || "",
       `entries=${count(record.entry_count)}`,
       `retry_at=${normalizedRetryAt(record.retry_at)}`,
       record.recovery
