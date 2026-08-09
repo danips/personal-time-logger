@@ -117,4 +117,14 @@ describe("IndexedDB repository", () => {
     assert.equal((await db.getEntry("entry-left")).task, "left");
     assert.equal((await db.getEntry("entry-right")).task, "right");
   });
+
+  it("fences a former lock holder after a newer generation is claimed", async () => {
+    const first = await db.claimLock("generation-lock", "first-holder", -1);
+    const second = await db.claimLock("generation-lock", "second-holder", -1);
+
+    assert.ok(second.generation > first.generation);
+    assert.equal(await db.renewLock("generation-lock", "first-holder", first.generation), false);
+    await db.releaseLock("generation-lock", "first-holder", first.generation);
+    assert.equal(await db.isLockCurrent("generation-lock", "second-holder", second.generation, 120_000), true);
+  });
 });

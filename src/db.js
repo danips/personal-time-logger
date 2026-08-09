@@ -2,6 +2,7 @@ const DB_NAME = "timelogger_db";
 const DB_VERSION = 2;
 const ENTRY_STORE = "time_entries";
 const SETTINGS_STORE = "settings";
+const LOCK_GENERATION_SUFFIX = ":generation";
 
 let dbPromise = null;
 
@@ -153,7 +154,9 @@ export async function mutateSetting(key, mutator) {
  * Claims a named lock, held in the settings store so it is visible to every
  * extension context. The get and the put share one readwrite transaction, and
  * IndexedDB serializes transactions across contexts, so two callers cannot both
- * observe the lock as free. Returns false when someone else holds it.
+ * observe the lock as free. Each successful new claim receives a monotonically
+ * increasing generation, which callers use as a fencing token. Returns false
+ * when someone else holds it.
  */
 export async function claimLock(key, holder, ttlMs) {
   return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
@@ -161,27 +164,47 @@ export async function claimLock(key, holder, ttlMs) {
     const lock = record ? record.value : null;
     const heldUntil = lock ? Number(lock.acquired_at || 0) + ttlMs : 0;
     if (lock && lock.holder !== holder && heldUntil > Date.now()) return false;
-    await requestToPromise(objectStore.put({ key, value: { holder, acquired_at: Date.now() } }));
-    return true;
+    if (lock && lock.holder === holder && heldUntil > Date.now()) {
+      const generation = Number(lock.generation || 0) || 1;
+      await requestToPromise(objectStore.put({ key, value: { ...lock, generation, acquired_at: Date.now() } }));
+      return { holder, generation };
+    }
+    const generationKey = `${key}${LOCK_GENERATION_SUFFIX}`;
+    const generationRecord = await requestToPromise(objectStore.get(generationKey));
+    const generation = Number(generationRecord?.value || 0) + 1;
+    await requestToPromise(objectStore.put({ key: generationKey, value: generation }));
+    await requestToPromise(objectStore.put({ key, value: { holder, generation, acquired_at: Date.now() } }));
+    return { holder, generation };
   });
 }
 
-export async function releaseLock(key, holder) {
+export async function releaseLock(key, holder, generation = undefined) {
   await store(SETTINGS_STORE, "readwrite", async (objectStore) => {
     const record = await requestToPromise(objectStore.get(key));
     const lock = record ? record.value : null;
-    if (lock && lock.holder !== holder) return;
+    if (!lock || lock.holder !== holder || (generation !== undefined && Number(lock.generation) !== Number(generation))) return;
     await requestToPromise(objectStore.delete(key));
   });
 }
 
-export async function renewLock(key, holder) {
+export async function renewLock(key, holder, generation = undefined) {
   return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
     const record = await requestToPromise(objectStore.get(key));
     const lock = record ? record.value : null;
-    if (!lock || lock.holder !== holder) return false;
+    if (!lock || lock.holder !== holder || (generation !== undefined && Number(lock.generation) !== Number(generation))) return false;
     await requestToPromise(objectStore.put({ key, value: { ...lock, acquired_at: Date.now() } }));
     return true;
+  });
+}
+
+export async function isLockCurrent(key, holder, generation, ttlMs) {
+  return store(SETTINGS_STORE, "readonly", async (objectStore) => {
+    const record = await requestToPromise(objectStore.get(key));
+    const lock = record ? record.value : null;
+    return Boolean(lock
+      && lock.holder === holder
+      && Number(lock.generation) === Number(generation)
+      && Number(lock.acquired_at || 0) + ttlMs > Date.now());
   });
 }
 

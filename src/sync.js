@@ -1,4 +1,4 @@
-import { claimLock, getAllEntries, getEntry, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
+import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -46,8 +46,9 @@ function codedError(code, message) {
  * be stale by the time the request returns, so an entry edited mid-flight is
  * left dirty for the next cycle rather than being overwritten.
  */
-export async function markSynced(entry) {
+export async function markSynced(entry, { lease } = {}) {
   try {
+    await lease?.assert();
     return await mutateEntries([entry.id], { [entry.id]: Number(entry.revision || 0) }, (entries) => {
       const current = entries.get(entry.id);
       if (!current || entryFingerprint(current) !== entryFingerprint(entry)) {
@@ -117,8 +118,10 @@ function remoteFingerprintSets(snapshot) {
   return fingerprints;
 }
 
-async function confirmAmbiguousAppends(entries, { interactiveAuth }) {
+async function confirmAmbiguousAppends(entries, { interactiveAuth, lease }) {
+  await lease?.assert();
   const snapshot = await readRemoteSnapshot({ interactiveAuth });
+  await lease?.assert();
   const remoteFingerprints = remoteFingerprintSets(snapshot);
   const confirmed = [];
   const conflicts = [];
@@ -135,9 +138,9 @@ async function confirmAmbiguousAppends(entries, { interactiveAuth }) {
   return { confirmed, conflicts };
 }
 
-async function acknowledgePushedEntries(local, entries, pushedIds) {
+async function acknowledgePushedEntries(local, entries, pushedIds, { lease } = {}) {
   for (const entry of entries) {
-    const acknowledgement = await markSynced(entry);
+    const acknowledgement = await markSynced(entry, { lease });
     if (acknowledgement.entry) local.apply([acknowledgement.entry]);
     if (acknowledgement.applied) pushedIds.add(entry.id);
   }
@@ -149,7 +152,7 @@ async function acknowledgePushedEntries(local, entries, pushedIds) {
  * All row rewrites go in one request and all new rows in another, so the cost is
  * two calls regardless of how many entries are pending.
  */
-export async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth, forcedIds = new Set() }) {
+export async function pushDirtyEntries(local, remoteEntries, rowMap, { interactiveAuth, forcedIds = new Set(), lease } = {}) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const updates = [];
   const appends = [];
@@ -168,13 +171,18 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
   const pushedIds = new Set();
   if (!updates.length && !appends.length) return pushedIds;
 
+  await lease?.assert();
   await updateRemoteEntries(updates, { interactiveAuth });
+  await lease?.assert();
 
   let appendFailure = null;
   let appendMappings = [];
   try {
+    await lease?.assert();
     appendMappings = await appendRemoteEntries(appends, { interactiveAuth });
+    await lease?.assert();
   } catch (error) {
+    await lease?.assert();
     appendFailure = error;
   }
 
@@ -183,7 +191,7 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
   if (appendFailure || confirmedAppendIds.size < appends.length) {
     let recovery;
     try {
-      recovery = await confirmAmbiguousAppends(appends.filter((entry) => !confirmedAppendIds.has(entry.id)), { interactiveAuth });
+      recovery = await confirmAmbiguousAppends(appends.filter((entry) => !confirmedAppendIds.has(entry.id)), { interactiveAuth, lease });
     } catch (error) {
       if (appendFailure) throw appendFailure;
       throw error;
@@ -199,7 +207,7 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
     if (confirmedAppendIds.has(id)) rowMap.set(id, rowIndex);
   }
   const confirmedAppends = appends.filter((entry) => confirmedAppendIds.has(entry.id));
-  await acknowledgePushedEntries(local, [...updates.map((update) => update.entry), ...confirmedAppends], pushedIds);
+  await acknowledgePushedEntries(local, [...updates.map((update) => update.entry), ...confirmedAppends], pushedIds, { lease });
 
   if (appendConflicts.length) {
     throw codedError("REMOTE_APPEND_CONFLICT", `Spreadsheet rows conflict with append${appendConflicts.length === 1 ? "" : "s"}: ${appendConflicts.join(", ")}`);
@@ -227,8 +235,9 @@ async function verifiedLocalResolutionIds(local, remoteEntries) {
   return verified;
 }
 
-async function clearCompletedResolutions(ids) {
+async function clearCompletedResolutions(ids, { lease } = {}) {
   if (!ids.size) return;
+  await lease?.assert();
   await mutateSettings([RECONCILIATION_INTENTS_KEY], (settings) => {
     const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
       ? settings.get(RECONCILIATION_INTENTS_KEY)
@@ -237,12 +246,13 @@ async function clearCompletedResolutions(ids) {
   });
 }
 
-export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set()) {
+export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set(), { lease } = {}) {
   const localById = new Map(local.all().map((entry) => [entry.id, entry]));
   const applied = [];
 
   for (const remote of remoteEntries) {
     if (pushedIds.has(remote.id)) continue;
+    await lease?.assert();
     const observed = localById.get(remote.id);
     const result = await mutateEntries([remote.id], observed ? observed.revision : undefined, (entries) => {
       const current = entries.get(remote.id);
@@ -272,7 +282,7 @@ export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Se
   return applied.length;
 }
 
-export async function markMultipleActiveTimers(local) {
+export async function markMultipleActiveTimers(local, { lease } = {}) {
   const active = local.all()
     .filter((entry) => !entry.deleted_at && !entry.end_at)
     .sort((a, b) => String(b.start_at).localeCompare(String(a.start_at)));
@@ -280,6 +290,7 @@ export async function markMultipleActiveTimers(local) {
   if (active.length <= 1) return [];
 
   const older = active.slice(1);
+  await lease?.assert();
   const expectedById = new Map(older.map((entry) => [entry.id, entryFingerprint(entry)]));
   const changed = await mutateEntries(older.map((entry) => entry.id), (entries) => {
     const applied = [];
@@ -314,7 +325,7 @@ function isExpiredDeletion(deletedAt) {
   return Number.isFinite(time) && time < addDays(new Date(), -14).getTime();
 }
 
-export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicates = [], { interactiveAuth = false } = {}) {
+export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicates = [], { interactiveAuth = false, lease } = {}) {
   const expiredRows = remoteEntries
     .filter((entry) => isExpiredDeletion(entry.deleted_at) && rowMap.has(entry.id))
     .map((entry) => ({
@@ -333,7 +344,9 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
   let blockedIds = new Set();
   if (expiredRows.length) {
     try {
+      await lease?.assert();
       await deleteRemoteRows(expiredRows, { interactiveAuth });
+      await lease?.assert();
       for (const { id } of expiredRows) rowMap.delete(id);
     } catch {
       // Keep the local copies so the rows are retried on the next sync.
@@ -343,6 +356,7 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
 
   const candidates = local.all().filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
   const expectedById = new Map(candidates.map((entry) => [entry.id, entryFingerprint(entry)]));
+  await lease?.assert();
   const deletedIds = await mutateEntries(candidates.map((entry) => entry.id), (entries) => {
     const applied = [];
     for (const [id, expectedFingerprint] of expectedById) {
@@ -370,7 +384,8 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
  * revision are deliberately untouched, so reconciling against a sheet that
  * already holds rows still resolves by age rather than by which side is newer.
  */
-export async function reseedForNewSpreadsheet(local) {
+export async function reseedForNewSpreadsheet(local, { lease } = {}) {
+  await lease?.assert();
   const reseeded = await mutateEntries(local.all().map((entry) => entry.id), (entries) => {
     const applied = [];
     for (const [id, current] of entries) {
@@ -386,6 +401,7 @@ export async function reseedForNewSpreadsheet(local) {
     return applied;
   });
   local.apply(reseeded);
+  await lease?.assert();
   await setSetting(REMOTE_MODIFIED_KEY, "");
   return reseeded.length;
 }
@@ -394,13 +410,15 @@ export async function reseedForNewSpreadsheet(local) {
  * Makes sure a spreadsheet is selected, adopting the most recently modified one
  * this extension created or creating one when there are none.
  */
-async function ensureSpreadsheet(local, { interactiveAuth }) {
+async function ensureSpreadsheet(local, { interactiveAuth, lease }) {
   const spreadsheetId = await getSpreadsheetId();
   const provisioningPending = await getSetting("spreadsheet_provision_pending", "");
   if (spreadsheetId && provisioningPending !== spreadsheetId) return null;
 
+  await lease?.assert();
   const provisioned = await provisionSpreadsheet({ interactiveAuth });
-  await reseedForNewSpreadsheet(local);
+  await lease?.assert();
+  await reseedForNewSpreadsheet(local, { lease });
   return provisioned;
 }
 
@@ -411,12 +429,14 @@ async function ensureSpreadsheet(local, { interactiveAuth }) {
  * Only acts once Drive confirms the file is actually gone, so an unreachable but
  * intact spreadsheet still reports its error rather than being silently replaced.
  */
-async function reprovisionIfSpreadsheetGone(error, local, { interactiveAuth }) {
+async function reprovisionIfSpreadsheetGone(error, local, { interactiveAuth, lease }) {
   if (error.code !== "API_ERROR" && error.code !== "SHEET_MISSING") return null;
   if (!await isSpreadsheetGone({ interactiveAuth })) return null;
 
+  await lease?.assert();
   const provisioned = await provisionSpreadsheet({ interactiveAuth });
-  await reseedForNewSpreadsheet(local);
+  await lease?.assert();
+  await reseedForNewSpreadsheet(local, { lease });
   return provisioned;
 }
 
@@ -436,7 +456,7 @@ async function hasPendingConfig() {
  * snapshot, and writes only when the local value is genuinely newer. Returns
  * true when it wrote to the sheet.
  */
-async function syncConfig(remoteConfig, configRows, { interactiveAuth }) {
+async function syncConfig(remoteConfig, configRows, { interactiveAuth, lease } = {}) {
   const remote = remoteConfig[MULTIPLIER_KEY];
   const remoteUpdatedAt = remote ? String(remote.updated_at || "") : "";
   const remoteValue = remote ? String(remote.value || "") : "";
@@ -444,6 +464,7 @@ async function syncConfig(remoteConfig, configRows, { interactiveAuth }) {
   const localValue = String(await getSetting(MULTIPLIER_KEY, "1"));
 
   if (remoteUpdatedAt && remoteUpdatedAt > localUpdatedAt) {
+    await lease?.assert();
     await setSetting(MULTIPLIER_KEY, remoteValue);
     await setSetting(MULTIPLIER_UPDATED_KEY, remoteUpdatedAt);
     await setSetting(MULTIPLIER_SYNCED_KEY, remoteUpdatedAt);
@@ -452,14 +473,17 @@ async function syncConfig(remoteConfig, configRows, { interactiveAuth }) {
 
   if (!localUpdatedAt) return false;
   if (remoteUpdatedAt === localUpdatedAt && remoteValue === localValue) {
+    await lease?.assert();
     await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
     return false;
   }
 
+  await lease?.assert();
   await updateRemoteConfig(MULTIPLIER_KEY, localValue, localUpdatedAt, {
     rowIndex: configRows.get(MULTIPLIER_KEY) || 0,
     interactiveAuth
   });
+  await lease?.assert();
   await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
   return true;
 }
@@ -479,13 +503,22 @@ async function runSyncCycle({ interactiveAuth, force }) {
   // The popup, the calendar page, and the background alarm all sync
   // independently. Without this lock two cycles can each miss the other's rows
   // and append the same entry twice.
-  if (!(await claimLock(SYNC_LOCK_KEY, CONTEXT_ID, SYNC_LOCK_TTL_MS))) {
+  const lock = await claimLock(SYNC_LOCK_KEY, CONTEXT_ID, SYNC_LOCK_TTL_MS);
+  if (!lock) {
     throw codedError("SYNC_BUSY", "another sync is already running");
   }
 
   let leaseLost = false;
+  const lease = {
+    async assert() {
+      if (leaseLost || !await isLockCurrent(SYNC_LOCK_KEY, CONTEXT_ID, lock.generation, SYNC_LOCK_TTL_MS)) {
+        leaseLost = true;
+        throw codedError("SYNC_BUSY", "sync lease was lost; retrying from a fresh snapshot is required");
+      }
+    }
+  };
   const leaseTimer = setInterval(() => {
-    renewLock(SYNC_LOCK_KEY, CONTEXT_ID).then((renewed) => {
+    renewLock(SYNC_LOCK_KEY, CONTEXT_ID, lock.generation).then((renewed) => {
       if (!renewed) leaseLost = true;
     }).catch(() => {
       leaseLost = true;
@@ -493,14 +526,16 @@ async function runSyncCycle({ interactiveAuth, force }) {
   }, Math.floor(SYNC_LOCK_TTL_MS / 3));
 
   try {
+    await lease.assert();
     const local = localState(await getAllEntries());
+    await lease.assert();
     // A timer left running overnight stays running. Only genuinely competing
     // timers are flagged, and that is done before the push so the markers travel
     // in the same pass.
-    const conflictChanges = await markMultipleActiveTimers(local);
+    const conflictChanges = await markMultipleActiveTimers(local, { lease });
     // Under the sync lock, so two contexts cannot both decide none exists and
     // each create one.
-    let provisioned = await ensureSpreadsheet(local, { interactiveAuth });
+    let provisioned = await ensureSpreadsheet(local, { interactiveAuth, lease });
 
     // Both marking passes set dirty, so either of them producing changes makes
     // hasLocalWork true and forces the read below.
@@ -518,9 +553,12 @@ async function runSyncCycle({ interactiveAuth, force }) {
     // migrating, and leaves the sync button reporting success without looking.
     let modifiedTime = "";
     if (!hasLocalWork && !force) {
+      await lease.assert();
       modifiedTime = await getRemoteModifiedTime({ interactiveAuth });
+      await lease.assert();
       const lastSeenModified = String(await getSetting(REMOTE_MODIFIED_KEY, "") || "");
       if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
+        await lease.assert();
         await clearBackoff();
         await recordCycleActivity({ changed: false, force });
         return { status: "synced", warning: "", syncedAt: nowIso(), changed: false };
@@ -529,29 +567,36 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
     let snapshot;
     try {
+      await lease.assert();
       snapshot = await readRemoteSnapshot({ interactiveAuth });
+      await lease.assert();
     } catch (error) {
-      const recovered = await reprovisionIfSpreadsheetGone(error, local, { interactiveAuth });
+      const recovered = await reprovisionIfSpreadsheetGone(error, local, { interactiveAuth, lease });
       if (!recovered) throw error;
       provisioned = recovered;
+      await lease.assert();
       snapshot = await readRemoteSnapshot({ interactiveAuth });
+      await lease.assert();
     }
 
-    if (leaseLost) throw codedError("SYNC_BUSY", "sync lease was lost; retrying from a fresh snapshot is required");
+    await lease.assert();
 
     const forcedResolutionIds = await verifiedLocalResolutionIds(local, snapshot.entries);
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, {
       interactiveAuth,
-      forcedIds: forcedResolutionIds
+      forcedIds: forcedResolutionIds,
+      lease
     });
-    await clearCompletedResolutions(new Set([...forcedResolutionIds].filter((id) => pushedIds.has(id))));
-    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds);
+    await clearCompletedResolutions(new Set([...forcedResolutionIds].filter((id) => pushedIds.has(id))), { lease });
+    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { lease });
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
-    const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, snapshot.duplicates, { interactiveAuth });
-    const configPushed = await syncConfig(snapshot.config, snapshot.configRows, { interactiveAuth });
+    const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, snapshot.duplicates, { interactiveAuth, lease });
+    const configPushed = await syncConfig(snapshot.config, snapshot.configRows, { interactiveAuth, lease });
     // Backfills spreadsheets created before the marker existed, once.
+    await lease.assert();
     const markerWritten = await ensureAppMarker(snapshot.config, snapshot.configRows, { interactiveAuth });
+    await lease.assert();
 
     // Our own writes bump modifiedTime, so it is re-read to avoid a needless
     // download next cycle. If Drive lags, the gate simply opens once more.
@@ -559,6 +604,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     const nextModified = wroteRemotely || !modifiedTime
       ? await getRemoteModifiedTime({ interactiveAuth })
       : modifiedTime;
+    await lease.assert();
     await setSetting(REMOTE_MODIFIED_KEY, nextModified || "");
 
     const changed = wroteRemotely
@@ -566,6 +612,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
       || conflictChanges.length > 0
       || Boolean(provisioned);
     const timestamp = nowIso();
+    await lease.assert();
     await clearBackoff();
     await recordCycleActivity({ changed, force });
     notifyEntriesChanged({ action: "sync" });
@@ -580,7 +627,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     throw error;
   } finally {
     clearInterval(leaseTimer);
-    await releaseLock(SYNC_LOCK_KEY, CONTEXT_ID);
+    await releaseLock(SYNC_LOCK_KEY, CONTEXT_ID, lock.generation);
   }
 }
 
