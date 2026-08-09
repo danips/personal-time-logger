@@ -476,9 +476,9 @@ async function readSnapshotOnce(spreadsheetId, { interactiveAuth }) {
   const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
   if (!Array.isArray(data.valueRanges)) throw codedError("API_ERROR", "Google Sheets returned an invalid snapshot");
 
-  const { entries, rowMap, duplicates } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
+  const { entries, rowMap, duplicates, quarantined } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
   const { config, configRows } = rowsToConfig(valuesForRange(data.valueRanges, CONFIG_SHEET_NAME));
-  return { entries, rowMap, duplicates, config, configRows };
+  return { entries, rowMap, duplicates, quarantined, config, configRows };
 }
 
 /**
@@ -519,49 +519,42 @@ export function rowsToEntries(rows) {
   }
 
   const byId = new Map();
+  const quarantined = [];
   cells.slice(1).forEach((row, index) => {
     if (!row[0]) return;
     const rowIndex = index + 2;
-    const entry = rowToEntry(row);
-    const existing = byId.get(entry.id);
-
-    if (!existing) {
-      byId.set(entry.id, { entry, rowIndex, rowIndexes: [rowIndex] });
+    const decoded = decodeRemoteRow(row, rowIndex);
+    if (!decoded.entry) {
+      quarantined.push(decoded.quarantine);
       return;
     }
-
-    existing.rowIndexes.push(rowIndex);
-    if (String(entry.updated_at || "") > String(existing.entry.updated_at || "")) {
-      existing.entry = entry;
-      existing.rowIndex = rowIndex;
-    }
+    const existing = byId.get(decoded.entry.id) || [];
+    existing.push({ entry: decoded.entry, rowIndex });
+    byId.set(decoded.entry.id, existing);
   });
 
   const entries = [];
   const rowMap = new Map();
   const duplicates = [];
-  const quarantined = [];
-  for (const record of byId.values()) {
-    const decoded = decodeRemoteRow(cells[record.rowIndex - 1], record.rowIndex);
-    if (!decoded.entry) {
-      quarantined.push(decoded.quarantine);
-      continue;
-    }
-    entries.push(decoded.entry);
-    rowMap.set(decoded.entry.id, record.rowIndex);
-    if (record.rowIndexes.length > 1) {
-      const rows = record.rowIndexes.map((rowIndex) => ({
-        id: record.entry.id,
+  for (const records of byId.values()) {
+    const winner = records.reduce((best, candidate) => (
+      String(candidate.entry.updated_at || "") > String(best.entry.updated_at || "") ? candidate : best
+    ));
+    entries.push(winner.entry);
+    rowMap.set(winner.entry.id, winner.rowIndex);
+    if (records.length > 1) {
+      const rows = records.map(({ rowIndex }) => ({
+        id: winner.entry.id,
         rowIndex,
         expectedFingerprint: rowFingerprint(cells[rowIndex - 1])
       }));
       duplicates.push({
-        id: record.entry.id,
-        entry: decoded.entry,
-        keepRowIndex: record.rowIndex,
-        keepRow: rows.find((row) => row.rowIndex === record.rowIndex),
-        extraRows: rows.filter((row) => row.rowIndex !== record.rowIndex),
-        extraRowIndexes: record.rowIndexes.filter((rowIndex) => rowIndex !== record.rowIndex)
+        id: winner.entry.id,
+        entry: winner.entry,
+        keepRowIndex: winner.rowIndex,
+        keepRow: rows.find((row) => row.rowIndex === winner.rowIndex),
+        extraRows: rows.filter((row) => row.rowIndex !== winner.rowIndex),
+        extraRowIndexes: records.filter((record) => record.rowIndex !== winner.rowIndex).map((record) => record.rowIndex)
       });
     }
   }

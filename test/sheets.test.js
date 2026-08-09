@@ -86,4 +86,13 @@ describe("rowsToEntries", () => {
     assert.deepEqual(entries.map((entry) => entry.id), ["valid"]);
     assert.deepEqual(quarantined.map((item) => item.id), ["broken"]);
   });
+
+  it("retains a valid duplicate when a newer duplicate is malformed", () => {
+    const valid = fixture({ id: "mixed-duplicate", task: "valid", updated_at: "2026-07-27T08:00:00.000Z" });
+    const malformed = fixture({ id: valid.id, task: "broken", updated_at: "not-a-date" });
+    const { entries, quarantined } = rowsToEntries(sheet([valid, malformed]));
+
+    assert.deepEqual(entries.map((entry) => entry.task), ["valid"]);
+    assert.deepEqual(quarantined.map((item) => item.id), [valid.id]);
+  });
 });
