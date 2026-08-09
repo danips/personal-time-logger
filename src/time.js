@@ -88,9 +88,17 @@ export function toLocalInputValue(iso) {
 }
 
 export function fromLocalInputValue(value) {
-  if (!value) return "";
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(String(value || ""))) return "";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  if (Number.isNaN(date.getTime())) return "";
+  const [day, time] = value.split("T");
+  const [year, month, dateOfMonth] = day.split("-").map(Number);
+  const [hours, minutes, seconds = 0] = time.split(":").map(Number);
+  if (date.getFullYear() !== year || date.getMonth() + 1 !== month || date.getDate() !== dateOfMonth
+    || date.getHours() !== hours || date.getMinutes() !== minutes || date.getSeconds() !== seconds) return "";
+  const localText = (candidate) => toLocalInputValue(candidate.toISOString());
+  if (localText(new Date(date.getTime() - 3600_000)) === value || localText(new Date(date.getTime() + 3600_000)) === value) return "";
+  return date.toISOString();
 }
 
 export function bindMinuteRollover(input) {
