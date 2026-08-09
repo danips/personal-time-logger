@@ -3,10 +3,15 @@
   "private": true,
   "type": "module",
   "description": "Local-first time tracking with Google Sheets sync. Packaging and tests only; the extension itself has no dependencies.",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=8.0.0"
+  },
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
     "test:browser": "node scripts/browser-runtime-smoke.mjs",
-    "lint:extension": "node scripts/prepare-firefox-release.mjs --base-url https://example.invalid/personal-time-logger --output web-ext-artifacts/lint-source && web-ext lint --source-dir web-ext-artifacts/lint-source --self-hosted"
+    "lint:extension": "node scripts/prepare-firefox-release.mjs --base-url https://example.invalid/personal-time-logger --output web-ext-artifacts/lint-source && web-ext lint --source-dir web-ext-artifacts/lint-source --self-hosted",
+    "package:firefox": "./scripts/xpi_gen.sh"
   },
   "devDependencies": {
     "acorn": "8.15.0",

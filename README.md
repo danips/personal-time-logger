@@ -286,9 +286,33 @@ The calendar exports clipped allocations for the displayed week. Deleted entries
 - The cross-browser refresh-token path uses Google device flow and stores personal OAuth credentials in the local extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
 - Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live Sheets or Drive.
-- No external runtime dependencies. The only development dependency is Node for the tests and packaging scripts.
+- No external runtime dependencies. Contributor tooling is installed from the locked npm development dependencies.
 - Manifest V3 support in Firefox can vary by version; if a browser rejects the manifest, use a current Firefox release.
 - SVG icons are in `icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
+
+## Development setup
+
+Use Node.js **20 or newer** and npm **8 or newer**. The pinned `web-ext`
+tooling requires Node 20; the extension itself does not ship Node modules.
+
+From a clean checkout, install exactly the locked development dependencies:
+
+```bash
+npm ci
+```
+
+Run the checks and build a local unsigned review archive with:
+
+```bash
+npm test
+npm run lint:extension
+npm run package:firefox
+```
+
+`npm run package:firefox` writes `time-logger.xpi`. It contains the same
+allow-listed source membership as the release build, but uses an inert update
+URL and is not signed for installation. Firefox signing and publication remain
+the responsibility of the tag-triggered release workflow.
 
 ## Tests
 
@@ -296,7 +320,7 @@ The calendar exports clipped allocations for the displayed week. Deleted entries
 npm test
 ```
 
-Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic Google API barriers before response, response body, and commit acknowledgement. There is nothing to install: the tests use only the standard library, and the extension itself has no dependencies.
+Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic Google API barriers before response, response body, and commit acknowledgement. Run `npm ci` first so the pinned static-analysis and packaging tools are available; the extension itself has no runtime npm dependencies.
 
 For an opt-in Firefox WebDriver smoke test of popup, calendar, reconcile, options, and an extension-context lock, install Firefox, `geckodriver`, and `zip`, then run:
 
