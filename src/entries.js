@@ -1,5 +1,6 @@
 import { getSetting, mutateEntries, mutateEntry, mutateLocalState, mutateSetting, putEntry } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
+import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { durationSeconds, nowIso, uuid } from "./time.js";
 
@@ -34,7 +35,7 @@ const EDITABLE_FIELDS = new Set([
 
 function entryModelError(message) {
   const error = new TypeError(message);
-  error.code = "ENTRY_INVALID";
+  error.code = ERROR_CODE.ENTRY_INVALID;
   return error;
 }
 

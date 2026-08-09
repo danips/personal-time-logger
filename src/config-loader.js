@@ -1,5 +1,6 @@
 import { getSetting, mutateSettings, removeSetting } from "./db.js";
 import { platform } from "./platform.js";
+import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 const CLIENT_ID_KEY = SETTING_KEY.GOOGLE_OAUTH_CLIENT_ID;
@@ -59,7 +60,7 @@ export async function setOAuthClientCredentials(clientId, clientSecret) {
   const complete = Boolean(normalized[CLIENT_ID_KEY] && normalized[CLIENT_SECRET_KEY]);
   if (!complete && (normalized[CLIENT_ID_KEY] || normalized[CLIENT_SECRET_KEY])) {
     const error = new TypeError("Save both the Google OAuth client ID and secret, or clear both.");
-    error.code = "CONFIG_INVALID";
+    error.code = ERROR_CODE.CONFIG_INVALID;
     throw error;
   }
 
@@ -80,7 +81,7 @@ export async function setOAuthClientCredentials(clientId, clientSecret) {
     await platform.setSyncedStorage(normalized);
   } catch (cause) {
     const error = new Error("Could not save Google credentials to synchronized storage.");
-    error.code = "CONFIG_SAVE_FAILED";
+    error.code = ERROR_CODE.CONFIG_SAVE_FAILED;
     error.cause = cause;
     throw error;
   }

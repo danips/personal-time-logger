@@ -4,6 +4,7 @@ import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
 import { nowIso, uuid } from "./time.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import { ERROR_CODE } from "./error-codes.js";
 import { RECONCILIATION_INTENT_STATE } from "./operation-states.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
@@ -223,7 +224,7 @@ export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {
 
 function batchResolutionError(message) {
   const error = new TypeError(message);
-  error.code = "RECONCILIATION_BATCH_INVALID";
+  error.code = ERROR_CODE.RECONCILIATION_BATCH_INVALID;
   return error;
 }
 

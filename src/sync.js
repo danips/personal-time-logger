@@ -21,6 +21,7 @@ import {
 } from "./reconcile.js";
 import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry } from "./entries.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import { ERROR_CODE } from "./error-codes.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
 import { platform } from "./platform.js";
@@ -45,8 +46,10 @@ let inFlightSync = null;
 let inFlightOptions = null;
 let queuedSync = null;
 let queuedOptions = null;
+const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 
 function codedError(code, message) {
+  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
   const error = new Error(message);
   error.code = code;
   return error;

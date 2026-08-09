@@ -4,6 +4,7 @@ import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
 import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -25,8 +26,10 @@ const APP_MARKER_VALUE = "personal-time-logger";
 const MAX_CANDIDATES = 25;
 const API_TIMEOUT_MS = 30_000;
 const DRIVE_GATE_RETRY_MS = 60_000;
+const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 
 function codedError(code, message) {
+  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
   const error = new Error(message);
   error.code = code;
   return error;

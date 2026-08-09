@@ -1,3 +1,5 @@
+import { ERROR_CODE } from "./error-codes.js";
+
 const DB_NAME = "timelogger_db";
 const DB_VERSION = 3;
 const ENTRY_STORE = "time_entries";
@@ -18,7 +20,7 @@ export class StorageConflictError extends Error {
   constructor(message, details = {}) {
     super(message);
     this.name = "StorageConflictError";
-    this.code = "STORAGE_CONFLICT";
+    this.code = ERROR_CODE.STORAGE_CONFLICT;
     Object.assign(this, details);
   }
 }
@@ -57,7 +59,7 @@ function openDb() {
 
     request.onblocked = () => {
       const error = new Error("IndexedDB upgrade is blocked by another extension context");
-      error.code = "DB_BLOCKED";
+      error.code = ERROR_CODE.DB_BLOCKED;
       reject(error);
     };
     request.onsuccess = () => {
