@@ -227,6 +227,7 @@ export async function createAccountContainer(label, overrides = {}) {
     label: normalizedLabel,
     cookie_store_id: identity.cookieStoreId,
     pending_setup: true,
+    provisioning_state: "awaiting_sign_in",
     fingerprint: "",
     email: "",
     plan_type: "",
@@ -236,7 +237,27 @@ export async function createAccountContainer(label, overrides = {}) {
     last_error: null
   };
   await mutateAccounts(deps, (accounts) => ({ accounts: [...accounts, account], result: account }));
-  await deps.platform.createTab({ url: CHATGPT_USAGE_PAGE_URL, cookieStoreId: identity.cookieStoreId, active: true });
+  try {
+    await deps.platform.createTab({ url: CHATGPT_USAGE_PAGE_URL, cookieStoreId: identity.cookieStoreId, active: true });
+  } catch (error) {
+    // The account cannot be completed without its first setup tab. Remove the
+    // durable pending state and best-effort clean up the unused container; a
+    // cleanup failure must not hide the actionable setup error.
+    try {
+      await mutateAccounts(deps, (accounts) => ({
+        accounts: accounts.filter((candidate) => candidate.id !== account.id),
+        result: null
+      }));
+    } finally {
+      try {
+        await deps.platform.removeContextualIdentity?.(identity.cookieStoreId);
+      } catch {
+        // The account record is gone, so the remaining container is harmless
+        // and can still be removed manually from Firefox container settings.
+      }
+    }
+    throw usageError("setup_tab_unavailable", "Could not open the ChatGPT setup tab", { cause: error });
+  }
   return account;
 }
 

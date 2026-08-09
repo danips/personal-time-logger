@@ -29,7 +29,7 @@ const response = (over = {}) => ({
 
 function harness({ raw = response(), tabs = [], now = 1_800_000_000_000 } = {}) {
   const values = new Map();
-  const calls = { createdTabs: [], removedTabs: [], permission: 0 };
+  const calls = { createdTabs: [], removedTabs: [], removedContainers: [], permission: 0 };
   let tabId = 10;
   const fakePlatform = {
     async hasOptionalHostPermission() {
@@ -42,6 +42,10 @@ function harness({ raw = response(), tabs = [], now = 1_800_000_000_000 } = {}) 
     },
     async getContextualIdentity() {
       return { cookieStoreId: "firefox-container-1" };
+    },
+    async removeContextualIdentity(cookieStoreId) {
+      calls.removedContainers.push(cookieStoreId);
+      return true;
     },
     async createTab(details) {
       const tab = { id: ++tabId, status: "complete", ...details };
@@ -88,6 +92,17 @@ describe("ChatGPT container orchestration", () => {
     const { overrides } = harness();
     overrides.platform.hasOptionalHostPermission = async () => false;
     await assert.rejects(() => createAccountContainer("Account 1", overrides), { code: "permission_required" });
+  });
+
+  it("rolls back a pending account and its new container when opening setup fails", async () => {
+    const { calls, values, overrides } = harness();
+    overrides.platform.createTab = async () => {
+      throw new Error("browser refused the setup tab");
+    };
+
+    await assert.rejects(() => createAccountContainer("Account 1", overrides), { code: "setup_tab_unavailable" });
+    assert.deepEqual(values.get("chatgpt_usage_accounts"), []);
+    assert.deepEqual(calls.removedContainers, ["firefox-container-1"]);
   });
 
   it("validates a signed-in account and stores only the fingerprint and normalized snapshot", async () => {

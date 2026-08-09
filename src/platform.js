@@ -98,6 +98,12 @@ export const platform = {
     }
   },
 
+  async removeContextualIdentity(cookieStoreId) {
+    if (!rawApi.contextualIdentities || !rawApi.contextualIdentities.remove) return false;
+    await apiCall(rawApi.contextualIdentities.remove, rawApi.contextualIdentities, cookieStoreId);
+    return true;
+  },
+
   async createTab(details) {
     if (!rawApi.tabs || !rawApi.tabs.create) throw new Error("Browser tabs API is unavailable");
     return apiCall(rawApi.tabs.create, rawApi.tabs, details);
