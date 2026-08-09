@@ -1,13 +1,13 @@
 # Time model decisions
 
 These decisions define how the extension allocates duration between calendar,
-popup totals, and CSV export.
+popup totals, and Tempo upload.
 
 ## D-01 — Multiplied time at boundaries
 
 Calendar blocks always use the actual start and end timestamps. A completed
 entry's stored `duration_seconds` is its effective duration; when a day, week,
-or export period clips the actual interval, that effective duration is divided
+or upload period clips the actual interval, that effective duration is divided
 proportionally by elapsed overlap. A multiplier never creates an additional
 visual tail or moves time into a later period.
 
@@ -31,12 +31,12 @@ compare-and-swap operation, so an edit in the interval between those requests
 can be detected by post-write verification but cannot be prevented. A successful
 local resolution is a durable operation rather than a synthetic timestamp bump.
 
-## D-04 — Displayed-week export
+## D-04 — Displayed-week Tempo allocation
 
-Calendar CSV export contains only each entry's allocation within the displayed
-week. Every row includes the original entry ID and machine-readable allocation
-start/end timestamps, so the clipped record remains traceable. A whole-entry
-export is intentionally not produced by this command.
+Calendar Tempo upload contains only each completed entry's effective allocation
+within the displayed week. Time is apportioned across the week boundary instead
+of assigning the whole entry to either week. Running entries are excluded because
+Tempo requires a fixed positive duration.
 
 ## Second-audit decisions
 

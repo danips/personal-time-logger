@@ -15,9 +15,87 @@ import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
+import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
 
 let diagnostics = [];
 let eventsBound = false;
+
+function createTempoMappingRow(task = "", issueId = "") {
+  const row = document.createElement("tr");
+  const taskCell = document.createElement("td");
+  const issueCell = document.createElement("td");
+  const actionCell = document.createElement("td");
+  const taskInput = document.createElement("input");
+  const issueInput = document.createElement("input");
+  const removeButton = document.createElement("button");
+
+  taskInput.type = "text";
+  taskInput.value = task;
+  taskInput.placeholder = "Task name (blank means no Task)";
+  taskInput.className = "tempo-task";
+  taskInput.setAttribute("aria-label", "Task name");
+  issueInput.type = "text";
+  issueInput.inputMode = "numeric";
+  issueInput.pattern = "[0-9]+";
+  issueInput.value = issueId;
+  issueInput.className = "tempo-issue-id";
+  issueInput.setAttribute("aria-label", `Issue ID for ${task || "entries without a Task"}`);
+  removeButton.type = "button";
+  removeButton.className = "compact-button";
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    updateTempoMappingsEmptyState();
+  });
+
+  taskCell.append(taskInput);
+  issueCell.append(issueInput);
+  actionCell.append(removeButton);
+  row.append(taskCell, issueCell, actionCell);
+  return row;
+}
+
+function updateTempoMappingsEmptyState() {
+  $("#tempoMappingsEmpty").hidden = $("#tempoMappings").children.length > 0;
+}
+
+function renderTempoMappings(value) {
+  const mappings = normalizeTempoTaskIssueIds(value);
+  const rows = Object.entries(mappings)
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([task, issueId]) => createTempoMappingRow(task, issueId));
+  $("#tempoMappings").replaceChildren(...rows);
+  updateTempoMappingsEmptyState();
+}
+
+function readTempoMappings() {
+  const mappings = {};
+  for (const row of $("#tempoMappings").querySelectorAll("tr")) {
+    const task = row.querySelector(".tempo-task").value.trim();
+    const rawIssueId = row.querySelector(".tempo-issue-id").value;
+    const issueId = normalizeTempoIssueId(rawIssueId);
+    if (!issueId) throw new Error(`Enter a positive numeric issue ID for ${task || "entries without a Task"}`);
+    if (Object.hasOwn(mappings, task)) throw new Error(`Task “${task || "(No task)"}” is listed more than once`);
+    mappings[task] = issueId;
+  }
+  return mappings;
+}
+
+async function saveTempoSettings() {
+  const token = $("#tempoApiToken").value.trim();
+  const authorAccountId = $("#tempoAuthorAccountId").value.trim();
+  const taskIssueIds = readTempoMappings();
+  await mutateSettings([
+    SETTING_KEY.TEMPO_API_TOKEN,
+    SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID,
+    SETTING_KEY.TEMPO_TASK_ISSUE_IDS
+  ], (settings) => {
+    settings.set(SETTING_KEY.TEMPO_API_TOKEN, token);
+    settings.set(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, authorAccountId);
+    settings.set(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, taskIssueIds);
+  });
+  setStatus("Tempo settings saved on this device");
+}
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -153,6 +231,9 @@ async function refresh() {
   renderDiagnostics();
   $("#syncInterval").value = String(await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
   $("#durationMultiplier").value = String(await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
+  $("#tempoApiToken").value = await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "");
+  $("#tempoAuthorAccountId").value = await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, "");
+  renderTempoMappings(await getSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, {}));
 
   if (auth.missingClientId) {
     $("#authStatus").textContent = "Google client ID missing";
@@ -314,6 +395,13 @@ function bindEvents() {
   $("#copyDiagnostics").addEventListener("click", copyDiagnosticsClicked);
   $("#exportDiagnostics").addEventListener("click", exportDiagnosticsClicked);
   $("#clearDiagnostics").addEventListener("click", (event) => runOptionsAction("clear-diagnostics", clearDiagnosticsClicked, event.currentTarget));
+  $("#addTempoMapping").addEventListener("click", () => {
+    const row = createTempoMappingRow();
+    $("#tempoMappings").append(row);
+    updateTempoMappingsEmptyState();
+    row.querySelector(".tempo-task").focus();
+  });
+  $("#saveTempoSettings").addEventListener("click", (event) => runOptionsAction("save-tempo-settings", saveTempoSettings, event.currentTarget));
 
   $("#saveGoogleCredentials").addEventListener("click", (event) => runOptionsAction("save-google-credentials", saveGoogleCredentials, event.currentTarget));
   $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));

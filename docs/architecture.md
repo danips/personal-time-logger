@@ -19,7 +19,7 @@ ChatGPT content scripts ────────────────┘     
 | --- | --- | --- | --- |
 | Background | `background/background.js` | Alarm heartbeat, installation recovery, and non-interactive sync. | Does not own entries; it calls `src/sync.js`. |
 | Popup | `popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `src/entries.js` and refreshes on entry events. |
-| Calendar | `calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and clipped CSV export. | Geometry is in `src/calendar-layout.js`; allocation is in `src/time-allocation.js`. |
+| Calendar | `calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `src/calendar-layout.js`; allocation is in `src/time-allocation.js`; Tempo transport is in `src/tempo.js`. |
 | Options | `options/options.js` | OAuth client setup, sync settings, spreadsheet adoption/replacement, and diagnostics. | OAuth client settings use synchronized browser storage; tokens remain local. |
 | Reconcile | `reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
 | Usage | `usage/usage.js` | Firefox-only ChatGPT account setup and usage display. | It requests optional ChatGPT permission before contacting that host. |
@@ -62,7 +62,7 @@ created_at, updated_at, deleted_at, device_id, revision, multiply
 
 `duration_seconds` is effective duration. Calendar geometry always uses the
 actual interval, while `src/time-allocation.js` apportions effective duration
-proportionally across day/week/export boundaries. `docs/time-model.md` records
+proportionally across day/week/upload boundaries. `docs/time-model.md` records
 the product decisions for allocation, merging, conflicts, and multiplier
 validation.
 

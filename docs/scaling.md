@@ -30,10 +30,9 @@ edited entries stay in the active tab until their calendar year is closed; a
 verified migration copies a year into its archive tab, keeps tombstones there,
 and writes a versioned partition manifest in `config`. Every device must read
 the manifest before syncing, so old clients continue to use the unpartitioned
-layout rather than silently losing history. Reconciliation and CSV export read
-only the partitions covering their selected range, while a full-history export
-may stream one partition at a time.
+layout rather than silently losing history. Reconciliation and displayed-week
+Tempo upload read only the partitions covering their selected range.
 
 This repository intentionally has no automatic migration yet. It needs the
-benchmark data above, an explicit backup/export confirmation, and a compatible
+benchmark data above, an explicit backup confirmation, and a compatible
 manifest rollout before a remotely destructive move is safe.

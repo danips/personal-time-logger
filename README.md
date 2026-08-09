@@ -8,7 +8,7 @@ A browser extension for local-first time tracking with Google Sheets sync. It is
 - Project, task, description, and multiply fields in the popup.
 - Start, active-timer Stop, and header Sync controls in the popup. Starting a timer stops the running one.
 - Recent entries grouped by week and day, with totals, repeated entries collapsed into expandable groups, and **Load more** for earlier weeks.
-- Weekly calendar view with movable and resizable time logs and displayed-week CSV export.
+- Weekly calendar view with movable and resizable time logs and direct displayed-week Tempo upload.
 - Reconcile screen comparing this device with the spreadsheet, including duplicate-row detection.
 - Multiple-active-timer warning.
 - Options page for Google auth, sync interval, duration multiplier, and device ID. The spreadsheet is found or created automatically.
@@ -182,7 +182,7 @@ Sync reads first and only inspects the layout when a read fails. A missing tab, 
 7. Use the play button on a recent entry to start a new timer with the same details.
 8. Use **Load more** to reach earlier weeks in the recent list.
 9. Use the calendar button to open the weekly calendar view, and the ⇄ button to open Reconcile.
-10. Use **Export CSV** in the calendar to download proportional allocations for its displayed week.
+10. Use **Send to Tempo** in the calendar to create the displayed week's completed worklogs directly in Tempo.
 11. Use the merge controls in a recent entry edit panel or selected calendar entry to append another matching completed log's elapsed time to the selected entry.
 
 Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when Google auth is not ready.
@@ -195,7 +195,7 @@ Set **Duration multiplier** in Options. Entries with **Multiply** checked store 
 
 The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid using their actual start/end times. Entries that overlap in time are shown side by side. A multiplier affects effective totals, but is allocated proportionally across the actual interval rather than extending a block into later days.
 
-Click **Export CSV** to download only the portions of entries allocated inside the displayed week. The downloaded filename includes that week's Monday and Sunday dates.
+Click **Send to Tempo** to send the displayed week's completed entries to Tempo. Configure the Tempo API token and author account ID in Options first. Each Task maps to a numeric Jira issue ID; the calendar asks when it encounters an unknown Task and stores the answer in the editable cache in Options. The entry description becomes the Tempo worklog comment, and multiplied time is apportioned proportionally when an entry crosses the week boundary. Running timers are skipped because Tempo requires a fixed duration. Review the confirmation carefully: sending the same week again creates duplicate Tempo worklogs.
 
 Drag a time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`. Completed entries keep their original duration when moved. Active timers keep running and only their `start_at` value changes.
 
@@ -244,32 +244,6 @@ The ⇄ button in the popup header opens a page comparing this device with the s
 Differing entries list each field with the device value beside the spreadsheet value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
 
 Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck the complete row before the request and verify the result afterward. Google Sheets has no atomic compare-and-swap, so a manual edit in the narrow interval between those requests is detected after the fact rather than prevented. Deleting duplicate rows is the one action that writes to the spreadsheet directly, because a duplicate row has no local counterpart; it verifies every target before sending the batch and checks the result afterward.
-
-## CSV Export
-
-CSV files use comma separators, CRLF rows, RFC 4180 quoting, and UTF-8. Calendar downloads include a UTF-8 BOM for spreadsheet applications that otherwise guess a local legacy encoding; `entriesToCsv(..., { includeBom: false })` produces a BOM-free machine export.
-
-The following columns are stable and machine-readable regardless of browser locale: **Entry ID**, **Allocation Start (ISO)**, **Allocation End (ISO)**, **Duration (hours)**, **Multiplied duration (hours)**, **Multiply**, and **Status**. Hour and multiplier values always use a decimal point. Start/End Date and Time are locale-formatted convenience columns for people, not interchange fields.
-
-The CSV export also includes:
-
-- Project
-- Task
-- Description
-- Start Date
-- Start Time
-- End Date
-- End Time
-- Duration (hours)
-- Multiplied duration (hours)
-- Multiply
-- Status
-
-`Duration (hours)` is the allocated elapsed time. `Multiplied duration (hours)` is the allocated effective duration after applying the value in `Multiply`. Fields that begin with spreadsheet formula sigils are prefixed safely so opening the file cannot execute a formula.
-
-`Status` is `completed`, `needs_review`, or `running`. A running timer is exported with empty end columns, its elapsed time so far in `Duration (hours)`, and no multiplied duration, since that is not settled until the timer stops.
-
-The calendar exports clipped allocations for the displayed week. Deleted entries are excluded.
 
 ## Known Limitations
 
@@ -367,4 +341,3 @@ OAuth credentials are stored in IndexedDB through the Options page and are not p
 - Add a summary report of time by project and task for a chosen period.
 - Add entry search across all history.
 - Add local backup and restore of the entry database.
-- Add import from CSV.

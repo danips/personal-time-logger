@@ -112,6 +112,44 @@
       </section>
 
       <section class="panel">
+        <h2>Tempo</h2>
+        <label>
+          API token
+          <input id="tempoApiToken" type="password" autocomplete="off" spellcheck="false">
+        </label>
+        <label>
+          Author account ID
+          <input id="tempoAuthorAccountId" type="text" autocomplete="off" spellcheck="false">
+        </label>
+        <p class="note">
+          These credentials stay in this browser profile. Calendar sends the displayed
+          week's completed logs directly to Tempo and uses each description as its comment.
+        </p>
+        <h3>Cached Task issue IDs</h3>
+        <p class="note">
+          When Calendar encounters a Task it does not know, it asks for the numeric Jira
+          issue ID and remembers it here. You can edit or remove mappings before sending.
+        </p>
+        <div class="table-scroll">
+          <table class="tempo-mappings">
+            <thead>
+              <tr>
+                <th scope="col">Task</th>
+                <th scope="col">Issue ID</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="tempoMappings"></tbody>
+          </table>
+        </div>
+        <p id="tempoMappingsEmpty" class="note">No Task issue IDs cached yet.</p>
+        <div class="actions">
+          <button id="addTempoMapping" type="button">Add mapping</button>
+          <button id="saveTempoSettings" type="button">Save Tempo Settings</button>
+        </div>
+      </section>
+
+      <section class="panel">
         <h2>Diagnostics</h2>
         <p id="diagnosticsSummary" class="note">Loading diagnostics...</p>
         <p class="note">

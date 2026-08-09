@@ -1,8 +1,13 @@
-import { getEntriesIntersecting } from "../src/db.js";
+import { getEntriesIntersecting, getSetting, mutateSetting } from "../src/db.js";
 import { isActionRunning, runAction } from "../src/action-runner.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
-import { downloadCsv } from "../src/csv.js";
+import {
+  normalizeTempoIssueId,
+  normalizeTempoTaskIssueIds,
+  prepareTempoWeek,
+  sendTempoWorklogs
+} from "../src/tempo.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
 import {
@@ -11,7 +16,6 @@ import {
   durationSeconds,
   formatElapsed,
   fromLocalInputValue,
-  localDateKey,
   localTime,
   startOfLocalDay as startOfDay,
   startOfLocalWeek as startOfWeek,
@@ -42,6 +46,7 @@ import {
   weekStartFromInput
 } from "../src/calendar-layout.js";
 import { bindPopupDrag } from "./popup-drag.js";
+import { SETTING_KEY } from "../src/setting-keys.js";
 
 const DRAG_THRESHOLD_PX = 5;
 const DEFAULT_VISIBLE_HOUR = 7;
@@ -852,14 +857,78 @@ async function changeWeek(nextStart) {
   setStatus("Ready");
 }
 
-function exportDisplayedWeek() {
+function requestIssueId(task) {
+  const taskLabel = task || "(No task)";
+  while (true) {
+    const value = window.prompt(`Enter the numeric Jira issue ID for Task “${taskLabel}”. It will be remembered for later weeks.`);
+    if (value === null) return null;
+    const issueId = normalizeTempoIssueId(value);
+    if (issueId) return issueId;
+    window.alert("The issue ID must be a positive whole number.");
+  }
+}
+
+async function sendDisplayedWeekToTempo() {
+  const token = String(await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "")).trim();
+  const authorAccountId = String(await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, "")).trim();
+  if (!token || !authorAccountId) {
+    throw new Error("Enter the Tempo API token and author account ID in Options first");
+  }
+
   const weekEnd = addDays(weekStart, DAY_COUNT);
-  const finalDay = addDays(weekStart, DAY_COUNT - 1);
-  downloadCsv(
-    renderedEntries,
-    `time-entries-${localDateKey(weekStart)}-to-${localDateKey(finalDay)}.csv`,
-    { periodStart: weekStart, periodEnd: weekEnd }
+  const entries = renderedEntries.map((entry) => ({ ...entry }));
+  let taskIssueIds = normalizeTempoTaskIssueIds(
+    await getSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, {})
   );
+  let prepared = prepareTempoWeek(entries, {
+    periodStart: weekStart,
+    periodEnd: weekEnd,
+    authorAccountId,
+    taskIssueIds
+  });
+
+  for (const task of prepared.missingTasks) {
+    const issueId = requestIssueId(task);
+    if (!issueId) {
+      setStatus("Tempo send cancelled; no worklogs were sent");
+      return;
+    }
+    taskIssueIds[task] = issueId;
+  }
+  if (prepared.missingTasks.length) {
+    taskIssueIds = await mutateSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, (current) => ({
+      ...normalizeTempoTaskIssueIds(current),
+      ...taskIssueIds
+    }));
+    prepared = prepareTempoWeek(entries, {
+      periodStart: weekStart,
+      periodEnd: weekEnd,
+      authorAccountId,
+      taskIssueIds
+    });
+  }
+
+  if (!prepared.totalWorklogs) {
+    setStatus(prepared.skippedRunning
+      ? "No completed worklogs to send; running timers were skipped"
+      : "No worklogs to send for the displayed week");
+    return;
+  }
+
+  const skipped = prepared.skippedRunning
+    ? ` ${prepared.skippedRunning} running timer${prepared.skippedRunning === 1 ? " will" : "s will"} be skipped.`
+    : "";
+  const confirmed = window.confirm(
+    `Send ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} from the displayed week to Tempo?${skipped}\n\nSending the same week again creates duplicates in Tempo.`
+  );
+  if (!confirmed) {
+    setStatus("Tempo send cancelled; no worklogs were sent");
+    return;
+  }
+
+  setStatus(`Sending ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} to Tempo...`);
+  const result = await sendTempoWorklogs(prepared.groups, { token });
+  setStatus(`Sent ${result.sentWorklogs} worklog${result.sentWorklogs === 1 ? "" : "s"} to Tempo`);
 }
 
 function bindEvents() {
@@ -870,7 +939,7 @@ function bindEvents() {
   $("#prevWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, -DAY_COUNT)), { button: event.currentTarget }));
   $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
-  $("#exportButton").addEventListener("click", exportDisplayedWeek);
+  $("#sendTempoButton").addEventListener("click", (event) => runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget }));
   $("#syncButton").addEventListener("click", (event) => runCalendarAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
   $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, { button: event.currentTarget, expectedRevision: lastResizeUndo?.revision }));
   $("#duplicateEntryButton").addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));

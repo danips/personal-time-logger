@@ -35,6 +35,11 @@ h2 {
   font-size: 18px;
 }
 
+h3 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+}
+
 .status {
   margin-top: 6px;
   color: #5f6368;
@@ -62,6 +67,46 @@ input {
   border-radius: 6px;
   padding: 9px 10px;
   font: inherit;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.tempo-mappings {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+}
+
+.tempo-mappings th,
+.tempo-mappings td {
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.tempo-mappings th:first-child,
+.tempo-mappings td:first-child {
+  width: 55%;
+}
+
+.tempo-mappings input {
+  min-width: 140px;
+}
+
+.compact-button {
+  min-height: 34px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 button {

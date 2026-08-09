@@ -25,6 +25,9 @@ export const SETTING_KEY = Object.freeze({
   SYNC_BACKOFF_UNTIL: "sync_backoff_until",
   SYNC_IDLE_STREAK: "sync_idle_streak",
   SYNC_INTERVAL_SECONDS: "sync_interval_seconds",
+  TEMPO_API_TOKEN: "tempo_api_token",
+  TEMPO_AUTHOR_ACCOUNT_ID: "tempo_author_account_id",
+  TEMPO_TASK_ISSUE_IDS: "tempo_task_issue_ids",
   TIME_ENTRIES_SHEET_ID: "time_entries_sheet_id",
   WINDOW_RESIZE_PRESETS: "window_resize_presets"
 });

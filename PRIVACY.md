@@ -2,6 +2,12 @@
 
 Personal Time Logger stores time entries, settings, and Google OAuth tokens in the local Firefox profile. It stores the Google OAuth client ID and client secret in Firefox synchronized extension storage so Firefox can restore them on the user's other desktop devices.
 
+## Tempo upload
+
+The optional Tempo upload stores the user-entered Tempo API token, author account ID, and Task-to-Jira-issue-ID cache only in the extension's local IndexedDB profile. These values are not put in Firefox Sync. The token is unencrypted within the Firefox profile, like the Google access tokens described below.
+
+When the user explicitly confirms **Send to Tempo**, the extension sends the displayed week's completed worklogs directly to `https://api.tempo.io`. Each request contains the configured author account ID and Jira issue ID plus the entry description, local start date, and effective duration. The API token is sent only as the Tempo bearer authorization header. Running timers are not sent. No Tempo credential or worklog is sent to the extension developer, analytics, Google, or any endpoint other than Tempo as part of this action.
+
 ## ChatGPT usage limits
 
 The optional ChatGPT usage feature requests access to `https://chatgpt.com/*` only after the user presses **Grant ChatGPT access**. It uses Firefox contextual identities so simultaneously connected ChatGPT accounts remain in separate cookie stores. Firefox's built-in containers are sufficient; Mozilla's Multi-Account Containers extension is optional and is not required by Personal Time Logger.
