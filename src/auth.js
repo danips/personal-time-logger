@@ -50,17 +50,6 @@ async function formRequest(url, params) {
   return { response, data };
 }
 
-async function tokenRequest(params) {
-  const { response, data } = await formRequest(TOKEN_URL, params);
-
-  if (!response.ok) {
-    const detail = [data.error, data.error_description].filter(Boolean).join(": ");
-    throw codedError("AUTH_FAILED", detail || `Google token request failed with HTTP ${response.status}`);
-  }
-
-  return data;
-}
-
 async function deviceCodeRequest(config) {
   const { response, data } = await formRequest(DEVICE_CODE_URL, {
     client_id: config.GOOGLE_CLIENT_ID,
