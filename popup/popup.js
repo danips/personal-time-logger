@@ -746,7 +746,7 @@ async function restartFromEntry(id) {
     project: entry.project || "",
     task: entry.task || "",
     description: entry.description || "",
-    multiply: entry.multiply ? true : false
+    multiply: entry.multiply || ""
   });
   hideEdit();
   await runSync({ force: false });
