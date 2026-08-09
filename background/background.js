@@ -8,6 +8,7 @@ import {
   SYNC_ALARM
 } from "../src/background-schedule.js";
 import { platform } from "../src/platform.js";
+import { recordDiagnostic } from "../src/diagnostics.js";
 
 const SCHEDULE_ERROR_KEY = "background_schedule_error";
 
@@ -23,10 +24,16 @@ async function runBackgroundSync() {
 
   try {
     await syncNow({ interactiveAuth: false });
-  } catch {
+  } catch (error) {
     // Offline, backoff, another context already syncing, missing config, and
     // expired auth are all expected here. syncNow records its own backoff and the
     // UI surfaces sync status, so there is nothing to report from the background.
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "sync_cycle",
+      error,
+      recovery: "Open Options, review diagnostics, then retry sync."
+    }).catch(() => {});
   }
 
   // Set from the idle streak, so a quiet profile stretches its polling out and
@@ -43,8 +50,16 @@ async function scheduleHeartbeat() {
     scheduleFallback() {
       return scheduleSyncHeartbeat(MIN_SYNC_INTERVAL_SECONDS);
     },
-    saveDiagnostic(diagnostic) {
-      return setSetting(SCHEDULE_ERROR_KEY, diagnostic);
+    async saveDiagnostic(diagnostic) {
+      await setSetting(SCHEDULE_ERROR_KEY, diagnostic);
+      if (diagnostic) {
+        await recordDiagnostic({
+          subsystem: "background",
+          phase: "schedule",
+          code: diagnostic.code,
+          recovery: "Open Options and retry after browser alarms are available."
+        });
+      }
     }
   });
 }
@@ -52,8 +67,14 @@ async function scheduleHeartbeat() {
 async function runAlarmLifecycle() {
   try {
     await runBackgroundSync();
-  } catch {
+  } catch (error) {
     // Sync failures are expected and are handled by syncNow's backoff state.
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "alarm_lifecycle",
+      error,
+      recovery: "Open Options, review diagnostics, then retry sync."
+    }).catch(() => {});
   } finally {
     // This must be awaited so a failed due-time or sync operation cannot strand
     // future periodic work without attempting a conservative fallback alarm.
@@ -73,9 +94,15 @@ async function handleInstalled({ reason }) {
   try {
     await clearRemoteReadMarker();
     await setSetting(NEXT_DUE_KEY, 0);
-  } catch {
+  } catch (error) {
     // The guaranteed scheduling attempt in finally still gives this context a
     // chance to recover once IndexedDB is available again.
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "install",
+      error,
+      recovery: "Restart the extension, then review Options diagnostics."
+    }).catch(() => {});
   } finally {
     await scheduleHeartbeat();
   }

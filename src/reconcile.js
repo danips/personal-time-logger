@@ -3,6 +3,7 @@ import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
 import { nowIso } from "./time.js";
+import { recordDiagnostic } from "./diagnostics.js";
 
 // Only the columns that live in the sheet are compared. dirty, last_sync_at and
 // sync_error are local bookkeeping, so a difference there is not a divergence.
@@ -41,7 +42,7 @@ export function isPendingReconciliationIntent(intent, now = Date.now()) {
 
 /** Moves expired/legacy intents to a small local diagnostic record. */
 export async function pruneExpiredReconciliationIntents({ now = Date.now() } = {}) {
-  return mutateSettings([RECONCILIATION_INTENTS_KEY, STALE_RECONCILIATION_INTENTS_KEY], (settings) => {
+  const stale = await mutateSettings([RECONCILIATION_INTENTS_KEY, STALE_RECONCILIATION_INTENTS_KEY], (settings) => {
     const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
       ? settings.get(RECONCILIATION_INTENTS_KEY)
       : [];
@@ -70,6 +71,16 @@ export async function pruneExpiredReconciliationIntents({ now = Date.now() } = {
     }
     return stale;
   });
+  if (stale.length) {
+    await recordDiagnostic({
+      subsystem: "reconciliation",
+      phase: "intent_expiry",
+      code: "RECONCILIATION_INTENT_EXPIRED",
+      entryCount: stale.length,
+      recovery: "Rescan reconciliation before choosing a side."
+    });
+  }
+  return stale;
 }
 
 /**

@@ -38,6 +38,7 @@ const expectedFiles = [
   "src/config-loader.js",
   "src/csv.js",
   "src/db.js",
+  "src/diagnostics.js",
   "src/entries.js",
   "src/entry-form.js",
   "src/events.js",

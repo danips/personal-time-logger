@@ -3,6 +3,7 @@ import { getAccessToken } from "./auth.js";
 import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
 import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
+import { recordDiagnostic } from "./diagnostics.js";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
@@ -113,7 +114,27 @@ function isIdempotentRequest(options) {
   return ["GET", "PUT", "DELETE"].includes(String(options.method || "GET").toUpperCase());
 }
 
-async function apiFetch(path, options = {}, { interactiveAuth = false, baseUrl = API_BASE } = {}) {
+async function apiFetch(path, options = {}, context = {}) {
+  try {
+    return await apiFetchUnsafe(path, options, context);
+  } catch (error) {
+    try {
+      await recordDiagnostic({
+        subsystem: "sheets",
+        phase: "api_request",
+        error,
+        recovery: error?.code === "AUTH_EXPIRED" || error?.code === "SCOPE_MISSING"
+          ? "Open Options and sign in again."
+          : "Retry the sync. Open Options diagnostics if it continues."
+      });
+    } catch {
+      // Do not replace an API error with a local diagnostics failure.
+    }
+    throw error;
+  }
+}
+
+async function apiFetchUnsafe(path, options = {}, { interactiveAuth = false, baseUrl = API_BASE } = {}) {
   if (!platform.isOnline()) throw codedError("OFFLINE", "Network is offline");
   let token = await getAccessToken({ interactive: interactiveAuth });
   let response;

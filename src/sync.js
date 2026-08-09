@@ -4,6 +4,7 @@ import {
   deleteRemoteRows,
   ensureAppMarker,
   getRemoteModifiedTime,
+  getDriveGateDiagnostics,
   getSpreadsheetId,
   isSpreadsheetGone,
   provisionSpreadsheet,
@@ -19,6 +20,7 @@ import {
   RECONCILIATION_INTENTS_KEY
 } from "./reconcile.js";
 import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry } from "./entries.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
 import { platform } from "./platform.js";
@@ -47,6 +49,35 @@ function codedError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function syncRecovery(error) {
+  if (["AUTH_REQUIRED", "AUTH_EXPIRED", "SCOPE_MISSING"].includes(error?.code)) {
+    return "Open Options and sign in again.";
+  }
+  if (["SHEET_MISSING", "SPREADSHEET_MISSING", "SHEET_SCHEMA_UNSUPPORTED"].includes(error?.code)) {
+    return "Open Options to reconnect or replace the spreadsheet.";
+  }
+  if (error?.code === "SYNC_BUSY") return "Retry after the other sync finishes.";
+  if (["RATE_LIMIT", "API_TIMEOUT", "API_NETWORK", "OFFLINE", "BACKOFF"].includes(error?.code)) {
+    return "Wait for the retry deadline, then sync again.";
+  }
+  return "Retry the sync. Open Options diagnostics if it continues.";
+}
+
+async function recordSyncDiagnostic(phase, error, entryCount = 0, retryAt = 0) {
+  try {
+    await recordDiagnostic({
+      subsystem: "sync",
+      phase,
+      error,
+      entryCount,
+      retryAt,
+      recovery: syncRecovery(error)
+    });
+  } catch {
+    // A diagnostic must never hide the original sync failure.
+  }
 }
 
 /**
@@ -78,13 +109,15 @@ export async function markSynced(entry, { lease } = {}) {
 }
 
 async function recordBackoff(error) {
-  if (!["RATE_LIMIT", "API_ERROR", "API_TIMEOUT", "API_NETWORK", "OFFLINE"].includes(error.code)) return;
+  if (!["RATE_LIMIT", "API_ERROR", "API_TIMEOUT", "API_NETWORK", "OFFLINE"].includes(error.code)) return 0;
   const current = Number(await getSetting("sync_backoff_seconds", 0)) || 0;
   const next = current ? Math.min(current * 2, MAX_BACKOFF_SECONDS) : 30;
+  const retryAt = Date.now() + next * 1000;
   await mutateSettings(["sync_backoff_seconds", "sync_backoff_until"], (settings) => {
     settings.set("sync_backoff_seconds", next);
-    settings.set("sync_backoff_until", Date.now() + next * 1000);
+    settings.set("sync_backoff_until", retryAt);
   });
+  return retryAt;
 }
 
 async function clearBackoff() {
@@ -214,6 +247,13 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
       if (rowIndex) rowMap.set(id, rowIndex);
     }
     appendConflicts = recovery.conflicts;
+    await recordDiagnostic({
+      subsystem: "sync",
+      phase: "append_recovery",
+      code: "REMOTE_APPEND_AMBIGUOUS",
+      entryCount: appends.length - confirmedAppendIds.size,
+      recovery: "The next sync will verify any remaining append before retrying."
+    });
   }
 
   for (const { id, rowIndex } of appendMappings) {
@@ -363,9 +403,16 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
       await deleteRemoteRows(expiredRows, { interactiveAuth });
       await lease?.assert();
       for (const { id } of expiredRows) rowMap.delete(id);
-    } catch {
+    } catch (error) {
       // Keep the local copies so the rows are retried on the next sync.
       blockedIds = new Set(expiredRows.map((row) => row.id));
+      await recordDiagnostic({
+        subsystem: "sync",
+        phase: "purge",
+        error,
+        entryCount: blockedIds.size,
+        recovery: "Expired deletions will retry during the next sync."
+      });
     }
   }
 
@@ -516,15 +563,20 @@ async function syncConfig(remoteConfig, configRows, { interactiveAuth, lease } =
 }
 
 async function runSyncCycle({ interactiveAuth, force }) {
+  let phase = "preflight";
+  let entryCount = 0;
   if (!platform.isOnline()) {
     const error = codedError("OFFLINE", "offline");
-    await recordBackoff(error);
+    const retryAt = await recordBackoff(error);
+    await recordSyncDiagnostic(phase, error, 0, retryAt);
     throw error;
   }
 
   const backoffUntil = Number(await getSetting("sync_backoff_until", 0)) || 0;
   if (!force && backoffUntil > Date.now()) {
-    throw codedError("BACKOFF", `retry after ${Math.ceil((backoffUntil - Date.now()) / 1000)}s`);
+    const error = codedError("BACKOFF", `retry after ${Math.ceil((backoffUntil - Date.now()) / 1000)}s`);
+    await recordSyncDiagnostic(phase, error, 0, backoffUntil);
+    throw error;
   }
 
   // The popup, the calendar page, and the background alarm all sync
@@ -532,7 +584,9 @@ async function runSyncCycle({ interactiveAuth, force }) {
   // and append the same entry twice.
   const lock = await claimLock(SYNC_LOCK_KEY, CONTEXT_ID, SYNC_LOCK_TTL_MS);
   if (!lock) {
-    throw codedError("SYNC_BUSY", "another sync is already running");
+    const error = codedError("SYNC_BUSY", "another sync is already running");
+    await recordSyncDiagnostic("lock", error);
+    throw error;
   }
 
   let leaseLost = false;
@@ -553,17 +607,22 @@ async function runSyncCycle({ interactiveAuth, force }) {
   }, Math.floor(SYNC_LOCK_TTL_MS / 3));
 
   try {
+    phase = "read_local";
     await lease.assert();
     const local = localState(await getAllEntries());
+    entryCount = local.all().length;
     await lease.assert();
+    phase = "intent_cleanup";
     await pruneExpiredReconciliationIntents();
     await lease.assert();
     // A timer left running overnight stays running. Only genuinely competing
     // timers are flagged, and that is done before the push so the markers travel
     // in the same pass.
+    phase = "active_timer_check";
     const conflictChanges = await markMultipleActiveTimers(local, { lease });
     // Under the sync lock, so two contexts cannot both decide none exists and
     // each create one.
+    phase = "provisioning";
     let provisioned = await ensureSpreadsheet(local, { interactiveAuth, lease });
 
     // Both marking passes set dirty, so either of them producing changes makes
@@ -582,9 +641,20 @@ async function runSyncCycle({ interactiveAuth, force }) {
     // migrating, and leaves the sync button reporting success without looking.
     let modifiedTime = "";
     if (!hasLocalWork && !force) {
+      phase = "remote_gate";
       await lease.assert();
       modifiedTime = await getRemoteModifiedTime({ interactiveAuth });
       await lease.assert();
+      const driveGate = getDriveGateDiagnostics();
+      if (driveGate.unavailable || driveGate.retryAt > Date.now()) {
+        await recordDiagnostic({
+          subsystem: "sync",
+          phase: "remote_gate",
+          code: "DRIVE_GATE_UNAVAILABLE",
+          retryAt: driveGate.retryAt,
+          recovery: "Sync reads the spreadsheet directly until Drive metadata recovers."
+        });
+      }
       const lastSeenModified = String(await getSetting(REMOTE_MODIFIED_KEY, "") || "");
       if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
         await lease.assert();
@@ -596,6 +666,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
     let snapshot;
     try {
+      phase = "remote_read";
       await lease.assert();
       snapshot = await readRemoteSnapshot({ interactiveAuth });
       await lease.assert();
@@ -610,7 +681,18 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
     await lease.assert();
 
+    if (snapshot.quarantined?.length) {
+      await recordDiagnostic({
+        subsystem: "sync",
+        phase: "remote_read",
+        code: "REMOTE_ROWS_QUARANTINED",
+        entryCount: snapshot.quarantined.length,
+        recovery: "Open Reconcile and correct the invalid spreadsheet rows."
+      });
+    }
+
     const forcedResolutions = await verifiedLocalResolutions(local, snapshot.entries);
+    phase = "push";
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.rowMap, {
       interactiveAuth,
       forcedIds: new Set(forcedResolutions.keys()),
@@ -620,10 +702,13 @@ async function runSyncCycle({ interactiveAuth, force }) {
       .filter(([id]) => pushedIds.has(id))
       .map(([, resolutionId]) => resolutionId));
     await clearCompletedResolutions(completedResolutionIds, { lease });
+    phase = "pull";
     const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { lease });
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
+    phase = "purge";
     const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.rowMap, snapshot.duplicates, { interactiveAuth, lease });
+    phase = "config";
     const configPushed = await syncConfig(snapshot.config, snapshot.configRows, { interactiveAuth, lease });
     // Backfills spreadsheets created before the marker existed, once.
     await lease.assert();
@@ -633,12 +718,14 @@ async function runSyncCycle({ interactiveAuth, force }) {
     // Our own writes bump modifiedTime, so it is re-read to avoid a needless
     // download next cycle. If Drive lags, the gate simply opens once more.
     const wroteRemotely = pushedIds.size > 0 || purged > 0 || configPushed || markerWritten;
+    phase = "remote_marker";
     const nextModified = wroteRemotely || !modifiedTime
       ? await getRemoteModifiedTime({ interactiveAuth })
       : modifiedTime;
     await lease.assert();
     await setSetting(REMOTE_MODIFIED_KEY, nextModified || "");
 
+    phase = "complete";
     const changed = wroteRemotely
       || pulled > 0
       || conflictChanges.length > 0
@@ -655,7 +742,8 @@ async function runSyncCycle({ interactiveAuth, force }) {
       changed
     };
   } catch (error) {
-    await recordBackoff(error);
+    const retryAt = await recordBackoff(error);
+    await recordSyncDiagnostic(phase, error, entryCount, retryAt);
     throw error;
   } finally {
     clearInterval(leaseTimer);

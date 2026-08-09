@@ -1,5 +1,6 @@
 import { claimLock, getSetting, mutateSettings, releaseLock } from "./db.js";
 import { getConfig } from "./config-loader.js";
+import { recordDiagnostic } from "./diagnostics.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -17,6 +18,21 @@ function codedError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+async function recordAuthDiagnostic(phase, error) {
+  try {
+    await recordDiagnostic({
+      subsystem: "auth",
+      phase,
+      error,
+      recovery: ["AUTH_REQUIRED", "AUTH_EXPIRED", "CONFIG_MISSING"].includes(error?.code)
+        ? "Open Options and complete Google sign-in."
+        : "Retry Google sign-in from Options."
+    });
+  } catch {
+    // Keep authentication errors actionable even if IndexedDB is unavailable.
+  }
 }
 
 function sleep(ms) {
@@ -205,11 +221,16 @@ export async function getAuthStatus() {
 }
 
 export async function signIn({ onDeviceCode } = {}) {
-  const config = await getConfig();
-  const configError = authConfigError(config);
-  if (configError) throw configError;
+  try {
+    const config = await getConfig();
+    const configError = authConfigError(config);
+    if (configError) throw configError;
 
-  return signInDevice(config, { onDeviceCode });
+    return await signInDevice(config, { onDeviceCode });
+  } catch (error) {
+    await recordAuthDiagnostic("sign_in", error);
+    throw error;
+  }
 }
 
 async function signInDevice(config, { onDeviceCode } = {}) {
@@ -306,24 +327,29 @@ async function refreshTokenOnce({ force }) {
 }
 
 export async function getAccessToken({ interactive = false, forceRefresh = false } = {}) {
-  const config = await getConfig();
-  const configError = authConfigError(config);
-  if (configError) throw configError;
+  try {
+    const config = await getConfig();
+    const configError = authConfigError(config);
+    if (configError) throw configError;
 
-  const tokenData = await getTokenData();
-  if (!forceRefresh && isUsable(tokenData)) return tokenData.access_token;
+    const tokenData = await getTokenData();
+    if (!forceRefresh && isUsable(tokenData)) return tokenData.access_token;
 
-  if (tokenData && tokenData.refresh_token) {
-    const refreshed = await refreshToken({ force: forceRefresh });
-    return refreshed.access_token;
+    if (tokenData && tokenData.refresh_token) {
+      const refreshed = await refreshToken({ force: forceRefresh });
+      return refreshed.access_token;
+    }
+
+    if (interactive) {
+      const signedIn = await signIn();
+      return signedIn.access_token;
+    }
+
+    throw codedError("AUTH_REQUIRED", "Please sign in from the options page");
+  } catch (error) {
+    await recordAuthDiagnostic("access_token", error);
+    throw error;
   }
-
-  if (interactive) {
-    const signedIn = await signIn();
-    return signedIn.access_token;
-  }
-
-  throw codedError("AUTH_REQUIRED", "Please sign in from the options page");
 }
 
 export async function signOut() {

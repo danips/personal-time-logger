@@ -110,6 +110,20 @@
           <button id="saveSettings" type="button">Save Settings</button>
         </div>
       </section>
+
+      <section class="panel">
+        <h2>Diagnostics</h2>
+        <p id="diagnosticsSummary" class="note">Loading diagnostics...</p>
+        <p class="note">
+          Recovery records contain time, component, error code, entry count, and suggested action.
+          They do not contain time-entry content, OAuth tokens, spreadsheet IDs, URLs, or raw API responses.
+        </p>
+        <div class="actions">
+          <button id="copyDiagnostics" type="button">Copy diagnostics</button>
+          <button id="exportDiagnostics" type="button">Download diagnostics</button>
+          <button id="clearDiagnostics" type="button">Clear diagnostics</button>
+        </div>
+      </section>
     </main>
     <script type="module" src="options.js"></script>
   </body>

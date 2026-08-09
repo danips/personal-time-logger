@@ -3,6 +3,7 @@ import { runAction } from "../src/action-runner.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
+import { clearDiagnostics, diagnosticsText, getDiagnostics } from "../src/diagnostics.js";
 import { NEXT_DUE_KEY, scheduleSyncHeartbeat } from "../src/background-schedule.js";
 import {
   adoptSpreadsheet,
@@ -12,6 +13,8 @@ import {
 import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
+
+let diagnostics = [];
 
 function setStatus(message) {
   $("#statusLine").textContent = message;
@@ -124,6 +127,17 @@ async function renderSpreadsheetBackupInfo() {
   $("#spreadsheetBackupInfo").textContent = `Local backup: ${liveText}${suffix}.`;
 }
 
+function renderDiagnostics() {
+  const latest = diagnostics.at(-1);
+  const summary = diagnostics.length
+    ? `${diagnostics.length} recovery record${diagnostics.length === 1 ? "" : "s"}. Latest: ${latest.code} during ${latest.phase}.`
+    : "No recovery records on this device.";
+  $("#diagnosticsSummary").textContent = summary;
+  $("#copyDiagnostics").disabled = diagnostics.length === 0;
+  $("#exportDiagnostics").disabled = diagnostics.length === 0;
+  $("#clearDiagnostics").disabled = diagnostics.length === 0;
+}
+
 async function refresh() {
   const config = await getConfig();
   const auth = await getAuthStatus();
@@ -132,6 +146,8 @@ async function refresh() {
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
   renderSpreadsheet(await getSetting("spreadsheet_id", ""));
   await renderSpreadsheetBackupInfo();
+  diagnostics = await getDiagnostics();
+  renderDiagnostics();
   $("#syncInterval").value = String(await getSetting("sync_interval_seconds", 60));
   $("#durationMultiplier").value = String(await getSetting("duration_multiplier", 1));
 
@@ -255,12 +271,44 @@ async function createReplacementSpreadsheetClicked() {
   }
 }
 
+async function copyDiagnosticsClicked() {
+  if (!diagnostics.length) return;
+  try {
+    await navigator.clipboard.writeText(diagnosticsText(diagnostics));
+    setStatus("Diagnostics copied to the clipboard");
+  } catch (error) {
+    setStatus(`Could not copy diagnostics: ${formatError(error)}`);
+  }
+}
+
+function exportDiagnosticsClicked() {
+  if (!diagnostics.length) return;
+  const blob = new Blob([`${diagnosticsText(diagnostics)}\n`], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "personal-time-logger-diagnostics.txt";
+  link.click();
+  URL.revokeObjectURL(url);
+  setStatus("Diagnostics download started");
+}
+
+async function clearDiagnosticsClicked() {
+  await clearDiagnostics();
+  diagnostics = [];
+  renderDiagnostics();
+  setStatus("Diagnostics cleared");
+}
+
 function bindEvents() {
   $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
   $("#reconnectSpreadsheet").addEventListener("click", (event) => runOptionsAction("reconnect-spreadsheet", reconnectSpreadsheetClicked, event.currentTarget));
   $("#connectSpreadsheet").addEventListener("click", (event) => runOptionsAction("connect-spreadsheet", connectSpreadsheetClicked, event.currentTarget));
   $("#createReplacementSpreadsheet").addEventListener("click", (event) => runOptionsAction("create-replacement-spreadsheet", createReplacementSpreadsheetClicked, event.currentTarget));
+  $("#copyDiagnostics").addEventListener("click", copyDiagnosticsClicked);
+  $("#exportDiagnostics").addEventListener("click", exportDiagnosticsClicked);
+  $("#clearDiagnostics").addEventListener("click", (event) => runOptionsAction("clear-diagnostics", clearDiagnosticsClicked, event.currentTarget));
 
   $("#saveGoogleCredentials").addEventListener("click", (event) => runOptionsAction("save-google-credentials", saveGoogleCredentials, event.currentTarget));
   $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));
