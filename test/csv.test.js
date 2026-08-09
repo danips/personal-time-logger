@@ -14,8 +14,44 @@ const fixture = (over = {}) => normalizeEntry({
   ...over
 });
 
-const rows = (csv) => csv.split("\n");
+const rows = (csv) => csv.split("\r\n");
 const columns = (line) => line.split(",");
+
+function parseRfc4180(csv) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < csv.length; index += 1) {
+    const character = csv[index];
+    if (quoted) {
+      if (character === '"' && csv[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        cell += character;
+      }
+    } else if (character === '"') {
+      quoted = true;
+    } else if (character === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (character === "\r" && csv[index + 1] === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      index += 1;
+    } else {
+      cell += character;
+    }
+  }
+  row.push(cell);
+  rows.push(row);
+  return rows;
+}
 
 describe("entriesToCsv", () => {
   it("always emits a header row", () => {
@@ -26,6 +62,15 @@ describe("entriesToCsv", () => {
 
   it("writes one row per exported entry", () => {
     assert.equal(rows(entriesToCsv([fixture(), fixture({ id: "entry-2" })])).length, 3);
+  });
+
+  it("uses CRLF rows and makes a UTF-8 BOM an explicit export option", () => {
+    const plain = entriesToCsv([fixture()]);
+    const bom = entriesToCsv([fixture()], { includeBom: true });
+
+    assert.match(plain, /\r\n/);
+    assert.equal(bom.startsWith("\uFEFF"), true);
+    assert.equal(bom.slice(1), plain);
   });
 
   it("omits deleted entries", () => {
@@ -97,5 +142,26 @@ describe("entriesToCsv", () => {
     assert.match(csv, /'=SUM\(A1:A2\)/);
     assert.match(csv, /'\+1\+1/);
     assert.match(csv, /'\tunsafe/);
+  });
+
+  it("round-trips stable machine columns through an RFC 4180 parser", () => {
+    const csv = entriesToCsv([fixture({
+      project: "A,B",
+      task: 'say "hi"',
+      description: "one\ntwo",
+      multiply: "1.5",
+      duration_seconds: 5400
+    })]);
+    const [header, value] = parseRfc4180(csv);
+
+    assert.deepEqual(header.slice(0, 3), ["Entry ID", "Allocation Start (ISO)", "Allocation End (ISO)"]);
+    assert.deepEqual(value.slice(0, 3), [
+      "entry-1",
+      "2026-07-27T09:00:00.000Z",
+      "2026-07-27T10:00:00.000Z"
+    ]);
+    assert.equal(value[10], "1.00");
+    assert.equal(value[11], "1.50");
+    assert.equal(value[12], "1.500");
   });
 });

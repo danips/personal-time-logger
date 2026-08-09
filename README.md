@@ -249,7 +249,11 @@ Resolutions only write locally and then trigger a sync, so every remote write st
 
 ## CSV Export
 
-The CSV export includes the original entry ID and machine-readable allocation start/end timestamps, plus:
+CSV files use comma separators, CRLF rows, RFC 4180 quoting, and UTF-8. Calendar downloads include a UTF-8 BOM for spreadsheet applications that otherwise guess a local legacy encoding; `entriesToCsv(..., { includeBom: false })` produces a BOM-free machine export.
+
+The following columns are stable and machine-readable regardless of browser locale: **Entry ID**, **Allocation Start (ISO)**, **Allocation End (ISO)**, **Duration (hours)**, **Multiplied duration (hours)**, **Multiply**, and **Status**. Hour and multiplier values always use a decimal point. Start/End Date and Time are locale-formatted convenience columns for people, not interchange fields.
+
+The CSV export also includes:
 
 - Project
 - Task
