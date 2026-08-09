@@ -171,6 +171,34 @@ export async function setSpreadsheetId(spreadsheetId) {
   return setSetting("spreadsheet_id", String(spreadsheetId || "").trim());
 }
 
+/** Clears only the selected remote binding; local time entries remain intact. */
+export async function resetSpreadsheetBinding() {
+  resetSheetCache();
+  return setProvisioningState("", "");
+}
+
+/**
+ * Selects an existing compatible spreadsheet after proving that its entries
+ * tab uses the expected schema. The following sync repairs or initializes the
+ * config tab when it is safe to do so, then re-seeds the local backup.
+ */
+export async function adoptSpreadsheet(spreadsheetId, { interactiveAuth = false } = {}) {
+  const selectedSpreadsheetId = String(spreadsheetId || "").trim();
+  if (!selectedSpreadsheetId) {
+    throw codedError("SPREADSHEET_MISSING", "Enter a spreadsheet ID to connect it.");
+  }
+  if (!await hasTimeEntriesHeader(selectedSpreadsheetId, { interactiveAuth })) {
+    throw codedError("SHEET_SCHEMA_UNSUPPORTED", "That spreadsheet does not contain a compatible time_entries tab.");
+  }
+
+  resetSheetCache();
+  // Pending makes the next sync repair the full layout if required and re-seed
+  // the local backup. Without it, clean entries would be left only on the old
+  // destination after an explicit recovery choice.
+  await setProvisioningState(selectedSpreadsheetId, selectedSpreadsheetId);
+  return selectedSpreadsheetId;
+}
+
 /**
  * Lists the spreadsheets this extension created. Under drive.file, Drive only
  * reports files the app created or opened, so the result is already scoped to our
@@ -244,6 +272,21 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
   }, { interactiveAuth });
 
   await setProvisioningState(spreadsheetId, "");
+  return spreadsheetId;
+}
+
+/**
+ * Creates a fresh remote destination on explicit user request. This never
+ * searches for or silently adopts another spreadsheet, which makes recovery
+ * from an inaccessible former destination deliberate and predictable.
+ */
+export async function createReplacementSpreadsheet({ interactiveAuth = false } = {}) {
+  resetSheetCache();
+  await setProvisioningState("", "");
+  const spreadsheetId = await createOwnedSpreadsheet({ interactiveAuth });
+  // Creation initialized the remote headers, but a new destination still needs
+  // the same one-time local re-seed as an adopted destination.
+  await setProvisioningState(spreadsheetId, spreadsheetId);
   return spreadsheetId;
 }
 

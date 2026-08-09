@@ -1,8 +1,12 @@
-import { getSetting, setSetting } from "../src/db.js";
+import { getAllEntries, getSetting, setSetting } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
-import { spreadsheetUrl } from "../src/sheets.js";
+import {
+  adoptSpreadsheet,
+  createReplacementSpreadsheet,
+  spreadsheetUrl
+} from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
@@ -79,6 +83,17 @@ function renderSpreadsheet(spreadsheetId) {
   link.href = spreadsheetUrl(spreadsheetId);
 }
 
+async function renderSpreadsheetBackupInfo() {
+  const entries = await getAllEntries();
+  const liveEntries = entries.filter((entry) => !entry.deleted_at).length;
+  const deletedEntries = entries.length - liveEntries;
+  const liveText = `${liveEntries} ${liveEntries === 1 ? "entry" : "entries"}`;
+  const suffix = deletedEntries
+    ? ` and ${deletedEntries} deleted record${deletedEntries === 1 ? "" : "s"}`
+    : "";
+  $("#spreadsheetBackupInfo").textContent = `Local backup: ${liveText}${suffix}.`;
+}
+
 async function refresh() {
   const config = await getConfig();
   const auth = await getAuthStatus();
@@ -86,6 +101,7 @@ async function refresh() {
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
   renderSpreadsheet(await getSetting("spreadsheet_id", ""));
+  await renderSpreadsheetBackupInfo();
   $("#syncInterval").value = String(await getSetting("sync_interval_seconds", 60));
   $("#durationMultiplier").value = String(await getSetting("duration_multiplier", 1));
 
@@ -144,9 +160,77 @@ async function copySpreadsheetIdClicked() {
   }
 }
 
+async function reconnectSpreadsheetClicked() {
+  const button = $("#reconnectSpreadsheet");
+  button.disabled = true;
+  try {
+    setStatus("Reconnecting to the current spreadsheet...");
+    await syncNow({ force: true, interactiveAuth: true });
+    setStatus("Connected to the current spreadsheet");
+  } catch (error) {
+    setStatus(`Could not reconnect: ${formatError(error)}`);
+  } finally {
+    button.disabled = false;
+    await refresh();
+  }
+}
+
+async function connectSpreadsheetClicked() {
+  const button = $("#connectSpreadsheet");
+  const spreadsheetId = $("#replacementSpreadsheetId").value.trim();
+  if (!spreadsheetId) {
+    setStatus("Enter the spreadsheet ID to connect it");
+    return;
+  }
+  if (!window.confirm("Connect this spreadsheet and sync the local backup to it? Its time_entries header must match this extension exactly.")) {
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    setStatus("Checking the selected spreadsheet...");
+    await adoptSpreadsheet(spreadsheetId, { interactiveAuth: true });
+    setStatus("Connecting the selected spreadsheet and syncing local entries...");
+    await syncNow({ force: true, interactiveAuth: true });
+    $("#replacementSpreadsheetId").value = "";
+    setStatus("Connected and synchronized the selected spreadsheet");
+  } catch (error) {
+    setStatus(`Could not connect the spreadsheet: ${formatError(error)}`);
+  } finally {
+    button.disabled = false;
+    await refresh();
+  }
+}
+
+async function createReplacementSpreadsheetClicked() {
+  const button = $("#createReplacementSpreadsheet");
+  const currentId = await getSetting("spreadsheet_id", "");
+  const message = currentId
+    ? "Create a new spreadsheet and sync the local backup to it? This changes the selected spreadsheet, but does not delete the current spreadsheet or any local entries."
+    : "Create a new spreadsheet and sync the local backup to it?";
+  if (!window.confirm(message)) return;
+
+  button.disabled = true;
+  try {
+    setStatus("Creating a replacement spreadsheet...");
+    await createReplacementSpreadsheet({ interactiveAuth: true });
+    setStatus("Syncing the local backup to the replacement spreadsheet...");
+    await syncNow({ force: true, interactiveAuth: true });
+    setStatus("Replacement spreadsheet created and synchronized");
+  } catch (error) {
+    setStatus(`Could not create a replacement: ${formatError(error)}`);
+  } finally {
+    button.disabled = false;
+    await refresh();
+  }
+}
+
 function bindEvents() {
   $("#saveSettings").addEventListener("click", saveSettings);
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
+  $("#reconnectSpreadsheet").addEventListener("click", reconnectSpreadsheetClicked);
+  $("#connectSpreadsheet").addEventListener("click", connectSpreadsheetClicked);
+  $("#createReplacementSpreadsheet").addEventListener("click", createReplacementSpreadsheetClicked);
 
   $("#saveGoogleCredentials").addEventListener("click", saveGoogleCredentials);
   $("#signInButton").addEventListener("click", signInClicked);

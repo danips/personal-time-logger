@@ -76,12 +76,26 @@
         </dl>
         <p class="note">
           The spreadsheet is found or created automatically after you sign in. If it is
-          ever deleted or moved to the trash, a replacement is set up on the next sync
-          and refilled from the entries stored on this device.
+          permanently deleted or you lose access, use the recovery controls below; the
+          extension will never replace an inaccessible spreadsheet automatically.
         </p>
+        <p id="spreadsheetBackupInfo" class="note">Checking local backup...</p>
         <div class="actions">
           <button id="copySpreadsheetId" type="button">Copy ID</button>
+          <button id="reconnectSpreadsheet" type="button">Reconnect</button>
+          <button id="createReplacementSpreadsheet" type="button">Create replacement</button>
         </div>
+        <label>
+          Connect an existing compatible spreadsheet ID
+          <input id="replacementSpreadsheetId" type="text" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="actions">
+          <button id="connectSpreadsheet" type="button">Connect spreadsheet</button>
+        </div>
+        <p class="note">
+          Reconnect keeps the current ID. Connecting or creating a replacement preserves
+          every local entry and syncs that backup to the selected destination.
+        </p>
         <label>
           Sync interval seconds
           <input id="syncInterval" type="number" min="30" step="1">

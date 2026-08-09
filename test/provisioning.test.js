@@ -130,6 +130,52 @@ describe("spreadsheet provisioning", () => {
     assert.equal(await sheets.isSpreadsheetGone(), false);
   });
 
+  it("only adopts a selected spreadsheet after validating its time_entries header", async () => {
+    await sheets.setSpreadsheetId("former-sheet");
+    google.calls.length = 0;
+    google.enqueue(
+      { method: "GET", pathname: "/v4/spreadsheets/recovery-sheet/values/time_entries!A1%3AN1" },
+      google.json({ values: [SHEET_HEADERS] })
+    );
+
+    assert.equal(await sheets.adoptSpreadsheet(" recovery-sheet "), "recovery-sheet");
+    assert.equal(await sheets.getSpreadsheetId(), "recovery-sheet");
+    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "recovery-sheet");
+  });
+
+  it("marks an explicitly created replacement for one-time local re-seeding", async () => {
+    await sheets.setSpreadsheetId("former-sheet");
+    await db.setSetting("spreadsheet_provision_pending", "");
+    google.calls.length = 0;
+    google.enqueue(
+      { method: "POST", pathname: "/v4/spreadsheets" },
+      google.json({ spreadsheetId: "replacement-sheet" })
+    );
+    google.enqueue(
+      { method: "POST", pathname: "/v4/spreadsheets/replacement-sheet/values:batchUpdate" },
+      google.json({})
+    );
+
+    assert.equal(await sheets.createReplacementSpreadsheet(), "replacement-sheet");
+    assert.equal(await sheets.getSpreadsheetId(), "replacement-sheet");
+    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "replacement-sheet");
+  });
+
+  it("does not replace the current binding when a selected spreadsheet is incompatible", async () => {
+    await sheets.setSpreadsheetId("keep-this-sheet");
+    google.calls.length = 0;
+    google.enqueue(
+      { method: "GET", pathname: "/v4/spreadsheets/not-ours/values/time_entries!A1%3AN1" },
+      google.json({ values: [["not", "our", "header"]] })
+    );
+
+    await assert.rejects(
+      () => sheets.adoptSpreadsheet("not-ours"),
+      (error) => error.code === "SHEET_SCHEMA_UNSUPPORTED"
+    );
+    assert.equal(await sheets.getSpreadsheetId(), "keep-this-sheet");
+  });
+
   it("rejects a malformed successful Sheets response without attempting repair", async () => {
     await sheets.setSpreadsheetId("malformed-sheet");
     google.calls.length = 0;
