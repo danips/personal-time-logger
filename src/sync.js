@@ -479,8 +479,10 @@ async function syncConfig(remoteConfig, configRows, { interactiveAuth, lease } =
   }
 
   await lease?.assert();
+  const configRow = configRows.get(MULTIPLIER_KEY) || {};
   await updateRemoteConfig(MULTIPLIER_KEY, localValue, localUpdatedAt, {
-    rowIndex: configRows.get(MULTIPLIER_KEY) || 0,
+    rowIndex: configRow.rowIndex || 0,
+    expectedFingerprint: configRow.expectedFingerprint || "",
     interactiveAuth
   });
   await lease?.assert();

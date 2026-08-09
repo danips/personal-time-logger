@@ -278,8 +278,10 @@ export async function ensureAppMarker(config, configRows, { interactiveAuth = fa
   const existing = config[APP_MARKER_KEY];
   if (existing && String(existing.value) === APP_MARKER_VALUE) return false;
 
+  const row = configRows.get(APP_MARKER_KEY) || {};
   await updateRemoteConfig(APP_MARKER_KEY, APP_MARKER_VALUE, nowIso(), {
-    rowIndex: configRows.get(APP_MARKER_KEY) || 0,
+    rowIndex: row.rowIndex || 0,
+    expectedFingerprint: row.expectedFingerprint || "",
     interactiveAuth
   });
   return true;
@@ -389,16 +391,27 @@ async function assertHeaderIsSafeToWrite(spreadsheetId, tab, { interactiveAuth =
 }
 
 function rowsToConfig(rows) {
+  const cells = rowsAsText(rows);
+  if (!headersMatchFor(CONFIG_HEADERS, cells[0] || [])) {
+    throw codedError("SHEET_SCHEMA_UNSUPPORTED", "The config tab header is missing or invalid. No config values were changed.");
+  }
   const config = {};
   const configRows = new Map();
-  (rows || []).slice(1).forEach((row, index) => {
-    const key = row[0] == null ? "" : String(row[0]);
+  cells.slice(1).forEach((row, index) => {
+    const key = row[0];
     if (!key) return;
+    if (configRows.has(key)) {
+      throw codedError("CONFIG_CONFLICT", `The config tab has duplicate rows for ${key}. Resolve the duplicate before syncing.`);
+    }
+    const updatedAt = row[2];
+    if (!updatedAt || !Number.isFinite(new Date(updatedAt).getTime())) {
+      throw codedError("CONFIG_CONFLICT", `The config value ${key} has an invalid updated_at timestamp.`);
+    }
     config[key] = {
-      value: row[1] == null ? "" : String(row[1]),
-      updated_at: row[2] == null ? "" : String(row[2])
+      value: row[1],
+      updated_at: updatedAt
     };
-    configRows.set(key, index + 2);
+    configRows.set(key, { rowIndex: index + 2, expectedFingerprint: row.slice(0, 3).join("\u0000") });
   });
   return { config, configRows };
 }
@@ -407,24 +420,35 @@ function rowsToConfig(rows) {
  * Writes one config key. `rowIndex` comes from the snapshot, so no extra read is
  * needed; 0 means the key is not in the sheet yet and the row is appended.
  */
-export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, interactiveAuth = false } = {}) {
+export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, expectedFingerprint = "", interactiveAuth = false } = {}) {
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) return;
+  const beforeData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_FULL_RANGE)}?valueRenderOption=UNFORMATTED_VALUE`, {}, { interactiveAuth });
+  const beforeRows = rowsAsText(beforeData.values || []);
+  const nextFingerprint = [key, value, updatedAt].join("\u0000");
 
-  // No layout check: this only runs after a successful snapshot read, which
-  // already proved the config tab exists.
   if (rowIndex > 0) {
+    const current = beforeRows[rowIndex - 1] || [];
+    if (current[0] !== key || current.slice(0, 3).join("\u0000") !== expectedFingerprint) {
+      throw codedError("REMOTE_ROW_STALE", "A config row changed before it could be updated.");
+    }
     await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A${rowIndex}:C${rowIndex}`)}?valueInputOption=RAW`, {
       method: "PUT",
       body: JSON.stringify({ values: [[key, value, updatedAt]] })
     }, { interactiveAuth });
-    return;
+  } else {
+    if (beforeRows.slice(1).some((row) => row[0] === key)) {
+      throw codedError("CONFIG_CONFLICT", `The config key ${key} appeared before it could be added.`);
+    }
+    await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A:C`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: "POST",
+      body: JSON.stringify({ values: [[key, value, updatedAt]] })
+    }, { interactiveAuth });
   }
-
-  await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A:C`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-    method: "POST",
-    body: JSON.stringify({ values: [[key, value, updatedAt]] })
-  }, { interactiveAuth });
+  const afterData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_FULL_RANGE)}?valueRenderOption=UNFORMATTED_VALUE`, {}, { interactiveAuth });
+  if (!rowsAsText(afterData.values || []).slice(1).some((row) => row.slice(0, 3).join("\u0000") === nextFingerprint)) {
+    throw codedError("REMOTE_ROW_STALE", "The config write could not be verified.");
+  }
 }
 
 /**
