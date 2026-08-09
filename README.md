@@ -91,7 +91,7 @@ git tag v0.1.1
 git push origin v0.1.1
 ```
 
-Watch **Actions > Release Firefox extension**. It runs the unit tests, lints the allow-listed extension files, asks Mozilla to sign an unlisted XPI, creates `updates.json`, and deploys both to GitHub Pages.
+Watch **Actions > Release Firefox extension**. It runs the unit tests, lints the allow-listed extension files, asks Mozilla to sign an unlisted XPI, verifies that the signed XPI, source manifest, and tag have the same version, then deploys the XPI with `updates.json`, `checksums.txt`, and `provenance.json` to GitHub Pages. The release workflow also creates GitHub artifact attestations for the published release files.
 
 On every device, open `https://OWNER.github.io/REPOSITORY/` in Firefox and install the XPI. If Firefox downloads it instead, open `about:addons`, use the gear menu, choose **Install Add-on From File**, and select the downloaded XPI. Then open the extension's Options, save the Google OAuth credentials, and sign in.
 

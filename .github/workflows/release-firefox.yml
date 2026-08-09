@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
+      attestations: write
+      id-token: write
     env:
       WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
       WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
@@ -85,6 +87,15 @@ jobs:
             --xpi "${signed_xpis[0]}" \
             --source web-ext-artifacts/release-source \
             --output web-ext-artifacts/site
+
+      - name: Attest signed release and update metadata
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: |
+            web-ext-artifacts/site/*.xpi
+            web-ext-artifacts/site/updates.json
+            web-ext-artifacts/site/checksums.txt
+            web-ext-artifacts/site/provenance.json
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
