@@ -878,7 +878,7 @@ function calendarError(code, message) {
 }
 
 async function sendDisplayedWeekToTempo() {
-  let permissionGranted = false;
+  let permissionGranted;
   try {
     permissionGranted = await platform.requestOptionalHostPermission(TEMPO_HOST_PERMISSION);
   } catch {

@@ -61,7 +61,7 @@ export const platform = {
       try {
         return await apiCall(rawApi.tabs.create, rawApi.tabs, { url });
       } catch (error) {
-        throw new Error(`Could not open extension page: ${error.message || error}`);
+        throw new Error(`Could not open extension page: ${error.message || error}`, { cause: error });
       }
     }
     throw new Error("Browser tabs API is unavailable");
