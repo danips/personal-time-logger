@@ -33,7 +33,7 @@ function txDone(tx) {
 function openDb() {
   if (dbPromise) return dbPromise;
 
-  dbPromise = new Promise((resolve, reject) => {
+  const pending = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
@@ -48,10 +48,25 @@ function openDb() {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onblocked = () => {
+      const error = new Error("IndexedDB upgrade is blocked by another extension context");
+      error.code = "DB_BLOCKED";
+      reject(error);
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        if (dbPromise === pending) dbPromise = null;
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
   });
-
+  dbPromise = pending;
+  pending.catch(() => {
+    if (dbPromise === pending) dbPromise = null;
+  });
   return dbPromise;
 }
 
