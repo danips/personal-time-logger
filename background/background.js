@@ -10,6 +10,12 @@ import {
 import { platform } from "../src/platform.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
+import { ERROR_CODE } from "../src/error-codes.js";
+import {
+  sendTempoWorklogs,
+  TEMPO_UPLOAD_MESSAGE,
+  tempoXhrRequest
+} from "../src/tempo.js";
 
 const SCHEDULE_ERROR_KEY = SETTING_KEY.BACKGROUND_SCHEDULE_ERROR;
 
@@ -111,6 +117,39 @@ async function handleInstalled({ reason }) {
 
 platform.onInstalled((details) => {
   void handleInstalled(details);
+});
+
+const TEMPO_ERROR_CODES = new Set([
+  ERROR_CODE.TEMPO_API_ERROR,
+  ERROR_CODE.TEMPO_CONFIG_MISSING,
+  ERROR_CODE.TEMPO_NETWORK,
+  ERROR_CODE.TEMPO_PARTIAL,
+  ERROR_CODE.TEMPO_PERMISSION_MISSING
+]);
+
+async function uploadTempoWorklogs(message, sender) {
+  const calendarUrl = platform.getURL("calendar/calendar.html");
+  if (sender?.url !== calendarUrl || !Array.isArray(message.groups)) {
+    return { ok: false, error: { code: ERROR_CODE.TEMPO_PERMISSION_MISSING } };
+  }
+  try {
+    const token = await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "");
+    const result = await sendTempoWorklogs(message.groups, {
+      token,
+      fetchImpl: tempoXhrRequest
+    });
+    return { ok: true, result };
+  } catch (error) {
+    const code = TEMPO_ERROR_CODES.has(error?.code)
+      ? error.code
+      : ERROR_CODE.TEMPO_NETWORK;
+    return { ok: false, error: { code } };
+  }
+}
+
+platform.onRuntimeMessage((message, sender) => {
+  if (message?.type !== TEMPO_UPLOAD_MESSAGE) return undefined;
+  return uploadTempoWorklogs(message, sender);
 });
 
 void scheduleHeartbeat();

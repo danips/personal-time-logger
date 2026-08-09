@@ -6,8 +6,10 @@ import {
   normalizeTempoIssueId,
   normalizeTempoTaskIssueIds,
   prepareTempoWeek,
-  sendTempoWorklogs
+  TEMPO_HOST_PERMISSION,
+  TEMPO_UPLOAD_MESSAGE
 } from "../src/tempo.js";
+import { ERROR_CODE } from "../src/error-codes.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
 import {
@@ -47,6 +49,7 @@ import {
 } from "../src/calendar-layout.js";
 import { bindPopupDrag } from "./popup-drag.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
+import { platform } from "../src/platform.js";
 
 const DRAG_THRESHOLD_PX = 5;
 const DEFAULT_VISIBLE_HOUR = 7;
@@ -868,11 +871,27 @@ function requestIssueId(task) {
   }
 }
 
+function calendarError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 async function sendDisplayedWeekToTempo() {
+  let permissionGranted = false;
+  try {
+    permissionGranted = await platform.requestOptionalHostPermission(TEMPO_HOST_PERMISSION);
+  } catch {
+    throw calendarError(ERROR_CODE.TEMPO_PERMISSION_MISSING, "Tempo host permission request failed");
+  }
+  if (!permissionGranted) {
+    throw calendarError(ERROR_CODE.TEMPO_PERMISSION_MISSING, "Tempo host permission was not granted");
+  }
+
   const token = String(await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "")).trim();
   const authorAccountId = String(await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, "")).trim();
   if (!token || !authorAccountId) {
-    throw new Error("Enter the Tempo API token and author account ID in Options first");
+    throw calendarError(ERROR_CODE.TEMPO_CONFIG_MISSING, "Enter the Tempo API token and author account ID in Options first");
   }
 
   const weekEnd = addDays(weekStart, DAY_COUNT);
@@ -927,7 +946,19 @@ async function sendDisplayedWeekToTempo() {
   }
 
   setStatus(`Sending ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} to Tempo...`);
-  const result = await sendTempoWorklogs(prepared.groups, { token });
+  let response;
+  try {
+    response = await platform.sendRuntimeMessage({
+      type: TEMPO_UPLOAD_MESSAGE,
+      groups: prepared.groups
+    });
+  } catch {
+    throw calendarError(ERROR_CODE.TEMPO_NETWORK, "Tempo background request failed");
+  }
+  if (!response?.ok) {
+    throw calendarError(response?.error?.code || ERROR_CODE.TEMPO_NETWORK, "Tempo background request failed");
+  }
+  const result = response.result;
   setStatus(`Sent ${result.sentWorklogs} worklog${result.sentWorklogs === 1 ? "" : "s"} to Tempo`);
 }
 

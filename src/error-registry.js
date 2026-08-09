@@ -106,6 +106,26 @@ export const ERROR_REGISTRY = {
     retryable: true, status: "pending", title: "Another sync is active",
     detail: "A different extension context owns the current sync lease.", recovery: "Wait for it to finish, then retry."
   },
+  [ERROR_CODE.TEMPO_CONFIG_MISSING]: {
+    retryable: false, status: "error", title: "Tempo setup is incomplete",
+    detail: "A Tempo API token and author account ID are required.", recovery: "Open Options and save both Tempo values."
+  },
+  [ERROR_CODE.TEMPO_PERMISSION_MISSING]: {
+    retryable: true, status: "error", title: "Tempo access is not granted",
+    detail: "Firefox did not grant access to the Tempo API host.", recovery: "Click Send to Tempo again and approve the permission request."
+  },
+  [ERROR_CODE.TEMPO_NETWORK]: {
+    retryable: true, status: "pending", title: "Tempo network request failed",
+    detail: "The background request did not complete with Tempo.", recovery: "Check the connection and Tempo host permission, then retry."
+  },
+  [ERROR_CODE.TEMPO_API_ERROR]: {
+    retryable: true, status: "error", title: "Tempo rejected the worklogs",
+    detail: "Tempo did not accept the requested worklog batch.", recovery: "Check the token, author account ID, issue IDs, and required Tempo attributes."
+  },
+  [ERROR_CODE.TEMPO_PARTIAL]: {
+    retryable: false, status: "error", title: "Tempo upload was only partly completed",
+    detail: "At least one earlier batch was created before a later batch failed.", recovery: "Do not resend the whole week; inspect Tempo and send only missing worklogs manually."
+  },
   [ERROR_CODE.STORAGE_CONFLICT]: {
     retryable: true, status: "pending", title: "Entry changed in another window",
     detail: "The displayed entry revision is no longer current.", recovery: "Review the refreshed entry and retry."

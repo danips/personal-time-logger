@@ -19,6 +19,8 @@ describe("error recovery registry", () => {
     assert.equal(statusFromError({ code: "BACKOFF" }), "pending");
     assert.equal(statusFromError({ code: "OFFLINE" }), "offline");
     assert.match(formatError({ code: "REMOTE_ROW_STALE" }), /Refresh Reconcile/);
+    assert.match(formatError({ code: "TEMPO_PERMISSION_MISSING" }), /approve the permission request/);
+    assert.match(formatError({ code: "TEMPO_PARTIAL" }), /Do not resend the whole week/);
   });
 
   it("does not expose an unknown error message verbatim", () => {

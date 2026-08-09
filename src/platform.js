@@ -197,6 +197,13 @@ export const platform = {
     return apiCall(rawApi.tabs.sendMessage, rawApi.tabs, tabId, message);
   },
 
+  async sendRuntimeMessage(message) {
+    if (!rawApi.runtime || !rawApi.runtime.sendMessage) {
+      throw new Error("Extension messaging API is unavailable");
+    }
+    return apiCall(rawApi.runtime.sendMessage, rawApi.runtime, message);
+  },
+
   async removeTab(tabId) {
     if (!rawApi.tabs || !rawApi.tabs.remove) return;
     return apiCall(rawApi.tabs.remove, rawApi.tabs, tabId);
@@ -237,5 +244,23 @@ export const platform = {
   onInstalled(listener) {
     if (!rawApi.runtime || !rawApi.runtime.onInstalled) return;
     rawApi.runtime.onInstalled.addListener(listener);
+  },
+
+  onRuntimeMessage(listener) {
+    if (!rawApi.runtime || !rawApi.runtime.onMessage) return;
+    rawApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      let result;
+      try {
+        result = listener(message, sender);
+      } catch (error) {
+        sendResponse({ ok: false, error: { code: error?.code || "", message: error?.message || "" } });
+        return false;
+      }
+      if (result === undefined) return false;
+      Promise.resolve(result).then(sendResponse, (error) => {
+        sendResponse({ ok: false, error: { code: error?.code || "", message: error?.message || "" } });
+      });
+      return true;
+    });
   }
 };

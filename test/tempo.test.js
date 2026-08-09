@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import { normalizeEntry } from "../src/entries.js";
@@ -6,8 +9,11 @@ import {
   normalizeTempoIssueId,
   normalizeTempoTaskIssueIds,
   prepareTempoWeek,
-  sendTempoWorklogs
+  sendTempoWorklogs,
+  tempoXhrRequest
 } from "../src/tempo.js";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const fixture = (overrides = {}) => normalizeEntry({
   id: "tempo-entry",
@@ -79,6 +85,55 @@ describe("Tempo week preparation", () => {
 });
 
 describe("Tempo bulk upload", () => {
+  it("keeps the authenticated request in the privileged background context", () => {
+    const calendar = readFileSync(join(root, "calendar/calendar.js"), "utf8");
+    const background = readFileSync(join(root, "background/background.js"), "utf8");
+    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+
+    assert.doesNotMatch(calendar, /sendTempoWorklogs/);
+    assert.match(calendar, /sendRuntimeMessage/);
+    assert.match(background, /fetchImpl:\s*tempoXhrRequest/);
+    assert.equal(manifest.host_permissions.includes("https://api.tempo.io/*"), false);
+    assert.equal(manifest.optional_host_permissions.includes("https://api.tempo.io/*"), true);
+  });
+
+  it("builds a privileged XMLHttpRequest suitable for the background page", async () => {
+    let request;
+    class FakeXmlHttpRequest {
+      constructor() {
+        request = this;
+        this.headers = {};
+        this.status = 200;
+        this.responseText = "[]";
+      }
+
+      open(method, url, async) {
+        Object.assign(this, { method, url, async });
+      }
+
+      setRequestHeader(name, value) {
+        this.headers[name] = value;
+      }
+
+      send(body) {
+        this.body = body;
+        queueMicrotask(() => this.onload());
+      }
+    }
+
+    const response = await tempoXhrRequest("https://api.tempo.io/4/worklogs/issue/42/bulk", {
+      method: "POST",
+      headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+      body: "[]"
+    }, FakeXmlHttpRequest);
+
+    assert.equal(response.ok, true);
+    assert.equal(request.method, "POST");
+    assert.equal(request.headers.Authorization, "Bearer token");
+    assert.equal(Object.hasOwn(request.headers, "Origin"), false);
+    assert.equal(request.timeout, 20_000);
+  });
+
   it("posts at most 50 worklogs per request with bearer authentication", async () => {
     const requests = [];
     const worklogs = Array.from({ length: 51 }, (_, index) => ({
@@ -116,6 +171,21 @@ describe("Tempo bulk upload", () => {
           ? new Response("[]", { status: 200 })
           : new Response(JSON.stringify({ message: "Not allowed" }), { status: 400 });
       }
-    }), /1 worklog was already sent; do not retry the whole week/);
+    }), (error) => {
+      assert.equal(error.code, "TEMPO_PARTIAL");
+      assert.match(error.message, /1 worklog was already sent; do not retry the whole week/);
+      return true;
+    });
+  });
+
+  it("codes blocked requests as Tempo network failures", async () => {
+    await assert.rejects(() => sendTempoWorklogs([
+      { issueId: "10", worklogs: [{ timeSpentSeconds: 60 }] }
+    ], {
+      token: "token",
+      fetchImpl: async () => {
+        throw new TypeError("CORS request did not succeed");
+      }
+    }), (error) => error.code === "TEMPO_NETWORK");
   });
 });

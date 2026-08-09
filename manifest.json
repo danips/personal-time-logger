@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Personal Time Logger",
   "description": "Local-first time tracking with Google Sheets sync and Tempo upload.",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "permissions": [
     "alarms",
     "storage",
@@ -11,11 +11,11 @@
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",
-    "https://oauth2.googleapis.com/*",
-    "https://api.tempo.io/*"
+    "https://oauth2.googleapis.com/*"
   ],
   "optional_host_permissions": [
-    "https://chatgpt.com/*"
+    "https://chatgpt.com/*",
+    "https://api.tempo.io/*"
   ],
   "content_scripts": [
     {
