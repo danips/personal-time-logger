@@ -1,7 +1,8 @@
-import { getAllEntries, getSetting, setSetting } from "../src/db.js";
+import { getAllEntries, getSetting, mutateSettings } from "../src/db.js";
 import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
+import { NEXT_DUE_KEY, scheduleSyncHeartbeat } from "../src/background-schedule.js";
 import {
   adoptSpreadsheet,
   createReplacementSpreadsheet,
@@ -40,13 +41,27 @@ function setDeviceAuthPanel(details = null) {
 async function saveSettings() {
   const interval = Math.max(30, Number($("#syncInterval").value) || 60);
   const multiplier = normalizeMultiplierText($("#durationMultiplier").value) || "1";
-  await setSetting("sync_interval_seconds", interval);
   const multiplierUpdatedAt = nowIso();
-  await setSetting("duration_multiplier", multiplier);
-  await setSetting("duration_multiplier_updated_at", multiplierUpdatedAt);
+  await mutateSettings([
+    "sync_interval_seconds",
+    "duration_multiplier",
+    "duration_multiplier_updated_at",
+    NEXT_DUE_KEY
+  ], (settings) => {
+    settings.set("sync_interval_seconds", interval);
+    settings.set("duration_multiplier", multiplier);
+    settings.set("duration_multiplier_updated_at", multiplierUpdatedAt);
+    // Discard the old long-interval due time before replacing the alarm.
+    settings.set(NEXT_DUE_KEY, 0);
+  });
   $("#syncInterval").value = String(interval);
   $("#durationMultiplier").value = String(multiplier);
-  setStatus("Settings saved");
+  try {
+    if (!scheduleSyncHeartbeat(interval)) throw new Error("Browser alarms are unavailable");
+    setStatus("Settings saved and sync schedule reset");
+  } catch (error) {
+    setStatus(`Settings saved, but could not reset the schedule: ${formatError(error)}`);
+  }
   syncNow({ force: true }).catch(() => {});
   await refresh();
 }

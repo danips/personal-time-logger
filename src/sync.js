@@ -76,13 +76,17 @@ async function recordBackoff(error) {
   if (!["RATE_LIMIT", "API_ERROR", "API_TIMEOUT", "API_NETWORK", "OFFLINE"].includes(error.code)) return;
   const current = Number(await getSetting("sync_backoff_seconds", 0)) || 0;
   const next = current ? Math.min(current * 2, MAX_BACKOFF_SECONDS) : 30;
-  await setSetting("sync_backoff_seconds", next);
-  await setSetting("sync_backoff_until", Date.now() + next * 1000);
+  await mutateSettings(["sync_backoff_seconds", "sync_backoff_until"], (settings) => {
+    settings.set("sync_backoff_seconds", next);
+    settings.set("sync_backoff_until", Date.now() + next * 1000);
+  });
 }
 
 async function clearBackoff() {
-  await setSetting("sync_backoff_seconds", 0);
-  await setSetting("sync_backoff_until", 0);
+  await mutateSettings(["sync_backoff_seconds", "sync_backoff_until"], (settings) => {
+    settings.set("sync_backoff_seconds", 0);
+    settings.set("sync_backoff_until", 0);
+  });
 }
 
 /**
@@ -469,9 +473,15 @@ async function syncConfig(remoteConfig, configRows, { interactiveAuth, lease } =
 
   if (remoteUpdatedAt && remoteUpdatedAt > localUpdatedAt) {
     await lease?.assert();
-    await setSetting(MULTIPLIER_KEY, remoteValue);
-    await setSetting(MULTIPLIER_UPDATED_KEY, remoteUpdatedAt);
-    await setSetting(MULTIPLIER_SYNCED_KEY, remoteUpdatedAt);
+    await mutateSettings([MULTIPLIER_KEY, MULTIPLIER_UPDATED_KEY, MULTIPLIER_SYNCED_KEY], (settings) => {
+      // A newer local save that landed after the snapshot must win and be
+      // pushed on the following cycle instead of being overwritten piecemeal.
+      if (String(settings.get(MULTIPLIER_UPDATED_KEY) || "") > remoteUpdatedAt) return false;
+      settings.set(MULTIPLIER_KEY, remoteValue);
+      settings.set(MULTIPLIER_UPDATED_KEY, remoteUpdatedAt);
+      settings.set(MULTIPLIER_SYNCED_KEY, remoteUpdatedAt);
+      return true;
+    });
     return false;
   }
 

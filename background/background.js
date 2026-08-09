@@ -1,17 +1,7 @@
 import { getSetting, setSetting } from "../src/db.js";
 import { clearRemoteReadMarker, nextSyncDelayMinutes, syncNow } from "../src/sync.js";
+import { NEXT_DUE_KEY, scheduleSyncHeartbeat, SYNC_ALARM } from "../src/background-schedule.js";
 import { platform } from "../src/platform.js";
-
-const SYNC_ALARM = "timelogger-sync";
-const NEXT_DUE_KEY = "background_sync_due_at";
-const MIN_INTERVAL_SECONDS = 30;
-
-async function heartbeatMinutes() {
-  const configured = Number(await getSetting("sync_interval_seconds", 60)) || 60;
-  const seconds = Math.max(MIN_INTERVAL_SECONDS, configured);
-  // Alarms are minute-granular, so anything faster than a minute is clamped.
-  return Math.max(1, Math.round(seconds / 60));
-}
 
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
@@ -37,9 +27,8 @@ async function runBackgroundSync() {
 }
 
 async function scheduleHeartbeat() {
-  // Re-creating the alarm with the same name replaces it, so this also picks up
-  // changes to sync_interval_seconds made in the options page.
-  platform.scheduleAlarm(SYNC_ALARM, await heartbeatMinutes());
+  const configured = await getSetting("sync_interval_seconds", 60);
+  return scheduleSyncHeartbeat(configured);
 }
 
 platform.onAlarm((alarm) => {
