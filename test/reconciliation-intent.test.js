@@ -44,17 +44,32 @@ describe("reconciliation intent", () => {
       chosen_side: intents[0].chosen_side,
       state: intents[0].state,
       local_revision: intents[0].local_revision,
-      remote_fingerprint: intents[0].remote_fingerprint,
-      resolution_id: intents[0].resolution_id
+      remote_fingerprint: intents[0].remote_fingerprint
     }, {
       entry_id: local.id,
       chosen_side: "local",
       state: reconcile.RECONCILIATION_INTENT_PENDING,
       local_revision: 2,
-      remote_fingerprint: reconcile.entryFingerprint(remote),
-      resolution_id: `${local.id}:2:${remote.updated_at}`
+      remote_fingerprint: reconcile.entryFingerprint(remote)
     });
+    assert.match(intents[0].resolution_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     assert.equal(reconcile.isPendingReconciliationIntent(intents[0]), true);
+  });
+
+  it("assigns a fresh operation id when the same choice is recorded again", async () => {
+    const entry = { ...local, id: "reselected-entry" };
+    const remote = { ...entry, task: "Spreadsheet choice", updated_at: "2026-08-08T11:00:00.000Z", revision: 4 };
+    await db.putEntry(entry);
+
+    await reconcile.keepLocal(entry.id, remote, { expectedRevision: entry.revision });
+    const firstId = (await db.getSetting(reconcile.RECONCILIATION_INTENTS_KEY))
+      .find((intent) => intent.entry_id === entry.id).resolution_id;
+    await reconcile.keepLocal(entry.id, remote, { expectedRevision: entry.revision });
+    const intents = (await db.getSetting(reconcile.RECONCILIATION_INTENTS_KEY))
+      .filter((intent) => intent.entry_id === entry.id);
+
+    assert.equal(intents.length, 1);
+    assert.notEqual(intents[0].resolution_id, firstId);
   });
 
   it("refuses to record a choice made from a stale reconciliation screen", async () => {

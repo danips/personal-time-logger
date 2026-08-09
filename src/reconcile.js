@@ -2,7 +2,7 @@ import { getAllEntries, mutateEntries, mutateLocalState, mutateSettings, Storage
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
-import { nowIso } from "./time.js";
+import { nowIso, uuid } from "./time.js";
 import { recordDiagnostic } from "./diagnostics.js";
 
 // Only the columns that live in the sheet are compared. dirty, last_sync_at and
@@ -25,7 +25,10 @@ function localResolutionIntent(entry, remoteEntry, now = Date.now()) {
     state: RECONCILIATION_INTENT_PENDING,
     local_revision: Number(entry.revision || 0),
     remote_fingerprint: entryFingerprint(remoteEntry),
-    resolution_id: `${entry.id}:${entry.revision}:${remoteEntry.updated_at || ""}`,
+    // This identifies one specific choice while its forced remote push is in
+    // flight. It must not be derived from the entry revision or remote row:
+    // either can be the same when a user chooses again before sync completes.
+    resolution_id: uuid(),
     created_at: new Date(now).toISOString(),
     expires_at: now + RECONCILIATION_INTENT_TTL_MS
   };
