@@ -70,7 +70,7 @@ export async function markSynced(entry, { lease } = {}) {
 }
 
 async function recordBackoff(error) {
-  if (!["RATE_LIMIT", "API_ERROR", "OFFLINE"].includes(error.code)) return;
+  if (!["RATE_LIMIT", "API_ERROR", "API_TIMEOUT", "API_NETWORK", "OFFLINE"].includes(error.code)) return;
   const current = Number(await getSetting("sync_backoff_seconds", 0)) || 0;
   const next = current ? Math.min(current * 2, MAX_BACKOFF_SECONDS) : 30;
   await setSetting("sync_backoff_seconds", next);
