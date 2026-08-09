@@ -1,4 +1,4 @@
-import { getSetting, setSetting } from "./db.js";
+import { getSetting, mutateSettings, setSetting } from "./db.js";
 import { getAccessToken } from "./auth.js";
 import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
 import { nowIso } from "./time.js";
@@ -43,6 +43,13 @@ function headersMatchFor(expected, row) {
 
 const SHEET_ID_SETTING = "time_entries_sheet_id";
 const PROVISION_PENDING_SETTING = "spreadsheet_provision_pending";
+
+async function setProvisioningState(spreadsheetId, pendingSpreadsheetId) {
+  return mutateSettings(["spreadsheet_id", PROVISION_PENDING_SETTING], (settings) => {
+    settings.set("spreadsheet_id", String(spreadsheetId || "").trim());
+    settings.set(PROVISION_PENDING_SETTING, String(pendingSpreadsheetId || "").trim());
+  });
+}
 
 const TABS = [
   { title: SHEET_NAME, headers: SHEET_HEADERS, headerRange: HEADER_RANGE },
@@ -223,8 +230,7 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
   // Record the ID before initialization. If the following write is interrupted,
   // the next provisioning attempt repairs this same file instead of making a
   // second, empty spreadsheet.
-  await setSpreadsheetId(spreadsheetId);
-  await setSetting(PROVISION_PENDING_SETTING, spreadsheetId);
+  await setProvisioningState(spreadsheetId, spreadsheetId);
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
@@ -237,7 +243,7 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
     })
   }, { interactiveAuth });
 
-  await setSetting(PROVISION_PENDING_SETTING, "");
+  await setProvisioningState(spreadsheetId, "");
   return spreadsheetId;
 }
 
@@ -254,7 +260,7 @@ export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
   const pendingSpreadsheetId = await getSetting(PROVISION_PENDING_SETTING, "");
   if (storedSpreadsheetId && pendingSpreadsheetId === storedSpreadsheetId) {
     await repairSheetLayout(storedSpreadsheetId, { interactiveAuth });
-    await setSetting(PROVISION_PENDING_SETTING, "");
+    await setProvisioningState(storedSpreadsheetId, "");
     return { spreadsheetId: storedSpreadsheetId, name: SPREADSHEET_TITLE, adopted: false, recovered: true };
   }
 
