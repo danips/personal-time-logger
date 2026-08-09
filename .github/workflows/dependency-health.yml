@@ -1,0 +1,31 @@
+name: Dependency health
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: Install pinned development tooling
+        run: timeout 10m npm ci
+
+      - name: Audit locked dependencies
+        run: timeout 5m npm audit --audit-level=high
+        # web-ext currently carries an upstream image-size advisory with no
+        # compatible remediation. Keep the scheduled report visible while
+        # Dependabot tracks a fix instead of making every maintenance run fail.
+        continue-on-error: true

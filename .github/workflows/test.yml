@@ -27,5 +27,5 @@ jobs:
       - name: Run unit tests
         run: timeout 10m npm test
 
-      - name: Lint extension package
-        run: timeout 10m npm run lint:extension
+      - name: Run static analysis and extension lint
+        run: timeout 10m npm run lint

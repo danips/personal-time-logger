@@ -305,7 +305,7 @@ Run the checks and build a local unsigned review archive with:
 
 ```bash
 npm test
-npm run lint:extension
+npm run lint
 npm run package:firefox
 ```
 
@@ -313,6 +313,11 @@ npm run package:firefox
 allow-listed source membership as the release build, but uses an inert update
 URL and is not signed for installation. Firefox signing and publication remain
 the responsibility of the tag-triggered release workflow.
+
+`npm run lint` runs ESLint across JavaScript source, scripts, and tests before
+running `web-ext` against the allow-listed extension package. See
+[`docs/architecture.md`](docs/architecture.md) for module boundaries, storage,
+sync fencing, spreadsheet schema, and ChatGPT trust boundaries.
 
 ## Tests
 

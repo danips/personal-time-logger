@@ -106,7 +106,7 @@ describe("ChatGPT container orchestration", () => {
   });
 
   it("validates a signed-in account and stores only the fingerprint and normalized snapshot", async () => {
-    const { values, overrides } = harness();
+    const { overrides } = harness();
     await createAccountContainer("Account 1", overrides);
     const saved = await verifyAccount("firefox-container-1", overrides);
 

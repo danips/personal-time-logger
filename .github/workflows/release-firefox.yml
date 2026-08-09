@@ -59,7 +59,10 @@ jobs:
           --expected-version "$RELEASE_VERSION"
           --output web-ext-artifacts/release-source
 
-      - name: Lint extension
+      - name: Run JavaScript static analysis
+        run: timeout 10m npm run lint:js
+
+      - name: Lint release extension
         run: >-
           timeout 10m npm exec -- web-ext lint
           --source-dir web-ext-artifacts/release-source

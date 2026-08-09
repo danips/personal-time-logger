@@ -160,7 +160,7 @@ async function apiFetchUnsafe(path, options = {}, { interactiveAuth = false, bas
       data = text ? (() => {
         try {
           return JSON.parse(text);
-        } catch (error) {
+        } catch {
           if (response.ok) throw codedError("API_ERROR", "Google API returned malformed JSON");
           return { error: { message: text } };
         }

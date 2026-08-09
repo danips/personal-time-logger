@@ -1,4 +1,4 @@
-import { getAllEntries, mutateEntries, mutateLocalState, mutateSettings, StorageConflictError } from "./db.js";
+import { getAllEntries, mutateLocalState, mutateSettings, StorageConflictError } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";

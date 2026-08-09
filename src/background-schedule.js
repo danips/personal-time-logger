@@ -29,16 +29,15 @@ function schedulingDiagnostic(error, fallbackError = null) {
 }
 
 /**
- * Runs the normal scheduler and, if it fails, always tries a conservative
- * fallback in finally. Persisting the primary failure is best-effort because a
- * storage error must not prevent the fallback alarm from being armed.
+ * Runs the normal scheduler and, if it fails, tries a conservative fallback.
+ * Persisting the primary failure is best-effort because a storage error must
+ * not prevent the fallback alarm from being armed.
  */
 export async function scheduleWithFallback({ schedule, scheduleFallback, saveDiagnostic }) {
   let failure = null;
   try {
     if (!await schedule()) throw new Error("Browser alarms are unavailable");
     await saveDiagnostic(null);
-    return true;
   } catch (error) {
     failure = error;
     try {
@@ -46,18 +45,17 @@ export async function scheduleWithFallback({ schedule, scheduleFallback, saveDia
     } catch {
       // The fallback below must still be attempted when local storage fails.
     }
-    return false;
-  } finally {
-    if (failure) {
-      try {
-        if (!await scheduleFallback()) throw new Error("Browser fallback alarm is unavailable");
-      } catch (fallbackError) {
-        try {
-          await saveDiagnostic(schedulingDiagnostic(failure, fallbackError));
-        } catch {
-          // There is no remaining local recovery channel; avoid an unhandled rejection.
-        }
-      }
+  }
+  if (!failure) return true;
+
+  try {
+    if (!await scheduleFallback()) throw new Error("Browser fallback alarm is unavailable");
+  } catch (fallbackError) {
+    try {
+      await saveDiagnostic(schedulingDiagnostic(failure, fallbackError));
+    } catch {
+      // There is no remaining local recovery channel; avoid an unhandled rejection.
     }
   }
+  return false;
 }
