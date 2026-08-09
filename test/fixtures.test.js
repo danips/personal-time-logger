@@ -48,7 +48,7 @@ describe("migration fixtures", () => {
 
     assert.deepEqual(entries.map((entry) => entry.id), ["legacy-complete-entry", "legacy-deleted-entry"]);
     assert.equal(entries[1].deleted_at, "2026-07-03T09:00:00.000Z");
-    assert.equal(entries[1].multiply, "2");
+    assert.equal(entries[1].multiply, "2.000");
     assert.deepEqual([...rowMap], [
       ["legacy-complete-entry", 2],
       ["legacy-deleted-entry", 3]
