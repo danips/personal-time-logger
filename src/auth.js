@@ -11,6 +11,7 @@ const TOKEN_REFRESH_POLL_MS = 50;
 const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
 let refreshInFlight = null;
+let refreshInFlightForced = false;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -230,10 +231,18 @@ async function signInDevice(config, { onDeviceCode } = {}) {
 }
 
 async function refreshToken({ force = false } = {}) {
+  if (refreshInFlight && force && !refreshInFlightForced) {
+    return refreshInFlight.then(() => refreshTokenOnce({ force: true }));
+  }
   if (!refreshInFlight) {
-    refreshInFlight = refreshTokenOnce({ force }).finally(() => {
-      refreshInFlight = null;
+    refreshInFlightForced = force;
+    const pending = refreshTokenOnce({ force }).finally(() => {
+      if (refreshInFlight === pending) {
+        refreshInFlight = null;
+        refreshInFlightForced = false;
+      }
     });
+    refreshInFlight = pending;
   }
   return refreshInFlight;
 }
