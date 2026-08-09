@@ -15,6 +15,7 @@ env:
 jobs:
   build-and-sign:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
     env:
@@ -22,10 +23,10 @@ jobs:
       WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
 
@@ -44,27 +45,27 @@ jobs:
           echo "UPDATE_BASE_URL=${update_base_url%/}" >> "$GITHUB_ENV"
 
       - name: Install pinned development tooling
-        run: npm ci
+        run: timeout 10m npm ci
 
       - name: Run unit tests
-        run: npm test
+        run: timeout 10m npm test
 
       - name: Prepare release source
         run: >-
-          node scripts/prepare-firefox-release.mjs
+          timeout 2m node scripts/prepare-firefox-release.mjs
           --base-url "$UPDATE_BASE_URL"
           --expected-version "$RELEASE_VERSION"
           --output web-ext-artifacts/release-source
 
       - name: Lint extension
         run: >-
-          npm exec -- web-ext lint
+          timeout 10m npm exec -- web-ext lint
           --source-dir web-ext-artifacts/release-source
           --self-hosted
 
       - name: Sign unlisted extension with Mozilla
         run: >-
-          npm exec -- web-ext sign
+          timeout 15m npm exec -- web-ext sign
           --source-dir web-ext-artifacts/release-source
           --artifacts-dir web-ext-artifacts/signed
           --channel unlisted
@@ -79,20 +80,21 @@ jobs:
             echo "Expected exactly one signed XPI, found ${#signed_xpis[@]}" >&2
             exit 1
           fi
-          node scripts/create-update-site.mjs \
+          timeout 2m node scripts/create-update-site.mjs \
             --base-url "$UPDATE_BASE_URL" \
             --xpi "${signed_xpis[0]}" \
             --source web-ext-artifacts/release-source \
             --output web-ext-artifacts/site
 
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: web-ext-artifacts/site
 
   deploy:
     needs: build-and-sign
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write
@@ -102,4 +104,4 @@ jobs:
     steps:
       - name: Deploy signed extension and update feed
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
