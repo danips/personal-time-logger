@@ -30,6 +30,61 @@ class FakeObjectStoreNames {
   }
 }
 
+class FakeIndexNames {
+  constructor(indexes) {
+    this.indexes = indexes;
+  }
+
+  contains(name) {
+    return this.indexes.has(name);
+  }
+}
+
+function indexedValue(value, keyPath) {
+  if (Array.isArray(keyPath)) return keyPath.map((key) => value[key]);
+  return value[keyPath];
+}
+
+function compareKeys(left, right) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+      const compared = compareKeys(left[index], right[index]);
+      if (compared) return compared;
+    }
+    return left.length - right.length;
+  }
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+class FakeKeyRange {
+  constructor(lower, upper, lowerOpen = false, upperOpen = false) {
+    this.lower = lower;
+    this.upper = upper;
+    this.lowerOpen = lowerOpen;
+    this.upperOpen = upperOpen;
+  }
+
+  includes(key) {
+    if (this.lower !== undefined) {
+      const compared = compareKeys(key, this.lower);
+      if (compared < 0 || (this.lowerOpen && compared === 0)) return false;
+    }
+    if (this.upper !== undefined) {
+      const compared = compareKeys(key, this.upper);
+      if (compared > 0 || (this.upperOpen && compared === 0)) return false;
+    }
+    return true;
+  }
+
+  static only(value) { return new FakeKeyRange(value, value); }
+  static lowerBound(value, open = false) { return new FakeKeyRange(value, undefined, open); }
+  static upperBound(value, open = false) { return new FakeKeyRange(undefined, value, false, open); }
+  static bound(lower, upper, lowerOpen = false, upperOpen = false) {
+    return new FakeKeyRange(lower, upper, lowerOpen, upperOpen);
+  }
+}
+
 class FakeDatabase {
   constructor(state) {
     this.state = state;
@@ -41,6 +96,7 @@ class FakeDatabase {
     if (this.state.stores.has(name)) throw new Error(`Store already exists: ${name}`);
     this.state.stores.set(name, {
       keyPath: options.keyPath,
+      indexes: new Map(),
       records: new Map()
     });
     return this.transactionStore(name, "versionchange");
@@ -169,6 +225,25 @@ class FakeObjectStore {
     return this.transaction.enqueue(operation);
   }
 
+  get indexNames() {
+    this.store.indexes ||= new Map();
+    return new FakeIndexNames(this.store.indexes);
+  }
+
+  createIndex(name, keyPath, options = {}) {
+    this.store.indexes ||= new Map();
+    if (this.store.indexes.has(name)) throw new Error(`Index already exists: ${name}`);
+    this.store.indexes.set(name, { keyPath, unique: Boolean(options.unique) });
+    return new FakeIndex(this.store, this.transaction, this.store.indexes.get(name));
+  }
+
+  index(name) {
+    this.store.indexes ||= new Map();
+    const definition = this.store.indexes.get(name);
+    if (!definition) throw new Error(`Unknown index: ${name}`);
+    return new FakeIndex(this.store, this.transaction, definition);
+  }
+
   get(key) {
     return this.request(() => clone(this.transaction.recordsFor(this.store).get(key)));
   }
@@ -193,6 +268,57 @@ class FakeObjectStore {
       this.transaction.recordsFor(this.store).delete(key);
       return undefined;
     });
+  }
+}
+
+class FakeIndex {
+  constructor(store, transaction, definition) {
+    this.store = store;
+    this.transaction = transaction;
+    this.definition = definition;
+  }
+
+  records(range = null, direction = "next") {
+    const records = this.transaction ? this.transaction.recordsFor(this.store) : this.store.records;
+    const values = [...records.values()]
+      .map((value) => ({ key: indexedValue(value, this.definition.keyPath), value: clone(value) }))
+      .filter(({ key }) => key !== undefined && (!range || range.includes(key)))
+      .sort((left, right) => compareKeys(left.key, right.key));
+    if (direction === "prev" || direction === "prevunique") values.reverse();
+    return values;
+  }
+
+  openCursor(range = null, direction = "next") {
+    const rows = this.records(range, direction);
+    const transaction = this.transaction;
+    let position = 0;
+    let request;
+    const nextCursor = () => {
+      const row = rows[position++];
+      if (!row) return null;
+      return {
+        key: row.key,
+        value: row.value,
+        continue() {
+          const emit = () => request.succeed(nextCursor());
+          if (!transaction) {
+            queueMicrotask(emit);
+            return;
+          }
+          transaction.enqueue(() => {
+            queueMicrotask(emit);
+            return undefined;
+          });
+        }
+      };
+    };
+    if (!transaction) {
+      request = new FakeRequest();
+      queueMicrotask(() => request.succeed(nextCursor()));
+      return request;
+    }
+    request = transaction.enqueue(() => nextCursor());
+    return request;
   }
 }
 
@@ -240,6 +366,11 @@ function createIndexedDB() {
         if (isNew || requestedVersion > database.version) {
           const oldVersion = database.version;
           database.version = requestedVersion;
+          request.transaction = {
+            objectStore(name) {
+              return connection.transactionStore(name, "versionchange");
+            }
+          };
           request.onupgradeneeded?.({ target: request, oldVersion, newVersion: requestedVersion });
         }
         request.succeed(connection);
@@ -269,5 +400,6 @@ function createIndexedDB() {
 export function installFakeIndexedDB() {
   const indexedDB = createIndexedDB();
   globalThis.indexedDB = indexedDB;
+  globalThis.IDBKeyRange = FakeKeyRange;
   return indexedDB;
 }

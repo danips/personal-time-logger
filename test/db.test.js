@@ -12,7 +12,7 @@ before(async () => {
 });
 
 describe("IndexedDB repository", () => {
-  it("creates the version-2 stores and round-trips entries and settings", async () => {
+  it("creates the version-3 stores and round-trips entries and settings", async () => {
     const entry = { id: "entry-1", project: "Project", revision: 1, dirty: true };
 
     await db.setSetting("profile", { name: "Test user" });
@@ -39,8 +39,8 @@ describe("IndexedDB repository", () => {
   });
 
   it("shares committed data across independent database connections", async () => {
-    const first = indexedDB.open("timelogger_db", 2);
-    const second = indexedDB.open("timelogger_db", 2);
+    const first = indexedDB.open("timelogger_db", 3);
+    const second = indexedDB.open("timelogger_db", 3);
     const [firstConnection, secondConnection] = await Promise.all([
       new Promise((resolve, reject) => {
         first.onsuccess = () => resolve(first.result);
@@ -126,5 +126,37 @@ describe("IndexedDB repository", () => {
     assert.equal(await db.renewLock("generation-lock", "first-holder", first.generation), false);
     await db.releaseLock("generation-lock", "first-holder", first.generation);
     assert.equal(await db.isLockCurrent("generation-lock", "second-holder", second.generation, 120_000), true);
+  });
+
+  it("uses indexes for dirty, deleted, status, active, and interval queries", async () => {
+    const entries = [
+      {
+        id: "index-completed", dirty: true, deleted_at: "", status: "ok",
+        start_at: "2026-08-10T09:00:00.000Z", end_at: "2026-08-10T10:00:00.000Z"
+      },
+      {
+        id: "index-active", dirty: false, deleted_at: "", status: "needs_review",
+        start_at: "2026-08-10T11:00:00.000Z", end_at: ""
+      },
+      {
+        id: "index-deleted", dirty: false, deleted_at: "2026-08-11T12:00:00.000Z", status: "ok",
+        start_at: "2026-08-11T09:00:00.000Z", end_at: "2026-08-11T10:00:00.000Z"
+      }
+    ];
+    await db.putEntries(entries);
+
+    assert.deepEqual((await db.getDirtyEntries()).map((entry) => entry.id), ["entry-1", "index-completed"]);
+    assert.deepEqual((await db.getDeletedEntries()).map((entry) => entry.id), ["index-deleted"]);
+    assert.deepEqual((await db.getEntriesByStatus("needs_review")).map((entry) => entry.id), ["index-active"]);
+    assert.deepEqual((await db.getActiveEntries()).map((entry) => entry.id), ["index-active"]);
+    assert.deepEqual(
+      (await db.getVisibleEntries({ limit: 2 })).map((entry) => entry.id),
+      ["index-active", "index-completed"]
+    );
+    assert.deepEqual(
+      (await db.getEntriesIntersecting("2026-08-10T09:30:00.000Z", "2026-08-10T12:00:00.000Z"))
+        .map((entry) => entry.id),
+      ["index-completed", "index-active"]
+    );
   });
 });

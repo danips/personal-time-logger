@@ -1,11 +1,11 @@
-import { getActiveEntries, getDirtyEntries, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
+import { getActiveEntries, getDirtyEntries, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
 import { getChatGptAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
 import { syncNow } from "../src/sync.js";
-import { allocateEntryByLocalDay, entryInterval } from "../src/time-allocation.js";
+import { allocateEntryByLocalDay } from "../src/time-allocation.js";
 import {
   addDays,
   bindMinuteRollover,
@@ -37,7 +37,9 @@ let mergeTargetRevisions = new Map();
 let ticker = null;
 let unsubscribeEntryEvents = null;
 const expandedRecentGroups = new Set();
-let recentWeekCount = 1;
+const RECENT_PAGE_SIZE = 200;
+let recentEntryLimit = RECENT_PAGE_SIZE;
+let recentEntries = [];
 const WINDOW_SIZE_SETTING = "window_resize_presets";
 const DEFAULT_WINDOW_SIZES = [
   { width: 2000, height: 1000, isWindow: false },
@@ -435,43 +437,22 @@ async function renderActive(isCurrent) {
   return true;
 }
 
-function weeksBefore(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return 0;
-  const entryWeek = startOfLocalWeek(date);
-  const currentWeek = startOfLocalWeek(new Date());
-  const weeks = (currentWeek.getTime() - entryWeek.getTime()) / (7 * 24 * 60 * 60 * 1000);
-  return Math.max(0, Math.round(weeks));
-}
-
 async function renderRecent(isCurrent) {
-  const allEntries = await getVisibleEntries();
+  // The popup never needs the full time-log history. Ask for one extra row so
+  // the button can tell whether another bounded page is available.
+  const page = await getVisibleEntries({ limit: recentEntryLimit + 1 });
   if (!isCurrent()) return false;
-  const newest = allEntries.find((entry) => entry.start_at);
-  if (newest) {
-    // Entries are sorted newest first, so expand the window far enough back to
-    // always show something when the current week is empty.
-    recentWeekCount = Math.max(recentWeekCount, weeksBefore(newest.start_at) + 1);
-  }
-  const cutoff = addDays(startOfLocalWeek(new Date()), -7 * (recentWeekCount - 1));
-  const entries = allEntries.filter((entry) => {
-    const interval = entryInterval(entry);
-    return interval && interval.end >= cutoff;
-  });
-  // Undated entries can never come into view by widening the window, so they
-  // must not keep the load-more button alive.
-  const hiddenCount = allEntries.filter((entry) => {
-    const interval = entryInterval(entry);
-    return interval && interval.end < cutoff;
-  }).length;
+  const hasMore = page.length > recentEntryLimit;
+  const entries = page.slice(0, recentEntryLimit);
+  recentEntries = entries;
 
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "entry-meta";
     empty.textContent = "No entries yet.";
     $recentEntries.replaceChildren(empty);
-    $loadMoreRecent.classList.toggle("hidden", hiddenCount === 0);
-    $loadMoreRecent.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
+    $loadMoreRecent.classList.toggle("hidden", !hasMore);
+    $loadMoreRecent.textContent = hasMore ? `Load ${RECENT_PAGE_SIZE} more` : "";
     return true;
   }
 
@@ -510,8 +491,8 @@ async function renderRecent(isCurrent) {
   });
   $recentEntries.replaceChildren(...weekElements);
 
-  $loadMoreRecent.classList.toggle("hidden", hiddenCount === 0);
-  $loadMoreRecent.textContent = hiddenCount > 0 ? "Load more (previous week)" : "";
+  $loadMoreRecent.classList.toggle("hidden", !hasMore);
+  $loadMoreRecent.textContent = hasMore ? `Load ${RECENT_PAGE_SIZE} more` : "";
   return true;
 }
 
@@ -756,7 +737,7 @@ async function startTimer() {
 }
 
 async function restartFromEntry(id) {
-  const entry = (await getVisibleEntries()).find((item) => item.id === id);
+  const entry = await getEntry(id);
   if (!entry) return;
   await replaceActiveTimer({
     project: entry.project || "",
@@ -776,8 +757,7 @@ async function stopTimer({ expectedRevision } = {}) {
 }
 
 async function showEdit(id) {
-  const entries = await getVisibleEntries();
-  const entry = entries.find((item) => item.id === id);
+  const entry = await getEntry(id);
   if (!entry) return;
   editingId = id;
   editingRevision = Number(entry.revision || 0);
@@ -785,7 +765,7 @@ async function showEdit(id) {
   $editProjectDot.classList.toggle("hidden", !entry.project);
   $editProjectDot.style.setProperty("--project-color", projectColor(entry));
   writeEntryForm(editFields(), entry);
-  renderMergeTargets(entry, entries);
+  renderMergeTargets(entry, recentEntries);
   setNewTimerOpen(false);
   $editPanel.classList.remove("hidden");
   $editProject.focus();
@@ -917,7 +897,7 @@ function bindEvents() {
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
   $loadMoreRecent.addEventListener("click", () => {
-    recentWeekCount += 1;
+    recentEntryLimit += RECENT_PAGE_SIZE;
     render().catch((error) => {
       setStatus($syncStatus, "error", formatError(error));
     });

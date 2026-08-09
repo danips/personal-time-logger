@@ -1,4 +1,4 @@
-import { getVisibleEntries } from "../src/db.js";
+import { getEntriesIntersecting } from "../src/db.js";
 import { isActionRunning, runAction } from "../src/action-runner.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
@@ -32,7 +32,6 @@ import {
   dailyTotalsFromSegments,
   dayIndexInWeek,
   durationMsForDrag,
-  intersectsWeek,
   isSameLocalDate,
   isoWeekValue,
   layoutSegments,
@@ -261,7 +260,7 @@ async function render() {
   if (dragState) return;
   const generation = ++renderGeneration;
   const weekEnd = addDays(weekStart, DAY_COUNT);
-  const nextEntries = (await getVisibleEntries()).filter((entry) => intersectsWeek(entry, weekStart, weekEnd));
+  const nextEntries = await getEntriesIntersecting(weekStart, weekEnd);
   if (generation !== renderGeneration) return;
   renderedEntries = nextEntries;
   const segmentsByDay = buildSegments(nextEntries, weekStart);

@@ -1,8 +1,16 @@
 const DB_NAME = "timelogger_db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ENTRY_STORE = "time_entries";
 const SETTINGS_STORE = "settings";
 const LOCK_GENERATION_SUFFIX = ":generation";
+const ENTRY_INDEX = {
+  ACTIVE: "active_by_start",
+  DIRTY: "dirty",
+  DELETED_AT: "deleted_at",
+  END_AT: "end_at",
+  START_AT: "start_at",
+  STATUS: "status"
+};
 
 let dbPromise = null;
 
@@ -38,11 +46,10 @@ function openDb() {
 
     request.onupgradeneeded = () => {
       const db = request.result;
-      // Both stores are keyed lookups only; every query filters in JS, so there
-      // are no indexes to maintain.
-      if (!db.objectStoreNames.contains(ENTRY_STORE)) {
-        db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
-      }
+      const entries = db.objectStoreNames.contains(ENTRY_STORE)
+        ? request.transaction.objectStore(ENTRY_STORE)
+        : db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
+      ensureEntryIndexes(entries);
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
       }
@@ -68,6 +75,22 @@ function openDb() {
     if (dbPromise === pending) dbPromise = null;
   });
   return dbPromise;
+}
+
+function ensureEntryIndexes(entries) {
+  const indexes = [
+    [ENTRY_INDEX.DIRTY, "dirty"],
+    [ENTRY_INDEX.DELETED_AT, "deleted_at"],
+    [ENTRY_INDEX.START_AT, "start_at"],
+    [ENTRY_INDEX.END_AT, "end_at"],
+    [ENTRY_INDEX.STATUS, "status"],
+    // Exact empty deleted/end values select active entries without scanning
+    // completed history, then return them in start-time order.
+    [ENTRY_INDEX.ACTIVE, ["deleted_at", "end_at", "start_at"]]
+  ];
+  for (const [name, keyPath] of indexes) {
+    if (!entries.indexNames.contains(name)) entries.createIndex(name, keyPath);
+  }
 }
 
 async function stores(names, mode, fn) {
@@ -373,21 +396,83 @@ export async function getAllEntries() {
   return store(ENTRY_STORE, "readonly", (s) => requestToPromise(s.getAll()));
 }
 
-export async function getDirtyEntries() {
-  const entries = await getAllEntries();
-  return entries.filter((entry) => entry.dirty);
+function keyRange(method, ...args) {
+  return globalThis.IDBKeyRange[method](...args);
 }
 
-export async function getVisibleEntries() {
-  const entries = await getAllEntries();
-  return entries
-    .filter((entry) => !entry.deleted_at)
-    .sort((a, b) => String(b.start_at || b.updated_at).localeCompare(String(a.start_at || a.updated_at)));
+async function entriesFromIndex(name, { range = null, direction = "next", limit = Infinity, filter = () => true } = {}) {
+  return store(ENTRY_STORE, "readonly", (objectStore) => new Promise((resolve, reject) => {
+    const entries = [];
+    const request = objectStore.index(name).openCursor(range, direction);
+    request.onerror = () => reject(request.error || new Error("IndexedDB index query failed"));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor || entries.length >= limit) {
+        resolve(entries);
+        return;
+      }
+      const entry = cursor.value;
+      if (filter(entry)) entries.push(entry);
+      if (entries.length >= limit) {
+        resolve(entries);
+        return;
+      }
+      cursor.continue();
+    };
+  }));
+}
+
+export async function getDirtyEntries() {
+  return entriesFromIndex(ENTRY_INDEX.DIRTY, { range: keyRange("only", true) });
+}
+
+/**
+ * Reads the newest visible entries first. Supplying a limit keeps history pages
+ * bounded; callers that need a specific time interval should use the interval
+ * query below instead of scanning prior history.
+ */
+export async function getVisibleEntries({ limit = Infinity } = {}) {
+  return entriesFromIndex(ENTRY_INDEX.START_AT, {
+    direction: "prev",
+    limit,
+    filter: (entry) => !entry.deleted_at
+  });
+}
+
+export async function getDeletedEntries() {
+  return entriesFromIndex(ENTRY_INDEX.DELETED_AT, {
+    range: keyRange("lowerBound", "", true)
+  });
+}
+
+export async function getEntriesByStatus(status) {
+  return entriesFromIndex(ENTRY_INDEX.STATUS, { range: keyRange("only", String(status || "")) });
 }
 
 export async function getActiveEntries() {
-  const entries = await getAllEntries();
-  return entries
-    .filter((entry) => !entry.deleted_at && !entry.end_at)
-    .sort((a, b) => String(b.start_at).localeCompare(String(a.start_at)));
+  return entriesFromIndex(ENTRY_INDEX.ACTIVE, {
+    range: keyRange("bound", ["", "", ""], ["", "", "\uffff"])
+  });
+}
+
+/**
+ * Returns visible entries that may overlap [start, end). The end-time index
+ * excludes completed history that ended before the requested interval; active
+ * entries are included through their dedicated index.
+ */
+export async function getEntriesIntersecting(start, end) {
+  const startAt = new Date(start).toISOString();
+  const endAt = new Date(end).toISOString();
+  const [completed, active] = await Promise.all([
+    entriesFromIndex(ENTRY_INDEX.END_AT, {
+      range: keyRange("lowerBound", startAt, true),
+      filter: (entry) => !entry.deleted_at && Boolean(entry.end_at) && String(entry.start_at || "") < endAt
+    }),
+    getActiveEntries()
+  ]);
+  return [...new Map([...completed, ...active]
+    .filter((entry) => String(entry.start_at || "") < endAt)
+    .map((entry) => [entry.id, entry]))
+    .values()]
+    .sort((left, right) => String(left.start_at).localeCompare(String(right.start_at)));
 }
