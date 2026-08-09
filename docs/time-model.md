@@ -22,10 +22,14 @@ description, but their multipliers may differ.
 
 ## D-03 — Conflicts
 
-Entries use optimistic revisions for local writes. A sync/reconcile choice is
-validated against the local revision and remote fingerprint observed by the
-user; divergent edits remain a conflict until explicitly resolved. A successful
-resolution is a durable operation rather than a synthetic timestamp bump.
+Entries use optimistic revisions for local writes. A reconciliation choice is
+validated against the local revision and complete remote-row fingerprint
+observed by the user; divergent edits remain a conflict until explicitly
+resolved. Sync mutations re-read the complete remote row before writing and
+verify the intended result afterward. Google Sheets offers no atomic
+compare-and-swap operation, so an edit in the interval between those requests
+can be detected by post-write verification but cannot be prevented. A successful
+local resolution is a durable operation rather than a synthetic timestamp bump.
 
 ## D-04 — Displayed-week export
 

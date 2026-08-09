@@ -168,9 +168,7 @@ A second tab named `config` holds settings shared between devices, currently the
 
 The `multiply` column stores the numeric multiplier value used for that entry, for example `1.5`. Existing rows without this value are treated as not multiplied.
 
-Layout problems repair themselves. Sync reads first and only inspects the layout when a read fails, at which point a missing tab is added and the header row is rewritten before the read is retried.
-
-Header repair assumes the rows below are still aligned with the header, which holds for a renamed or cleared header row. If the tab is a different width than the layout above, the extension reports the mismatch instead of rewriting the header over rows that do not line up with it. Fix the columns in the spreadsheet, or let the extension create a new one.
+Sync reads first and only inspects the layout when a read fails. A missing tab, or a completely empty tab, can be initialized automatically. A populated tab must already have the exact supported header row; an unrecognized or cleared header stops sync without changing the sheet. Restore the header or move the data to a new spreadsheet before trying again.
 
 ## Usage
 
@@ -222,7 +220,7 @@ Sync happens when:
 
 The sync interval defaults to 60 seconds and is clamped to a minimum of 30 seconds. When nothing is changing, the background poller stretches its interval out to 2x, 5x, then 10x that value, capped at 15 minutes, and snaps back to the configured interval as soon as a cycle moves data or you act in the interface. A second device's edits can therefore take up to 15 minutes to appear on an idle machine; opening the popup or calendar syncs immediately.
 
-Only one sync runs at a time. The popup, the calendar, and the background all sync independently, so a lock held in local storage keeps them from each appending the same entry twice.
+The popup, calendar, and background each attempt sync independently. A renewable IndexedDB lease admits one current holder, and the holder checks its generation before each mutating phase. A context that cannot acquire or renew the lease stops and retries from a fresh snapshot; this prevents normal same-profile cycles from both appending an entry, but it is not a distributed database lock across devices.
 
 On sync, the extension:
 
@@ -235,7 +233,7 @@ On sync, the extension:
 
 An idle cycle costs a single request. A timer left running overnight keeps running; it is never closed automatically.
 
-Where the same id appears in several rows, the row with the newest `updated_at` wins regardless of its position, so a stale duplicate cannot overwrite newer data. The surplus rows are reported on the Reconcile screen.
+Where a valid entry ID appears in several rows, the valid row with the newest `updated_at` is selected regardless of its position, so a stale duplicate cannot overwrite a newer one. Equal timestamps do not provide a reliable ordering and duplicate rows remain visible for review. Malformed rows are quarantined instead of participating in the choice. Surplus rows are deleted only after their full row fingerprints are rechecked.
 
 Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the matching spreadsheet row is updated with the same `deleted_at` tombstone instead of being removed. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote rows. Tombstones older than 14 days are removed from both the sheet and local storage.
 
@@ -245,7 +243,7 @@ The ⇄ button in the popup header opens a page comparing this device with the s
 
 Differing entries list each field with the device value beside the spreadsheet value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
 
-Resolutions only write locally and then trigger a sync, so every remote write still goes through the normal sync path. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Deleting duplicate rows is the one action that writes to the spreadsheet directly, because a duplicate row has no local counterpart, and it asks for confirmation naming the rows it will remove.
+Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck the complete row before the request and verify the result afterward. Google Sheets has no atomic compare-and-swap, so a manual edit in the narrow interval between those requests is detected after the fact rather than prevented. Deleting duplicate rows is the one action that writes to the spreadsheet directly, because a duplicate row has no local counterpart; it verifies every target before sending the batch and checks the result afterward.
 
 ## CSV Export
 
