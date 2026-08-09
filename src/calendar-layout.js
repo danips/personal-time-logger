@@ -92,22 +92,6 @@ export function actualDurationSeconds(rawStart, rawEnd) {
 }
 
 /**
- * Seconds the entry counts for. A completed entry keeps its stored duration,
- * which a multiplier can make longer than the elapsed interval.
- */
-export function effectiveDurationSeconds(entry, rawStart, rawEnd) {
-  const actualSeconds = actualDurationSeconds(rawStart, rawEnd);
-  if (!actualSeconds) return 0;
-  const stored = Number(entry.duration_seconds) || 0;
-  return entry.end_at && stored ? stored : actualSeconds;
-}
-
-/** Calendar geometry always follows elapsed time, never a multiplier tail. */
-export function effectiveEnd(entry, rawStart, rawEnd) {
-  return new Date(rawEnd);
-}
-
-/**
  * Splits entries into per-day segments for the displayed week, so an entry
  * crossing midnight is drawn once in each day it covers. Each segment carries the
  * share of the entry's duration that falls inside it.
