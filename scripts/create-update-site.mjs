@@ -2,16 +2,35 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
+import { parseArgs } from "node:util";
 
-const args = new Map();
-for (let index = 2; index < process.argv.length; index += 2) {
-  args.set(process.argv[index], process.argv[index + 1]);
+const cliArgs = process.argv.slice(2);
+const optionNames = ["base-url", "output", "source", "xpi"];
+for (const name of optionNames) {
+  const occurrences = cliArgs.filter((argument) => argument === `--${name}` || argument.startsWith(`--${name}=`)).length;
+  if (occurrences > 1) throw new Error(`--${name} can only be used once`);
 }
 
-const baseUrl = String(args.get("--base-url") || "").replace(/\/+$/, "");
-const xpiPath = path.resolve(args.get("--xpi") || "");
-const outputDirectory = path.resolve(args.get("--output") || "web-ext-artifacts/site");
-const sourceDirectory = path.resolve(args.get("--source") || "web-ext-artifacts/release-source");
+const { values } = parseArgs({
+  args: cliArgs,
+  options: {
+    "base-url": { type: "string" },
+    output: { type: "string", default: "web-ext-artifacts/site" },
+    source: { type: "string", default: "web-ext-artifacts/release-source" },
+    xpi: { type: "string" }
+  },
+  strict: true,
+  allowPositionals: false
+});
+
+for (const name of ["base-url", "xpi"]) {
+  if (!values[name]) throw new Error(`--${name} is required`);
+}
+
+const baseUrl = String(values["base-url"]).replace(/\/+$/, "");
+const xpiPath = path.resolve(values.xpi);
+const outputDirectory = path.resolve(values.output);
+const sourceDirectory = path.resolve(values.source);
 
 if (!baseUrl.startsWith("https://")) {
   throw new Error("--base-url must be an HTTPS URL");
