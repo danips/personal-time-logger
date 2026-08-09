@@ -12,6 +12,7 @@ import {
 } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
+import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 
@@ -63,14 +64,14 @@ async function saveSettings() {
   const multiplier = normalizeMultiplierText($("#durationMultiplier").value) || "1";
   const multiplierUpdatedAt = nowIso();
   await mutateSettings([
-    "sync_interval_seconds",
-    "duration_multiplier",
-    "duration_multiplier_updated_at",
+    SETTING_KEY.SYNC_INTERVAL_SECONDS,
+    SETTING_KEY.DURATION_MULTIPLIER,
+    SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
     NEXT_DUE_KEY
   ], (settings) => {
-    settings.set("sync_interval_seconds", interval);
-    settings.set("duration_multiplier", multiplier);
-    settings.set("duration_multiplier_updated_at", multiplierUpdatedAt);
+    settings.set(SETTING_KEY.SYNC_INTERVAL_SECONDS, interval);
+    settings.set(SETTING_KEY.DURATION_MULTIPLIER, multiplier);
+    settings.set(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, multiplierUpdatedAt);
     // Discard the old long-interval due time before replacing the alarm.
     settings.set(NEXT_DUE_KEY, 0);
   });
@@ -146,12 +147,12 @@ async function refresh() {
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
-  renderSpreadsheet(await getSetting("spreadsheet_id", ""));
+  renderSpreadsheet(await getSetting(SETTING_KEY.SPREADSHEET_ID, ""));
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
   renderDiagnostics();
-  $("#syncInterval").value = String(await getSetting("sync_interval_seconds", 60));
-  $("#durationMultiplier").value = String(await getSetting("duration_multiplier", 1));
+  $("#syncInterval").value = String(await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
+  $("#durationMultiplier").value = String(await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
 
   if (auth.missingClientId) {
     $("#authStatus").textContent = "Google client ID missing";
@@ -182,7 +183,7 @@ async function signInClicked() {
     await syncNow({ force: true }).catch((error) => {
       setStatus(formatError(error));
     });
-    if (await getSetting("spreadsheet_id", "")) setStatus("Signed in and spreadsheet ready");
+    if (await getSetting(SETTING_KEY.SPREADSHEET_ID, "")) setStatus("Signed in and spreadsheet ready");
   } catch (error) {
     setStatus(formatError(error));
   } finally {
@@ -198,7 +199,7 @@ async function signOutClicked() {
 }
 
 async function copySpreadsheetIdClicked() {
-  const spreadsheetId = await getSetting("spreadsheet_id", "");
+  const spreadsheetId = await getSetting(SETTING_KEY.SPREADSHEET_ID, "");
   if (!spreadsheetId) return;
   try {
     await navigator.clipboard.writeText(spreadsheetId);
@@ -252,7 +253,7 @@ async function connectSpreadsheetClicked() {
 
 async function createReplacementSpreadsheetClicked() {
   const button = $("#createReplacementSpreadsheet");
-  const currentId = await getSetting("spreadsheet_id", "");
+  const currentId = await getSetting(SETTING_KEY.SPREADSHEET_ID, "");
   const message = currentId
     ? "Create a new spreadsheet and sync the local backup to it? This changes the selected spreadsheet, but does not delete the current spreadsheet or any local entries."
     : "Create a new spreadsheet and sync the local backup to it?";

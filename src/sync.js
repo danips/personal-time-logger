@@ -24,15 +24,16 @@ import { recordDiagnostic } from "./diagnostics.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
 import { platform } from "./platform.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
 const MAX_BACKOFF_SECONDS = 300;
 const SYNC_LOCK_KEY = "sync_lock";
 const SYNC_LOCK_TTL_MS = 120000;
-const REMOTE_MODIFIED_KEY = "remote_modified_time";
-const MULTIPLIER_KEY = "duration_multiplier";
-const MULTIPLIER_UPDATED_KEY = "duration_multiplier_updated_at";
-const MULTIPLIER_SYNCED_KEY = "duration_multiplier_synced_at";
-const IDLE_STREAK_KEY = "sync_idle_streak";
+const REMOTE_MODIFIED_KEY = SETTING_KEY.REMOTE_MODIFIED_TIME;
+const MULTIPLIER_KEY = SETTING_KEY.DURATION_MULTIPLIER;
+const MULTIPLIER_UPDATED_KEY = SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT;
+const MULTIPLIER_SYNCED_KEY = SETTING_KEY.DURATION_MULTIPLIER_SYNCED_AT;
+const IDLE_STREAK_KEY = SETTING_KEY.SYNC_IDLE_STREAK;
 // Multipliers applied to the configured interval as idle cycles accumulate.
 const IDLE_BACKOFF_STEPS = [1, 2, 5, 10];
 const MAX_IDLE_INTERVAL_MINUTES = 15;
@@ -110,20 +111,20 @@ export async function markSynced(entry, { lease } = {}) {
 
 async function recordBackoff(error) {
   if (!["RATE_LIMIT", "API_ERROR", "API_TIMEOUT", "API_NETWORK", "OFFLINE"].includes(error.code)) return 0;
-  const current = Number(await getSetting("sync_backoff_seconds", 0)) || 0;
+  const current = Number(await getSetting(SETTING_KEY.SYNC_BACKOFF_SECONDS, 0)) || 0;
   const next = current ? Math.min(current * 2, MAX_BACKOFF_SECONDS) : 30;
   const retryAt = Date.now() + next * 1000;
-  await mutateSettings(["sync_backoff_seconds", "sync_backoff_until"], (settings) => {
-    settings.set("sync_backoff_seconds", next);
-    settings.set("sync_backoff_until", retryAt);
+  await mutateSettings([SETTING_KEY.SYNC_BACKOFF_SECONDS, SETTING_KEY.SYNC_BACKOFF_UNTIL], (settings) => {
+    settings.set(SETTING_KEY.SYNC_BACKOFF_SECONDS, next);
+    settings.set(SETTING_KEY.SYNC_BACKOFF_UNTIL, retryAt);
   });
   return retryAt;
 }
 
 async function clearBackoff() {
-  await mutateSettings(["sync_backoff_seconds", "sync_backoff_until"], (settings) => {
-    settings.set("sync_backoff_seconds", 0);
-    settings.set("sync_backoff_until", 0);
+  await mutateSettings([SETTING_KEY.SYNC_BACKOFF_SECONDS, SETTING_KEY.SYNC_BACKOFF_UNTIL], (settings) => {
+    settings.set(SETTING_KEY.SYNC_BACKOFF_SECONDS, 0);
+    settings.set(SETTING_KEY.SYNC_BACKOFF_UNTIL, 0);
   });
 }
 
@@ -477,7 +478,7 @@ export async function reseedForNewSpreadsheet(local, { lease } = {}) {
  */
 async function ensureSpreadsheet(local, { interactiveAuth, lease }) {
   const spreadsheetId = await getSpreadsheetId();
-  const provisioningPending = await getSetting("spreadsheet_provision_pending", "");
+  const provisioningPending = await getSetting(SETTING_KEY.SPREADSHEET_PROVISION_PENDING, "");
   if (spreadsheetId && provisioningPending !== spreadsheetId) return null;
 
   await lease?.assert();
@@ -572,7 +573,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     throw error;
   }
 
-  const backoffUntil = Number(await getSetting("sync_backoff_until", 0)) || 0;
+  const backoffUntil = Number(await getSetting(SETTING_KEY.SYNC_BACKOFF_UNTIL, 0)) || 0;
   if (!force && backoffUntil > Date.now()) {
     const error = codedError("BACKOFF", `retry after ${Math.ceil((backoffUntil - Date.now()) / 1000)}s`);
     await recordSyncDiagnostic(phase, error, 0, backoffUntil);
@@ -779,7 +780,7 @@ async function recordCycleActivity({ changed, force }) {
  * snaps back to the configured interval as soon as anything happens.
  */
 export async function nextSyncDelayMinutes() {
-  const configured = Number(await getSetting("sync_interval_seconds", 60)) || 60;
+  const configured = Number(await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60)) || 60;
   const baseMinutes = Math.max(1, Math.round(Math.max(30, configured) / 60));
   const streak = Number(await getSetting(IDLE_STREAK_KEY, 0)) || 0;
   const factor = IDLE_BACKOFF_STEPS[Math.min(streak, IDLE_BACKOFF_STEPS.length - 1)];

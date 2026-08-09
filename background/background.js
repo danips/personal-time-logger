@@ -9,8 +9,9 @@ import {
 } from "../src/background-schedule.js";
 import { platform } from "../src/platform.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
+import { SETTING_KEY } from "../src/setting-keys.js";
 
-const SCHEDULE_ERROR_KEY = "background_schedule_error";
+const SCHEDULE_ERROR_KEY = SETTING_KEY.BACKGROUND_SCHEDULE_ERROR;
 
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
@@ -44,7 +45,7 @@ async function runBackgroundSync() {
 async function scheduleHeartbeat() {
   return scheduleWithFallback({
     async schedule() {
-      const configured = await getSetting("sync_interval_seconds", 60);
+      const configured = await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60);
       return scheduleSyncHeartbeat(configured);
     },
     scheduleFallback() {

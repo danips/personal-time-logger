@@ -1,5 +1,6 @@
 import { getSetting, mutateEntries, mutateEntry, mutateLocalState, mutateSetting, putEntry } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
+import { SETTING_KEY } from "./setting-keys.js";
 import { durationSeconds, nowIso, uuid } from "./time.js";
 
 export const SHEET_HEADERS = [
@@ -139,11 +140,11 @@ export function decodePersistedEntry(entry) {
 }
 
 export async function getDeviceId() {
-  return mutateSetting("device_id", (deviceId) => deviceId || uuid());
+  return mutateSetting(SETTING_KEY.DEVICE_ID, (deviceId) => deviceId || uuid());
 }
 
 async function getDurationMultiplier() {
-  return normalizeMultiplierText(await getSetting("duration_multiplier", "1")) || "1";
+  return normalizeMultiplierText(await getSetting(SETTING_KEY.DURATION_MULTIPLIER, "1")) || "1";
 }
 
 export function normalizeMultiplierText(value) {
@@ -264,15 +265,15 @@ export async function replaceActiveTimer(fields, { operationId = uuid() } = {}) 
   const timestamp = nowIso();
   const createFields = decodeEntryCreate(fields);
   const multiply = await selectedMultiplyValue(createFields.multiply);
-  const entry = await mutateLocalState(["device_id", "active_timer_operation"], ({ entries, settings }) => {
-    const previousOperation = settings.get("active_timer_operation");
+  const entry = await mutateLocalState([SETTING_KEY.DEVICE_ID, SETTING_KEY.ACTIVE_TIMER_OPERATION], ({ entries, settings }) => {
+    const previousOperation = settings.get(SETTING_KEY.ACTIVE_TIMER_OPERATION);
     if (previousOperation && previousOperation.id === operationId) {
       const previousEntry = entries.get(previousOperation.entry_id);
       if (previousEntry) return previousEntry;
     }
 
-    const deviceId = settings.get("device_id") || uuid();
-    settings.set("device_id", deviceId);
+    const deviceId = settings.get(SETTING_KEY.DEVICE_ID) || uuid();
+    settings.set(SETTING_KEY.DEVICE_ID, deviceId);
     for (const existing of entries.values()) {
       if (existing.deleted_at || existing.end_at) continue;
       const currentMultiply = normalizeMultiplyValue(existing.multiply);
@@ -302,7 +303,7 @@ export async function replaceActiveTimer(fields, { operationId = uuid() } = {}) 
       dirty: true
     });
     entries.set(next.id, next);
-    settings.set("active_timer_operation", { id: operationId, entry_id: next.id });
+    settings.set(SETTING_KEY.ACTIVE_TIMER_OPERATION, { id: operationId, entry_id: next.id });
     return next;
   });
   notifyEntriesChanged({ action: "replace_active", ids: [entry.id] });

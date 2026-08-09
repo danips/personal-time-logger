@@ -1,11 +1,12 @@
 import { getSetting, mutateSettings, removeSetting } from "./db.js";
 import { platform } from "./platform.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
-const CLIENT_ID_KEY = "google_oauth_client_id";
-const CLIENT_SECRET_KEY = "google_oauth_client_secret";
+const CLIENT_ID_KEY = SETTING_KEY.GOOGLE_OAUTH_CLIENT_ID;
+const CLIENT_SECRET_KEY = SETTING_KEY.GOOGLE_OAUTH_CLIENT_SECRET;
 const CLIENT_CONFIG_KEYS = [CLIENT_ID_KEY, CLIENT_SECRET_KEY];
-export const TOKEN_KEY = "token_data";
-export const AUTH_GENERATION_KEY = "auth_generation";
+export const TOKEN_KEY = SETTING_KEY.GOOGLE_TOKEN_DATA;
+export const AUTH_GENERATION_KEY = SETTING_KEY.AUTH_GENERATION;
 
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",

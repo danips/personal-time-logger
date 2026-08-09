@@ -4,12 +4,13 @@ import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
 import { nowIso, uuid } from "./time.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
 // Only the columns that live in the sheet are compared. dirty, last_sync_at and
 // sync_error are local bookkeeping, so a difference there is not a divergence.
 const COMPARED_FIELDS = SHEET_HEADERS.filter((field) => field !== "id");
-export const RECONCILIATION_INTENTS_KEY = "reconciliation_intents";
-export const STALE_RECONCILIATION_INTENTS_KEY = "stale_reconciliation_intents";
+export const RECONCILIATION_INTENTS_KEY = SETTING_KEY.RECONCILIATION_INTENTS;
+export const STALE_RECONCILIATION_INTENTS_KEY = SETTING_KEY.STALE_RECONCILIATION_INTENTS;
 export const RECONCILIATION_INTENT_PENDING = "pending_remote_push";
 export const RECONCILIATION_INTENT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_STALE_RECONCILIATION_INTENTS = 20;

@@ -1,7 +1,8 @@
 import { platform } from "./platform.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
 export const SYNC_ALARM = "timelogger-sync";
-export const NEXT_DUE_KEY = "background_sync_due_at";
+export const NEXT_DUE_KEY = SETTING_KEY.BACKGROUND_SYNC_DUE_AT;
 export const MIN_SYNC_INTERVAL_SECONDS = 30;
 
 export function syncAlarmMinutes(intervalSeconds) {

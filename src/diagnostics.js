@@ -1,6 +1,7 @@
 import { getSetting, mutateSetting, setSetting } from "./db.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
-export const DIAGNOSTICS_KEY = "diagnostic_ring";
+export const DIAGNOSTICS_KEY = SETTING_KEY.DIAGNOSTIC_RING;
 export const MAX_DIAGNOSTICS = 50;
 const DEDUPE_WINDOW_MS = 60_000;
 

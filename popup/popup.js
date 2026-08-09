@@ -28,6 +28,7 @@ import {
 } from "../src/ui-helpers.js";
 import { platform } from "../src/platform.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
+import { SETTING_KEY } from "../src/setting-keys.js";
 import { setActiveIcon } from "../src/icon.js";
 import {
   MAX_WINDOW_SIZE,
@@ -47,7 +48,7 @@ const expandedRecentGroups = new Set();
 const RECENT_PAGE_SIZE = 200;
 let recentEntryLimit = RECENT_PAGE_SIZE;
 let recentEntries = [];
-const WINDOW_SIZE_SETTING = "window_resize_presets";
+const WINDOW_SIZE_SETTING = SETTING_KEY.WINDOW_RESIZE_PRESETS;
 const DEFAULT_WINDOW_SIZES = [
   { width: 2000, height: 1000, isWindow: false },
   { width: 1500, height: 1000, isWindow: false },

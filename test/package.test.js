@@ -48,6 +48,7 @@ const expectedFiles = [
   "src/platform.js",
   "src/reconcile-ui-state.js",
   "src/reconcile.js",
+  "src/setting-keys.js",
   "src/sheets.js",
   "src/sync.js",
   "src/time-allocation.js",

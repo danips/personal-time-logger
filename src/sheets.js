@@ -4,6 +4,7 @@ import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
 import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
@@ -43,12 +44,12 @@ function headersMatchFor(expected, row) {
   return expected.length === row.length && expected.every((header, index) => row[index] === header);
 }
 
-const SHEET_ID_SETTING = "time_entries_sheet_id";
-const PROVISION_PENDING_SETTING = "spreadsheet_provision_pending";
+const SHEET_ID_SETTING = SETTING_KEY.TIME_ENTRIES_SHEET_ID;
+const PROVISION_PENDING_SETTING = SETTING_KEY.SPREADSHEET_PROVISION_PENDING;
 
 async function setProvisioningState(spreadsheetId, pendingSpreadsheetId) {
-  return mutateSettings(["spreadsheet_id", PROVISION_PENDING_SETTING], (settings) => {
-    settings.set("spreadsheet_id", String(spreadsheetId || "").trim());
+  return mutateSettings([SETTING_KEY.SPREADSHEET_ID, PROVISION_PENDING_SETTING], (settings) => {
+    settings.set(SETTING_KEY.SPREADSHEET_ID, String(spreadsheetId || "").trim());
     settings.set(PROVISION_PENDING_SETTING, String(pendingSpreadsheetId || "").trim());
   });
 }
@@ -197,12 +198,12 @@ async function apiFetchUnsafe(path, options = {}, { interactiveAuth = false, bas
 }
 
 export async function getSpreadsheetId() {
-  return getSetting("spreadsheet_id", "");
+  return getSetting(SETTING_KEY.SPREADSHEET_ID, "");
 }
 
 export async function setSpreadsheetId(spreadsheetId) {
   resetSheetCache();
-  return setSetting("spreadsheet_id", String(spreadsheetId || "").trim());
+  return setSetting(SETTING_KEY.SPREADSHEET_ID, String(spreadsheetId || "").trim());
 }
 
 /** Clears only the selected remote binding; local time entries remain intact. */
