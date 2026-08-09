@@ -106,4 +106,44 @@ describe("token refresh", () => {
     await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "AUTH_FAILED");
     assert.deepEqual(await db.getSetting("token_data"), tokenData);
   });
+
+  it("does not restore credentials when a refresh completes after sign-out", async () => {
+    await db.setSetting("token_data", {
+      access_token: "expired-token",
+      refresh_token: "signout-refresh-token",
+      expires_at: Date.now() - 1
+    });
+    const refresh = google.barrier("refresh after sign-out");
+    google.enqueue({ method: "POST", pathname: "/token" }, refresh);
+    const auth = await authContext("signout-during-refresh");
+    const pending = auth.getAccessToken();
+    await refresh.waitForRequest();
+    await auth.signOut();
+    refresh.release(google.json({ access_token: "stale-fresh-token", expires_in: 3600 }));
+
+    await assert.rejects(pending, (error) => error.code === "AUTH_STALE");
+    assert.equal(await db.getSetting("token_data"), null);
+  });
+
+  it("keeps the newer refresh response when a former lock owner finishes last", async () => {
+    await db.setSetting("token_data", {
+      access_token: "expired-token",
+      refresh_token: "race-refresh-token",
+      expires_at: Date.now() - 1
+    });
+    const firstRefresh = google.barrier("first refresh");
+    google.enqueue({ method: "POST", pathname: "/token" }, firstRefresh);
+    const first = await authContext("first-refresh-owner");
+    const firstPending = first.getAccessToken();
+    await firstRefresh.waitForRequest();
+
+    await db.setSetting("token_refresh_lock", { holder: "expired-owner", generation: 999, acquired_at: 0 });
+    google.enqueue({ method: "POST", pathname: "/token" }, google.json({ access_token: "newer-token", expires_in: 3600 }));
+    const second = await authContext("second-refresh-owner");
+    assert.equal(await second.getAccessToken(), "newer-token");
+
+    firstRefresh.release(google.json({ access_token: "older-token", expires_in: 3600 }));
+    assert.equal(await firstPending, "newer-token");
+    assert.equal((await db.getSetting("token_data")).access_token, "newer-token");
+  });
 });

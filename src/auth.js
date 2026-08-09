@@ -1,9 +1,10 @@
-import { claimLock, getSetting, mutateSetting, releaseLock, removeSetting, setSetting } from "./db.js";
+import { claimLock, getSetting, mutateSettings, releaseLock } from "./db.js";
 import { getConfig } from "./config-loader.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_KEY = "token_data";
+const AUTH_GENERATION_KEY = "auth_generation";
 const TOKEN_REFRESH_LOCK_KEY = "token_refresh_lock";
 const TOKEN_REFRESH_LOCK_TTL_MS = 30_000;
 const TOKEN_REFRESH_POLL_MS = 50;
@@ -140,9 +141,42 @@ async function getTokenData() {
   return getSetting(TOKEN_KEY);
 }
 
-async function saveTokenData(tokenData) {
-  await setSetting(TOKEN_KEY, tokenData);
-  return tokenData;
+function nextGeneration(settings) {
+  const generation = Number(settings.get(AUTH_GENERATION_KEY) || 0) + 1;
+  settings.set(AUTH_GENERATION_KEY, generation);
+  return generation;
+}
+
+async function beginAuthOperation() {
+  return mutateSettings([AUTH_GENERATION_KEY], (settings) => nextGeneration(settings));
+}
+
+async function saveTokenData(tokenData, { expectedGeneration, expectedRefreshToken } = {}) {
+  return mutateSettings([TOKEN_KEY, AUTH_GENERATION_KEY], (settings) => {
+    const current = settings.get(TOKEN_KEY) || null;
+    const generation = Number(settings.get(AUTH_GENERATION_KEY) || 0);
+    if (expectedGeneration !== undefined && generation !== Number(expectedGeneration)) {
+      return { applied: false, tokenData: current };
+    }
+    if (expectedRefreshToken !== undefined && String(current?.refresh_token || "") !== String(expectedRefreshToken || "")) {
+      return { applied: false, tokenData: current };
+    }
+    settings.set(TOKEN_KEY, tokenData);
+    nextGeneration(settings);
+    return { applied: true, tokenData };
+  });
+}
+
+async function clearTokenData({ expectedGeneration, expectedRefreshToken } = {}) {
+  return mutateSettings([TOKEN_KEY, AUTH_GENERATION_KEY], (settings) => {
+    const current = settings.get(TOKEN_KEY) || null;
+    const generation = Number(settings.get(AUTH_GENERATION_KEY) || 0);
+    if (expectedGeneration !== undefined && generation !== Number(expectedGeneration)) return false;
+    if (expectedRefreshToken !== undefined && String(current?.refresh_token || "") !== String(expectedRefreshToken || "")) return false;
+    settings.delete(TOKEN_KEY);
+    nextGeneration(settings);
+    return true;
+  });
 }
 
 export async function getAuthStatus() {
@@ -178,6 +212,7 @@ export async function signIn({ onDeviceCode } = {}) {
 }
 
 async function signInDevice(config, { onDeviceCode } = {}) {
+  const generation = await beginAuthOperation();
   const deviceCodeData = await deviceCodeRequest(config);
   if (!deviceCodeData.device_code || !deviceCodeData.user_code || !deviceCodeData.verification_url) {
     throw codedError("AUTH_FAILED", "Google device code response was missing required fields");
@@ -186,10 +221,12 @@ async function signInDevice(config, { onDeviceCode } = {}) {
   if (onDeviceCode) onDeviceCode(deviceCodeData);
 
   const tokenData = await pollForDeviceToken(config, deviceCodeData);
-  return saveTokenData(withExpiry({
+  const saved = await saveTokenData(withExpiry({
     ...tokenData,
     flow: "device"
-  }));
+  }), { expectedGeneration: generation });
+  if (!saved.applied) throw codedError("AUTH_STALE", "Sign-in was superseded by a newer authentication action");
+  return saved.tokenData;
 }
 
 async function refreshToken({ force = false } = {}) {
@@ -213,13 +250,15 @@ async function refreshTokenOnce({ force }) {
   const holder = refreshLockHolder();
   const deadline = Date.now() + TOKEN_REFRESH_LOCK_TTL_MS;
   while (Date.now() < deadline) {
-    if (await claimLock(TOKEN_REFRESH_LOCK_KEY, holder, TOKEN_REFRESH_LOCK_TTL_MS)) {
+    const lock = await claimLock(TOKEN_REFRESH_LOCK_KEY, holder, TOKEN_REFRESH_LOCK_TTL_MS);
+    if (lock) {
       try {
         const tokenData = await getTokenData();
         if (!force && isUsable(tokenData)) return tokenData;
         if (!tokenData || !tokenData.refresh_token) {
           throw codedError("AUTH_EXPIRED", "Please sign in again");
         }
+        const generation = Number(await getSetting(AUTH_GENERATION_KEY, 0) || 0);
 
         const { response, data: refreshed } = await formRequest(
           TOKEN_URL,
@@ -227,10 +266,7 @@ async function refreshTokenOnce({ force }) {
         );
         if (!response.ok) {
           if (refreshed.error === "invalid_grant") {
-            await mutateSetting(TOKEN_KEY, (current) => {
-              if (current && current.refresh_token === tokenData.refresh_token) return undefined;
-              return current;
-            });
+            await clearTokenData({ expectedGeneration: generation, expectedRefreshToken: tokenData.refresh_token });
             throw codedError("AUTH_EXPIRED", "Google sign-in expired or was revoked. Please sign in again.");
           }
           throw codedError("AUTH_FAILED", tokenError(refreshed, response.status));
@@ -239,13 +275,16 @@ async function refreshTokenOnce({ force }) {
           throw codedError("AUTH_FAILED", "Google token response was missing an access token");
         }
 
-        return saveTokenData(withExpiry({
+        const saved = await saveTokenData(withExpiry({
           ...tokenData,
           ...refreshed,
           refresh_token: refreshed.refresh_token || tokenData.refresh_token
-        }));
+        }), { expectedGeneration: generation, expectedRefreshToken: tokenData.refresh_token });
+        if (saved.applied) return saved.tokenData;
+        if (isUsable(saved.tokenData)) return saved.tokenData;
+        throw codedError("AUTH_STALE", "Token refresh was superseded by a newer authentication action");
       } finally {
-        await releaseLock(TOKEN_REFRESH_LOCK_KEY, holder);
+        await releaseLock(TOKEN_REFRESH_LOCK_KEY, holder, lock.generation);
       }
     }
 
@@ -279,5 +318,5 @@ export async function getAccessToken({ interactive = false, forceRefresh = false
 }
 
 export async function signOut() {
-  await removeSetting(TOKEN_KEY);
+  await clearTokenData();
 }
