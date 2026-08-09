@@ -19,6 +19,125 @@ export const SHEET_HEADERS = [
   "multiply"
 ];
 
+const CREATE_FIELDS = new Set(["project", "task", "description", "multiply"]);
+const EDITABLE_FIELDS = new Set([
+  "project",
+  "task",
+  "description",
+  "start_at",
+  "end_at",
+  "status",
+  "multiply",
+  "deleted_at"
+]);
+
+function entryModelError(message) {
+  const error = new TypeError(message);
+  error.code = "ENTRY_INVALID";
+  return error;
+}
+
+function validTimestamp(value) {
+  return typeof value === "string" && value && Number.isFinite(new Date(value).getTime());
+}
+
+function assertAllowedFields(values, allowed, kind) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    throw entryModelError(`${kind} must be an object.`);
+  }
+  for (const key of Object.keys(values)) {
+    if (!allowed.has(key)) throw entryModelError(`${key} cannot be changed by an entry ${kind.toLowerCase()}.`);
+  }
+}
+
+function decodeText(value, field) {
+  if (typeof value !== "string") throw entryModelError(`${field} must be text.`);
+  return value.trim();
+}
+
+/** Decodes the form fields accepted when a new running entry is created. */
+export function decodeEntryCreate(fields) {
+  assertAllowedFields(fields, CREATE_FIELDS, "entry create request");
+  const decoded = {};
+  for (const field of ["project", "task", "description"]) {
+    if (Object.hasOwn(fields, field)) decoded[field] = decodeText(fields[field], field);
+  }
+  if (Object.hasOwn(fields, "multiply")
+    && typeof fields.multiply !== "boolean"
+    && typeof fields.multiply !== "string"
+    && typeof fields.multiply !== "number") {
+    throw entryModelError("multiply must be a checkbox value or numeric multiplier.");
+  }
+  if (Object.hasOwn(fields, "multiply")) decoded.multiply = fields.multiply;
+  return decoded;
+}
+
+/** Decodes a mutation payload and rejects identity and sync bookkeeping fields. */
+export function decodeEntryEdit(changes) {
+  assertAllowedFields(changes, EDITABLE_FIELDS, "entry edit request");
+  const decoded = {};
+  for (const field of ["project", "task", "description"]) {
+    if (Object.hasOwn(changes, field)) decoded[field] = decodeText(changes[field], field);
+  }
+  for (const field of ["start_at", "end_at", "deleted_at"]) {
+    if (!Object.hasOwn(changes, field)) continue;
+    const value = changes[field];
+    if (field === "end_at" && value === "") {
+      decoded[field] = "";
+      continue;
+    }
+    if (!validTimestamp(value)) throw entryModelError(`${field} must be a valid timestamp.`);
+    decoded[field] = value;
+  }
+  if (Object.hasOwn(changes, "status")) {
+    if (changes.status !== "ok" && changes.status !== "needs_review") {
+      throw entryModelError("status must be ok or needs_review.");
+    }
+    decoded.status = changes.status;
+  }
+  if (Object.hasOwn(changes, "multiply")) {
+    const value = changes.multiply;
+    if (typeof value !== "boolean" && typeof value !== "string" && typeof value !== "number") {
+      throw entryModelError("multiply must be a checkbox value or numeric multiplier.");
+    }
+    decoded.multiply = value;
+  }
+  return decoded;
+}
+
+/**
+ * Strictly decodes a record crossing the local/remote persistence boundary.
+ * Construction code may still use normalizeEntry to supply intentional defaults;
+ * persisted records must already carry every required field.
+ */
+export function decodePersistedEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw entryModelError("Persisted entry must be an object.");
+  for (const field of ["id", "project", "task", "description", "start_at", "end_at", "duration_seconds", "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"]) {
+    if (!Object.hasOwn(entry, field)) throw entryModelError(`Persisted entry is missing ${field}.`);
+  }
+  if (typeof entry.id !== "string" || !entry.id.trim()) throw entryModelError("id must be a non-empty string.");
+  for (const field of ["project", "task", "description", "device_id"]) {
+    if (typeof entry[field] !== "string") throw entryModelError(`${field} must be text.`);
+  }
+  for (const field of ["start_at", "created_at", "updated_at"]) {
+    if (!validTimestamp(entry[field])) throw entryModelError(`${field} must be a valid timestamp.`);
+  }
+  for (const field of ["end_at", "deleted_at"]) {
+    if (entry[field] !== "" && !validTimestamp(entry[field])) throw entryModelError(`${field} must be empty or a valid timestamp.`);
+  }
+  if (!Number.isFinite(Number(entry.duration_seconds)) || Number(entry.duration_seconds) < 0) {
+    throw entryModelError("duration_seconds must be a non-negative number.");
+  }
+  if (!Number.isInteger(Number(entry.revision)) || Number(entry.revision) < 1) {
+    throw entryModelError("revision must be a positive integer.");
+  }
+  if (entry.status !== "ok" && entry.status !== "needs_review") throw entryModelError("status must be ok or needs_review.");
+  if (entry.multiply !== "" && !normalizeMultiplierText(entry.multiply)) {
+    throw entryModelError("multiply must be empty or a valid numeric multiplier.");
+  }
+  return normalizeEntry(entry);
+}
+
 export async function getDeviceId() {
   return mutateSetting("device_id", (deviceId) => deviceId || uuid());
 }
@@ -115,9 +234,10 @@ export function normalizeEntry(entry) {
 
 export async function createEntry(fields) {
   const timestamp = nowIso();
-  const multiply = await selectedMultiplyValue(fields.multiply);
+  const createFields = decodeEntryCreate(fields);
+  const multiply = await selectedMultiplyValue(createFields.multiply);
   const entry = normalizeEntry({
-    ...fields,
+    ...createFields,
     id: uuid(),
     start_at: timestamp,
     end_at: "",
@@ -142,7 +262,8 @@ export async function createEntry(fields) {
  */
 export async function replaceActiveTimer(fields, { operationId = uuid() } = {}) {
   const timestamp = nowIso();
-  const multiply = await selectedMultiplyValue(fields.multiply);
+  const createFields = decodeEntryCreate(fields);
+  const multiply = await selectedMultiplyValue(createFields.multiply);
   const entry = await mutateLocalState(["device_id", "active_timer_operation"], ({ entries, settings }) => {
     const previousOperation = settings.get("active_timer_operation");
     if (previousOperation && previousOperation.id === operationId) {
@@ -167,7 +288,7 @@ export async function replaceActiveTimer(fields, { operationId = uuid() } = {}) 
     }
 
     const next = normalizeEntry({
-      ...fields,
+      ...createFields,
       id: uuid(),
       start_at: timestamp,
       end_at: "",
@@ -237,18 +358,19 @@ export async function stopEntry(id, { expectedRevision } = {}) {
 
 export async function updateEntry(id, changes, { expectedRevision } = {}) {
   const timestamp = nowIso();
-  const requestedMultiply = changes.multiply !== undefined
-    ? await selectedMultiplyValue(changes.multiply)
+  const editableChanges = decodeEntryEdit(changes);
+  const requestedMultiply = editableChanges.multiply !== undefined
+    ? await selectedMultiplyValue(editableChanges.multiply)
     : undefined;
   const next = await mutateEntry(id, expectedRevision, (existing) => {
-    const nextStart = changes.start_at || existing.start_at;
-    const nextEnd = changes.end_at !== undefined ? changes.end_at : existing.end_at;
+    const nextStart = editableChanges.start_at || existing.start_at;
+    const nextEnd = editableChanges.end_at !== undefined ? editableChanges.end_at : existing.end_at;
     const nextMultiply = requestedMultiply === undefined
       ? normalizeMultiplyValue(existing.multiply)
       : requestedMultiply;
     return normalizeEntry({
       ...existing,
-      ...changes,
+      ...editableChanges,
       multiply: nextMultiply,
       duration_seconds: nextEnd
         ? computedDurationSeconds(nextStart, nextEnd, nextMultiply)
@@ -315,7 +437,7 @@ export async function mergeEntries(targetId, sourceId, { expectedRevisions } = {
 }
 
 export function entryToRow(entry) {
-  const normalized = normalizeEntry(entry);
+  const normalized = decodePersistedEntry(entry);
   return [
     normalized.id,
     normalized.project,
@@ -335,11 +457,14 @@ export function entryToRow(entry) {
 }
 
 export function rowToEntry(row) {
+  if (!Array.isArray(row) || row.length < SHEET_HEADERS.length) {
+    throw entryModelError("Spreadsheet row does not contain every entry field.");
+  }
   const object = {};
   SHEET_HEADERS.forEach((header, index) => {
     object[header] = row[index] || "";
   });
-  return normalizeEntry({
+  return decodePersistedEntry({
     ...object,
     dirty: false,
     last_sync_at: nowIso(),

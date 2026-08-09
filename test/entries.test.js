@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   SHEET_HEADERS,
   canMergeEntries,
+  decodeEntryEdit,
+  decodePersistedEntry,
   entryToRow,
   hasEqualTimestampConflict,
   hasMultiplier,
@@ -134,6 +136,28 @@ describe("row serialization", () => {
     const restored = rowToEntry(entryToRow(fixture({ dirty: true })));
     assert.equal(restored.dirty, false);
     assert.equal(restored.sync_error, "");
+  });
+
+  it("rejects incomplete or invalid records at the persistence boundary", () => {
+    assert.throws(() => decodePersistedEntry({ id: "incomplete" }), { code: "ENTRY_INVALID" });
+    assert.throws(() => rowToEntry(["entry-only"]), { code: "ENTRY_INVALID" });
+    assert.throws(() => decodePersistedEntry({ ...fixture(), revision: 0 }), { code: "ENTRY_INVALID" });
+  });
+});
+
+describe("entry edit decoder", () => {
+  it("keeps identity and sync bookkeeping out of edit payloads", () => {
+    assert.throws(() => decodeEntryEdit({ id: "replace-me" }), { code: "ENTRY_INVALID" });
+    assert.throws(() => decodeEntryEdit({ dirty: false }), { code: "ENTRY_INVALID" });
+  });
+
+  it("rejects invalid dates and accepts the editable field whitelist", () => {
+    assert.throws(() => decodeEntryEdit({ start_at: "not a timestamp" }), { code: "ENTRY_INVALID" });
+    assert.deepEqual(decodeEntryEdit({ task: " Updated ", end_at: "", status: "needs_review" }), {
+      task: "Updated",
+      end_at: "",
+      status: "needs_review"
+    });
   });
 });
 

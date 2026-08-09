@@ -81,7 +81,8 @@ describe("rowsToEntries", () => {
   });
 
   it("quarantines malformed rows instead of assigning fresh timestamps", () => {
-    const rows = sheet([fixture({ id: "valid" }), fixture({ id: "broken", updated_at: "not-a-date" })]);
+    const rows = sheet([fixture({ id: "valid" }), fixture({ id: "broken" })]);
+    rows[2][SHEET_HEADERS.indexOf("updated_at")] = "not-a-date";
     const { entries, quarantined } = rowsToEntries(rows);
     assert.deepEqual(entries.map((entry) => entry.id), ["valid"]);
     assert.deepEqual(quarantined.map((item) => item.id), ["broken"]);
@@ -89,8 +90,10 @@ describe("rowsToEntries", () => {
 
   it("retains a valid duplicate when a newer duplicate is malformed", () => {
     const valid = fixture({ id: "mixed-duplicate", task: "valid", updated_at: "2026-07-27T08:00:00.000Z" });
-    const malformed = fixture({ id: valid.id, task: "broken", updated_at: "not-a-date" });
-    const { entries, quarantined } = rowsToEntries(sheet([valid, malformed]));
+    const malformed = fixture({ id: valid.id, task: "broken" });
+    const rows = sheet([valid, malformed]);
+    rows[2][SHEET_HEADERS.indexOf("updated_at")] = "not-a-date";
+    const { entries, quarantined } = rowsToEntries(rows);
 
     assert.deepEqual(entries.map((entry) => entry.task), ["valid"]);
     assert.deepEqual(quarantined.map((item) => item.id), [valid.id]);

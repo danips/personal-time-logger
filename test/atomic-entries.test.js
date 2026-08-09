@@ -45,6 +45,17 @@ describe("atomic entry mutations", () => {
     assert.equal(stored.description, "Description");
   });
 
+  it("rejects protected edit fields before opening a local write", async () => {
+    const original = fixture({ id: "protected-edit" });
+    await db.putEntry(original);
+
+    await assert.rejects(
+      () => entries.updateEntry(original.id, { id: "replacement-id" }, { expectedRevision: original.revision }),
+      { code: "ENTRY_INVALID" }
+    );
+    assert.deepEqual(await db.getEntry(original.id), original);
+  });
+
   it("merges the target and source in one committed mutation", async () => {
     await db.putEntries([
       fixture({ id: "merge-target", revision: 3 }),
