@@ -74,7 +74,7 @@ describe("compareEntries", () => {
     assert.equal(newerRemote.different[0].newer, "remote");
 
     const sameTimestamp = compareEntries([fixture({ task: "local" })], [fixture({ task: "remote" })]);
-    assert.equal(sameTimestamp.different[0].newer, "same");
+    assert.equal(sameTimestamp.different[0].newer, "conflict");
   });
 
   it("separates row totals from distinct entries when rows are duplicated", () => {

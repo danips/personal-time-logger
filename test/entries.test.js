@@ -5,6 +5,7 @@ import {
   SHEET_HEADERS,
   canMergeEntries,
   entryToRow,
+  hasEqualTimestampConflict,
   hasMultiplier,
   isRemoteNewer,
   normalizeEntry,
@@ -27,6 +28,12 @@ const fixture = (over = {}) => normalizeEntry({
 });
 
 describe("sheet schema", () => {
+  it("identifies different records with an equal timestamp as a conflict", () => {
+    const first = fixture();
+    assert.equal(hasEqualTimestampConflict(first, { ...first, task: "Other task" }), true);
+    assert.equal(hasEqualTimestampConflict(first, { ...first }), false);
+  });
+
   it("no longer carries the unused client, billable and tags columns", () => {
     for (const dropped of ["client", "billable", "tags"]) {
       assert.equal(SHEET_HEADERS.includes(dropped), false, `${dropped} is gone`);

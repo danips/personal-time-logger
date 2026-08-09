@@ -350,3 +350,9 @@ export function isRemoteNewer(remoteEntry, localEntry) {
   if (!localEntry) return true;
   return String(remoteEntry.updated_at || "").localeCompare(String(localEntry.updated_at || "")) > 0;
 }
+
+export function hasEqualTimestampConflict(firstEntry, secondEntry) {
+  return Boolean(firstEntry && secondEntry
+    && String(firstEntry.updated_at || "") === String(secondEntry.updated_at || "")
+    && entryToRow(firstEntry).join("\u0000") !== entryToRow(secondEntry).join("\u0000"));
+}

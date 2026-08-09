@@ -13,7 +13,7 @@ import {
 } from "./sheets.js";
 import { notifyEntriesChanged } from "./events.js";
 import { entryFingerprint, RECONCILIATION_INTENTS_KEY } from "./reconcile.js";
-import { isRemoteNewer, normalizeEntry } from "./entries.js";
+import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry } from "./entries.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
 import { platform } from "./platform.js";
@@ -160,7 +160,8 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
   for (const entry of local.all()) {
     if (!entry.dirty) continue;
     const remote = remoteById.get(entry.id);
-    if (remote && isRemoteNewer(remote, entry) && !forcedIds.has(entry.id)) continue;
+    if (remote && !forcedIds.has(entry.id)
+      && (isRemoteNewer(remote, entry) || hasEqualTimestampConflict(remote, entry))) continue;
     if (rowMap.has(entry.id)) {
       updates.push({ rowIndex: rowMap.get(entry.id), entry, expectedFingerprint: entryFingerprint(remote) });
     } else {
@@ -472,6 +473,7 @@ async function syncConfig(remoteConfig, configRows, { interactiveAuth, lease } =
   }
 
   if (!localUpdatedAt) return false;
+  if (remoteUpdatedAt === localUpdatedAt && remoteValue !== localValue) return false;
   if (remoteUpdatedAt === localUpdatedAt && remoteValue === localValue) {
     await lease?.assert();
     await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);

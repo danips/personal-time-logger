@@ -31,7 +31,7 @@ export function fieldDifferences(localEntry, remoteEntry) {
 function newerSide(localEntry, remoteEntry) {
   const local = String(localEntry.updated_at || "");
   const remote = String(remoteEntry.updated_at || "");
-  if (local === remote) return "same";
+  if (local === remote) return entryFingerprint(localEntry) === entryFingerprint(remoteEntry) ? "same" : "conflict";
   return local > remote ? "local" : "remote";
 }
 

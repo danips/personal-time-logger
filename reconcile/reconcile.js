@@ -112,7 +112,8 @@ function renderDifferent(items) {
   return items.map((item) => {
     const row = document.createElement("article");
     row.className = "row";
-    const badges = item.newer === "same" ? ["same timestamp"] : [`${item.newer} is newer`];
+    const badges = item.newer === "same" ? ["same timestamp"]
+      : item.newer === "conflict" ? ["same timestamp conflict"] : [`${item.newer} is newer`];
     row.append(
       rowHeading(item.local, badges),
       differenceTable(item.differences),
