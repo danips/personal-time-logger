@@ -85,20 +85,13 @@ async function saveSettings() {
 }
 
 async function saveGoogleCredentials() {
-  const previousConfig = await getConfig();
   const clientId = $("#googleClientId").value.trim();
   const clientSecret = $("#googleClientSecret").value.trim();
 
-  await setOAuthClientCredentials(clientId, clientSecret);
-
-  if (
-    clientId !== previousConfig.GOOGLE_CLIENT_ID
-    || clientSecret !== previousConfig.GOOGLE_CLIENT_SECRET
-  ) {
-    await signOut();
-  }
-
-  setStatus("Google credentials saved to Firefox Sync");
+  const saved = await setOAuthClientCredentials(clientId, clientSecret);
+  setStatus(saved.changed
+    ? "Google credentials saved; this device must sign in again"
+    : "Google credentials saved to Firefox Sync");
   await refresh();
 }
 

@@ -1,11 +1,9 @@
 import { claimLock, getSetting, mutateSettings, releaseLock } from "./db.js";
-import { getConfig } from "./config-loader.js";
+import { AUTH_GENERATION_KEY, getConfig, TOKEN_KEY } from "./config-loader.js";
 import { recordDiagnostic } from "./diagnostics.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const TOKEN_KEY = "token_data";
-const AUTH_GENERATION_KEY = "auth_generation";
 const TOKEN_REFRESH_LOCK_KEY = "token_refresh_lock";
 const TOKEN_REFRESH_LOCK_TTL_MS = 30_000;
 const TOKEN_REFRESH_POLL_MS = 50;
@@ -200,13 +198,14 @@ export async function getAuthStatus() {
   const config = await getConfig();
   const tokenData = await getTokenData();
 
-  if (!config.configLoaded || !config.GOOGLE_CLIENT_ID) {
+  if (!config.configLoaded) {
     return {
       signedIn: false,
       clientId: config.GOOGLE_CLIENT_ID || "",
       hasClientSecret: Boolean(config.GOOGLE_CLIENT_SECRET),
-      missingClientId: true,
-      message: "Google client ID missing"
+      missingClientId: !config.GOOGLE_CLIENT_ID,
+      missingClientSecret: !config.GOOGLE_CLIENT_SECRET,
+      message: config.configIncomplete ? "Google client configuration is incomplete" : "Google client ID missing"
     };
   }
 

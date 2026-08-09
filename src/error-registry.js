@@ -12,6 +12,14 @@ export const ERROR_REGISTRY = {
     retryable: false, status: "not signed in", title: "Google setup is incomplete",
     detail: "A Google OAuth client ID and secret are required.", recovery: "Open Options and save both credentials."
   },
+  CONFIG_INVALID: {
+    retryable: true, status: "error", title: "Google credentials are incomplete",
+    detail: "A client ID and client secret must be saved together.", recovery: "Enter both values, or clear both."
+  },
+  CONFIG_SAVE_FAILED: {
+    retryable: true, status: "error", title: "Google credentials were not saved",
+    detail: "Synchronized extension storage rejected the change.", recovery: "Retry saving in Options. Sign in again if prompted."
+  },
   AUTH_REQUIRED: {
     retryable: false, status: "not signed in", title: "Google sign-in is required",
     detail: "This device has no usable Google token.", recovery: "Open Options and sign in."

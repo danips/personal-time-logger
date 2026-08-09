@@ -1,9 +1,11 @@
-import { getSetting, removeSetting } from "./db.js";
+import { getSetting, mutateSettings, removeSetting } from "./db.js";
 import { platform } from "./platform.js";
 
 const CLIENT_ID_KEY = "google_oauth_client_id";
 const CLIENT_SECRET_KEY = "google_oauth_client_secret";
 const CLIENT_CONFIG_KEYS = [CLIENT_ID_KEY, CLIENT_SECRET_KEY];
+export const TOKEN_KEY = "token_data";
+export const AUTH_GENERATION_KEY = "auth_generation";
 
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
@@ -37,7 +39,7 @@ export async function getOAuthClientCredentials() {
   // keys are intentional and must not resurrect old local credentials.
   const clientId = String(await getSetting(CLIENT_ID_KEY, "") || "").trim();
   const clientSecret = String(await getSetting(CLIENT_SECRET_KEY, "") || "").trim();
-  if (clientId || clientSecret) {
+  if (clientId && clientSecret) {
     await platform.setSyncedStorage({
       [CLIENT_ID_KEY]: clientId,
       [CLIENT_SECRET_KEY]: clientSecret
@@ -53,11 +55,39 @@ export async function setOAuthClientCredentials(clientId, clientSecret) {
     [CLIENT_ID_KEY]: String(clientId || "").trim(),
     [CLIENT_SECRET_KEY]: String(clientSecret || "").trim()
   };
-  await platform.setSyncedStorage(normalized);
+  const complete = Boolean(normalized[CLIENT_ID_KEY] && normalized[CLIENT_SECRET_KEY]);
+  if (!complete && (normalized[CLIENT_ID_KEY] || normalized[CLIENT_SECRET_KEY])) {
+    const error = new TypeError("Save both the Google OAuth client ID and secret, or clear both.");
+    error.code = "CONFIG_INVALID";
+    throw error;
+  }
+
+  const previous = await getOAuthClientCredentials();
+  const changed = previous.clientId !== normalized[CLIENT_ID_KEY]
+    || previous.clientSecret !== normalized[CLIENT_SECRET_KEY];
+  // IndexedDB is the authority for access tokens. Invalidate it before making
+  // the new synced configuration visible, so a failed sync-storage write can
+  // at worst require sign-in again; it cannot pair new credentials with an old
+  // refresh token.
+  if (changed || !complete) {
+    await mutateSettings([TOKEN_KEY, AUTH_GENERATION_KEY], (settings) => {
+      settings.delete(TOKEN_KEY);
+      settings.set(AUTH_GENERATION_KEY, Number(settings.get(AUTH_GENERATION_KEY) || 0) + 1);
+    });
+  }
+  try {
+    await platform.setSyncedStorage(normalized);
+  } catch (cause) {
+    const error = new Error("Could not save Google credentials to synchronized storage.");
+    error.code = "CONFIG_SAVE_FAILED";
+    error.cause = cause;
+    throw error;
+  }
   await Promise.all(CLIENT_CONFIG_KEYS.map((key) => removeSetting(key)));
   return {
     clientId: normalized[CLIENT_ID_KEY],
-    clientSecret: normalized[CLIENT_SECRET_KEY]
+    clientSecret: normalized[CLIENT_SECRET_KEY],
+    changed
   };
 }
 
@@ -68,6 +98,7 @@ export async function getConfig() {
     GOOGLE_CLIENT_ID: clientId,
     GOOGLE_CLIENT_SECRET: clientSecret,
     GOOGLE_SCOPES,
-    configLoaded: Boolean(clientId || clientSecret)
+    configLoaded: Boolean(clientId && clientSecret),
+    configIncomplete: Boolean(clientId || clientSecret) && !(clientId && clientSecret)
   };
 }
