@@ -152,4 +152,17 @@ describe("reconciliation actions", () => {
     assert.equal((await db.getEntry(secondLocal.id)).dirty, true);
     assert.equal(google.calls.filter((call) => call.pathname === snapshotPath.pathname).length, 1);
   });
+
+  it("updates only the selected local entry", async () => {
+    const selected = fixture({ id: "scoped-reconcile-selected", dirty: false });
+    const unrelated = fixture({ id: "scoped-reconcile-unrelated", task: "Leave untouched", revision: 6 });
+    await db.putEntries([selected, unrelated]);
+    indexedDB._resetWriteLog();
+
+    await reconcile.keepLocal(selected.id, null, { expectedRevision: selected.revision });
+
+    const entryWrites = indexedDB._getWriteLog().filter((operation) => operation.store === "time_entries");
+    assert.deepEqual(entryWrites, [{ store: "time_entries", operation: "put", key: selected.id }]);
+    assert.deepEqual(await db.getEntry(unrelated.id), unrelated);
+  });
 });

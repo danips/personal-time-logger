@@ -1,4 +1,4 @@
-import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateEntries, mutateLocalState, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
+import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateAllLocalState, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
 import {
   appendRemoteEntries,
   deleteRemoteRows,
@@ -38,6 +38,7 @@ const IDLE_STREAK_KEY = SETTING_KEY.SYNC_IDLE_STREAK;
 // Multipliers applied to the configured interval as idle cycles accumulate.
 const IDLE_BACKOFF_STEPS = [1, 2, 5, 10];
 const MAX_IDLE_INTERVAL_MINUTES = 15;
+const PULL_MUTATION_BATCH_SIZE = 250;
 
 // Identifies this module instance, which is one per extension context (popup,
 // calendar page, background). Used as the sync lock holder.
@@ -308,33 +309,41 @@ async function clearCompletedResolutions(resolutionIds, { lease } = {}) {
 export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set(), { lease } = {}) {
   const localById = new Map(local.all().map((entry) => [entry.id, entry]));
   const applied = [];
+  const candidates = remoteEntries
+    .filter((remote) => !pushedIds.has(remote.id))
+    .map((remote) => ({ remote, observed: localById.get(remote.id) }))
+    // A remote value which was not newer than the snapshot cannot win. Recheck
+    // inside the transaction because the local entry may change while sync I/O
+    // is in flight.
+    .filter(({ remote, observed }) => !observed || isRemoteNewer(remote, observed));
 
-  for (const remote of remoteEntries) {
-    if (pushedIds.has(remote.id)) continue;
+  for (let start = 0; start < candidates.length; start += PULL_MUTATION_BATCH_SIZE) {
     await lease?.assert();
-    const observed = localById.get(remote.id);
-    const result = await mutateEntries([remote.id], observed ? observed.revision : undefined, (entries) => {
-      const current = entries.get(remote.id);
-      // A previously absent entry that appeared during the network read is a
-      // local write, not permission to import over it.
-      if (!observed && current) return { applied: false };
-      if (observed && !current) return { applied: false };
-      if (current && !current.dirty && !isRemoteNewer(remote, current)) return { applied: false };
-      if (current && current.dirty && !isRemoteNewer(remote, current)) return { applied: false };
+    const batch = candidates.slice(start, start + PULL_MUTATION_BATCH_SIZE);
+    const changed = await mutateEntries(batch.map(({ remote }) => remote.id), (entries) => {
+      const batchApplied = [];
+      for (const { remote, observed } of batch) {
+        const current = entries.get(remote.id);
+        // A previously absent entry that appeared during the network read is a
+        // local write, not permission to import over it. Likewise, do not
+        // overwrite an entry that was edited or deleted after the snapshot.
+        if (!observed ? Boolean(current) : !current || Number(current.revision || 0) !== Number(observed.revision || 0)) {
+          continue;
+        }
+        if (current && !isRemoteNewer(remote, current)) continue;
 
-      const next = normalizeEntry({
-        ...remote,
-        dirty: false,
-        last_sync_at: nowIso(),
-        sync_error: ""
-      });
-      entries.set(remote.id, next);
-      return { applied: true, entry: next };
-    }).catch((error) => {
-      if (error.code === "STORAGE_CONFLICT") return { applied: false };
-      throw error;
+        const next = normalizeEntry({
+          ...remote,
+          dirty: false,
+          last_sync_at: nowIso(),
+          sync_error: ""
+        });
+        entries.set(remote.id, next);
+        batchApplied.push(next);
+      }
+      return batchApplied;
     });
-    if (result.applied) applied.push(result.entry);
+    applied.push(...changed);
   }
 
   local.apply(applied);
@@ -453,7 +462,7 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
 export async function reseedForNewSpreadsheet(local, { lease } = {}) {
   await lease?.assert();
   const candidateIds = new Set(local.all().map((entry) => entry.id));
-  const reseeded = await mutateLocalState([RECONCILIATION_INTENTS_KEY, REMOTE_MODIFIED_KEY], ({ entries, settings }) => {
+  const reseeded = await mutateAllLocalState([RECONCILIATION_INTENTS_KEY, REMOTE_MODIFIED_KEY], ({ entries, settings }) => {
     const applied = [];
     for (const id of candidateIds) {
       const current = entries.get(id);

@@ -19,6 +19,7 @@ const fixture = (over = {}) => ({
   duration_seconds: 3600,
   created_at: "2026-08-08T09:00:00.000Z",
   updated_at: "2026-08-08T10:00:00.000Z",
+  deleted_at: "",
   revision: 1,
   dirty: false,
   ...over
@@ -29,6 +30,10 @@ describe("atomic entry mutations", () => {
     const [first, second] = await Promise.all([entries.getDeviceId(), entries.getDeviceId()]);
     assert.equal(first, second);
     assert.equal(await db.getSetting("device_id"), first);
+
+    indexedDB._resetWriteLog();
+    assert.equal(await entries.getDeviceId(), first);
+    assert.deepEqual(indexedDB._getWriteLog(), []);
   });
 
   it("rejects a stale edit without overwriting the current revision", async () => {
@@ -136,6 +141,7 @@ describe("atomic entry mutations", () => {
     ]);
 
     const replacement = await entries.replaceActiveTimer({ project: "Replacement" }, { operationId: "start-1" });
+    indexedDB._resetWriteLog();
     const retry = await entries.replaceActiveTimer({ project: "Ignored retry" }, { operationId: "start-1" });
     const active = await db.getActiveEntries();
 
@@ -144,5 +150,20 @@ describe("atomic entry mutations", () => {
     assert.equal((await db.getEntry("active-first")).revision, 3);
     assert.equal((await db.getEntry("active-second")).revision, 6);
     assert.equal((await db.getEntry(replacement.id)).project, "Replacement");
+    assert.deepEqual(indexedDB._getWriteLog(), []);
+  });
+
+  it("does not rewrite completed history when replacing the active timer", async () => {
+    await db.putEntries([
+      fixture({ id: "unrelated-completed-history", revision: 4 }),
+      fixture({ id: "scoped-active-timer", end_at: "", duration_seconds: 0, revision: 2 })
+    ]);
+    indexedDB._resetWriteLog();
+
+    await entries.replaceActiveTimer({ project: "Scoped replacement" }, { operationId: "scoped-start" });
+
+    const entryWrites = indexedDB._getWriteLog().filter((operation) => operation.store === "time_entries");
+    assert.equal(entryWrites.some((operation) => operation.key === "unrelated-completed-history"), false);
+    assert.equal((await db.getEntry("unrelated-completed-history")).revision, 4);
   });
 });

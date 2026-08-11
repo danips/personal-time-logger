@@ -113,6 +113,60 @@ function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
+function sameStoredValue(left, right) {
+  if (Object.is(left, right)) return true;
+  // Entries and settings are persisted as JSON-shaped data. Comparing that shape
+  // lets atomic helpers skip writes when a caller only read a value in order to
+  // decide what to change.
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function readSettings(objectStore, keys) {
+  const original = new Map();
+  const settings = new Map();
+  for (const key of keys) {
+    const record = await requestToPromise(objectStore.get(key));
+    if (!record) continue;
+    const value = clone(record.value);
+    original.set(key, value);
+    settings.set(key, clone(value));
+  }
+  return { original, settings };
+}
+
+async function writeChangedSettings(objectStore, keys, original, settings) {
+  for (const key of keys) {
+    const hadValue = original.has(key);
+    const hasValue = settings.has(key);
+    if (!hasValue) {
+      if (hadValue) await requestToPromise(objectStore.delete(key));
+      continue;
+    }
+    const next = settings.get(key);
+    if (!hadValue || !sameStoredValue(original.get(key), next)) {
+      await requestToPromise(objectStore.put({ key, value: next }));
+    }
+  }
+}
+
+async function writeChangedEntries(objectStore, original, entries) {
+  for (const [id, previous] of original) {
+    if (!entries.has(id) && previous !== undefined) {
+      await requestToPromise(objectStore.delete(id));
+    }
+  }
+  for (const [id, entry] of entries) {
+    if (entry === undefined) {
+      if (original.get(id) !== undefined) await requestToPromise(objectStore.delete(id));
+      continue;
+    }
+    if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
+    if (!original.has(id) || original.get(id) === undefined || !sameStoredValue(original.get(id), entry)) {
+      await requestToPromise(objectStore.put(entry));
+    }
+  }
+}
+
 function expectedRevisionFor(id, expectedRevisions, ids) {
   if (expectedRevisions === undefined || expectedRevisions === null) return undefined;
   if (expectedRevisions instanceof Map) return expectedRevisions.get(id);
@@ -156,24 +210,14 @@ export async function mutateSettings(keys, mutator) {
   const uniqueKeys = [...new Set(keys)];
   return stores(SETTINGS_STORE, "readwrite", async (objectStores) => {
     const objectStore = objectStores.get(SETTINGS_STORE);
-    const values = new Map();
-    for (const key of uniqueKeys) {
-      const record = await requestToPromise(objectStore.get(key));
-      if (record) values.set(key, clone(record.value));
-    }
+    const { original, settings } = await readSettings(objectStore, uniqueKeys);
 
-    const result = mutator(values);
+    const result = mutator(settings);
     if (result && typeof result.then === "function") {
       throw new TypeError("Settings mutators must not return a Promise");
     }
 
-    for (const key of uniqueKeys) {
-      if (values.has(key)) {
-        await requestToPromise(objectStore.put({ key, value: values.get(key) }));
-      } else {
-        await requestToPromise(objectStore.delete(key));
-      }
-    }
+    await writeChangedSettings(objectStore, uniqueKeys, original, settings);
     return result;
   });
 }
@@ -287,10 +331,12 @@ export async function mutateEntries(ids, expectedRevisions, mutator) {
 
   return stores(ENTRY_STORE, "readwrite", async (objectStores) => {
     const objectStore = objectStores.get(ENTRY_STORE);
+    const original = new Map();
     const entries = new Map();
     for (const id of uniqueIds) {
       const entry = await requestToPromise(objectStore.get(id));
       assertExpectedRevision(id, entry, expectedRevisionFor(id, expectedRevisions, uniqueIds));
+      original.set(id, clone(entry));
       entries.set(id, clone(entry));
     }
 
@@ -299,13 +345,7 @@ export async function mutateEntries(ids, expectedRevisions, mutator) {
       throw new TypeError("Entry mutators must not return a Promise");
     }
 
-    for (const id of uniqueIds) {
-      if (!entries.has(id)) await requestToPromise(objectStore.delete(id));
-    }
-    for (const [id, entry] of entries) {
-      if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
-      await requestToPromise(objectStore.put(entry));
-    }
+    await writeChangedEntries(objectStore, original, entries);
     return result;
   });
 }
@@ -351,49 +391,6 @@ export async function mutateAllEntries(mutator) {
   });
 }
 
-/**
- * Mutates the complete entry table and a named set of settings in one
- * transaction. It is reserved for state transitions, such as replacing the
- * active timer, that must not expose an intermediate entry/settings state.
- */
-export async function mutateLocalState(settingKeys, mutator) {
-  if (typeof mutator !== "function") throw new TypeError("A local-state mutator is required");
-  const uniqueKeys = [...new Set(settingKeys)];
-  return stores([ENTRY_STORE, SETTINGS_STORE], "readwrite", async (objectStores) => {
-    const entryStore = objectStores.get(ENTRY_STORE);
-    const settingsStore = objectStores.get(SETTINGS_STORE);
-    const existing = await requestToPromise(entryStore.getAll());
-    const entries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
-    const settings = new Map();
-    for (const key of uniqueKeys) {
-      const record = await requestToPromise(settingsStore.get(key));
-      if (record) settings.set(key, clone(record.value));
-    }
-
-    const result = mutator({ entries, settings });
-    if (result && typeof result.then === "function") {
-      throw new TypeError("Local-state mutators must not return a Promise");
-    }
-
-    const nextIds = new Set(entries.keys());
-    for (const entry of existing) {
-      if (!nextIds.has(entry.id)) await requestToPromise(entryStore.delete(entry.id));
-    }
-    for (const [id, entry] of entries) {
-      if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
-      await requestToPromise(entryStore.put(entry));
-    }
-    for (const key of uniqueKeys) {
-      if (settings.has(key)) {
-        await requestToPromise(settingsStore.put({ key, value: settings.get(key) }));
-      } else {
-        await requestToPromise(settingsStore.delete(key));
-      }
-    }
-    return result;
-  });
-}
-
 export async function getAllEntries() {
   return store(ENTRY_STORE, "readonly", (s) => requestToPromise(s.getAll()));
 }
@@ -402,8 +399,8 @@ function keyRange(method, ...args) {
   return globalThis.IDBKeyRange[method](...args);
 }
 
-async function entriesFromIndex(name, { range = null, direction = "next", limit = Infinity, filter = () => true } = {}) {
-  return store(ENTRY_STORE, "readonly", (objectStore) => new Promise((resolve, reject) => {
+function readEntriesFromIndex(objectStore, name, { range = null, direction = "next", limit = Infinity, filter = () => true } = {}) {
+  return new Promise((resolve, reject) => {
     const entries = [];
     const request = objectStore.index(name).openCursor(range, direction);
     request.onerror = () => reject(request.error || new Error("IndexedDB index query failed"));
@@ -421,7 +418,90 @@ async function entriesFromIndex(name, { range = null, direction = "next", limit 
       }
       cursor.continue();
     };
-  }));
+  });
+}
+
+async function entriesFromIndex(name, options = {}) {
+  return store(ENTRY_STORE, "readonly", (objectStore) => readEntriesFromIndex(objectStore, name, options));
+}
+
+/**
+ * Mutates named entries and settings in one transaction. Callers may opt into
+ * the active-entry index and add one or more setting-derived entry ids before
+ * the synchronous mutator runs. It avoids loading unrelated history.
+ */
+export async function mutateEntryState({
+  entryIds = [],
+  settingKeys = [],
+  includeActiveEntries = false,
+  additionalEntryIds = () => []
+} = {}, mutator) {
+  if (typeof mutator !== "function") throw new TypeError("An entry-state mutator is required");
+  const uniqueKeys = [...new Set(settingKeys)];
+  return stores([ENTRY_STORE, SETTINGS_STORE], "readwrite", async (objectStores) => {
+    const entryStore = objectStores.get(ENTRY_STORE);
+    const settingsStore = objectStores.get(SETTINGS_STORE);
+    const { original: originalSettings, settings } = await readSettings(settingsStore, uniqueKeys);
+    const requestedIds = new Set(entryIds);
+    for (const id of additionalEntryIds(settings) || []) requestedIds.add(id);
+
+    const originalEntries = new Map();
+    const entries = new Map();
+    const addEntry = (entry) => {
+      const value = clone(entry);
+      originalEntries.set(entry.id, value);
+      entries.set(entry.id, clone(value));
+    };
+
+    if (includeActiveEntries) {
+      const active = await readEntriesFromIndex(entryStore, ENTRY_INDEX.ACTIVE, {
+        range: keyRange("bound", ["", "", ""], ["", "", "\uffff"])
+      });
+      for (const entry of active) addEntry(entry);
+    }
+    for (const id of requestedIds) {
+      if (entries.has(id)) continue;
+      const entry = await requestToPromise(entryStore.get(id));
+      const value = clone(entry);
+      originalEntries.set(id, value);
+      entries.set(id, clone(value));
+    }
+
+    const result = mutator({ entries, settings });
+    if (result && typeof result.then === "function") {
+      throw new TypeError("Entry-state mutators must not return a Promise");
+    }
+
+    await writeChangedEntries(entryStore, originalEntries, entries);
+    await writeChangedSettings(settingsStore, uniqueKeys, originalSettings, settings);
+    return result;
+  });
+}
+
+/**
+ * Mutates the complete entry table and named settings in one transaction.
+ * Reserved for intentional whole-history operations such as spreadsheet reseed.
+ */
+export async function mutateAllLocalState(settingKeys, mutator) {
+  if (typeof mutator !== "function") throw new TypeError("A local-state mutator is required");
+  const uniqueKeys = [...new Set(settingKeys)];
+  return stores([ENTRY_STORE, SETTINGS_STORE], "readwrite", async (objectStores) => {
+    const entryStore = objectStores.get(ENTRY_STORE);
+    const settingsStore = objectStores.get(SETTINGS_STORE);
+    const existing = await requestToPromise(entryStore.getAll());
+    const originalEntries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const entries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const { original: originalSettings, settings } = await readSettings(settingsStore, uniqueKeys);
+
+    const result = mutator({ entries, settings });
+    if (result && typeof result.then === "function") {
+      throw new TypeError("Local-state mutators must not return a Promise");
+    }
+
+    await writeChangedEntries(entryStore, originalEntries, entries);
+    await writeChangedSettings(settingsStore, uniqueKeys, originalSettings, settings);
+    return result;
+  });
 }
 
 export async function getDirtyEntries() {

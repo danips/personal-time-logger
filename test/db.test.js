@@ -107,6 +107,47 @@ describe("IndexedDB repository", () => {
     assert.equal(await db.getSetting("second"), 2);
   });
 
+  it("skips writes for unchanged settings in an atomic mutation", async () => {
+    await db.setSetting("unchanged-setting", { value: "same" });
+    indexedDB._resetWriteLog();
+
+    await db.mutateSettings(["unchanged-setting", "changed-setting"], (settings) => {
+      settings.set("unchanged-setting", { value: "same" });
+      settings.set("changed-setting", "new");
+    });
+
+    assert.deepEqual(indexedDB._getWriteLog(), [
+      { store: "settings", operation: "put", key: "changed-setting" }
+    ]);
+  });
+
+  it("skips writes for unchanged entries in an atomic mutation", async () => {
+    const unchanged = { id: "unchanged-entry", revision: 1, task: "same" };
+    await db.putEntry(unchanged);
+    indexedDB._resetWriteLog();
+
+    await db.mutateEntries([unchanged.id], () => {});
+
+    assert.deepEqual(indexedDB._getWriteLog(), []);
+  });
+
+  it("rolls back scoped entry and setting changes together", async () => {
+    await db.putEntry({ id: "scoped-rollback", revision: 1, task: "before" });
+    await db.setSetting("scoped-rollback-setting", "before");
+    indexedDB._failOnWrite(2);
+
+    await assert.rejects(() => db.mutateEntryState({
+      entryIds: ["scoped-rollback"],
+      settingKeys: ["scoped-rollback-setting"]
+    }, ({ entries, settings }) => {
+      entries.set("scoped-rollback", { ...entries.get("scoped-rollback"), task: "after" });
+      settings.set("scoped-rollback-setting", "after");
+    }), /Injected IndexedDB write failure/);
+
+    assert.equal((await db.getEntry("scoped-rollback")).task, "before");
+    assert.equal(await db.getSetting("scoped-rollback-setting"), "before");
+  });
+
   it("does not apply a multi-entry mutation when any expected revision is stale", async () => {
     await assert.rejects(
       () => db.mutateEntries(["entry-left", "entry-right"], { "entry-left": 2, "entry-right": 2 }, (entries) => {

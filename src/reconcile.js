@@ -1,4 +1,4 @@
-import { getAllEntries, mutateLocalState, mutateSettings, StorageConflictError } from "./db.js";
+import { getAllEntries, mutateEntryState, mutateSettings, StorageConflictError } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
 import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
@@ -196,7 +196,10 @@ export async function deleteDuplicateRows(extraRows, { interactiveAuth = false }
  * other devices.
  */
 export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {}) {
-  const entry = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
+  const entry = await mutateEntryState({
+    entryIds: [id],
+    settingKeys: [RECONCILIATION_INTENTS_KEY]
+  }, ({ entries, settings }) => {
     const existing = entries.get(id);
     if (!existing) throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
     if (expectedRevision !== undefined && Number(existing.revision || 0) !== Number(expectedRevision)) {
@@ -317,7 +320,10 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
   }
 
   const remoteById = await verifyBatchRemoteResolutions(resolutions, { interactiveAuth });
-  const results = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
+  const results = await mutateEntryState({
+    entryIds: ids,
+    settingKeys: [RECONCILIATION_INTENTS_KEY]
+  }, ({ entries, settings }) => {
     const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
       ? settings.get(RECONCILIATION_INTENTS_KEY)
       : [];
@@ -387,7 +393,10 @@ async function verifyReconciliationRemote(id, expectedRemoteFingerprint, { inter
  */
 export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedRemoteFingerprint = entryFingerprint(remoteEntry) } = {}) {
   const verifiedRemote = await verifyReconciliationRemote(remoteEntry.id, expectedRemoteFingerprint);
-  const entry = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
+  const entry = await mutateEntryState({
+    entryIds: [remoteEntry.id],
+    settingKeys: [RECONCILIATION_INTENTS_KEY]
+  }, ({ entries, settings }) => {
     const existing = entries.get(remoteEntry.id);
     if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
       throw new StorageConflictError("Entry changed since reconciliation", { id: remoteEntry.id, reason: "revision_mismatch" });
@@ -410,7 +419,10 @@ export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedR
  */
 export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRevision, expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "" } = {}) {
   const verifiedRemote = await verifyReconciliationRemote(id, expectedRemoteFingerprint);
-  const entry = await mutateLocalState([RECONCILIATION_INTENTS_KEY], ({ entries, settings }) => {
+  const entry = await mutateEntryState({
+    entryIds: [id],
+    settingKeys: [RECONCILIATION_INTENTS_KEY]
+  }, ({ entries, settings }) => {
     const existing = entries.get(id);
     if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
       throw new StorageConflictError("Entry changed since reconciliation", { id, reason: "revision_mismatch" });

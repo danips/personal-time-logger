@@ -75,4 +75,93 @@ describe("sync pull CAS", () => {
     assert.equal((await db.getEntry(remote.id)).task, "Remote value");
     assert.equal((await db.getEntry(remote.id)).dirty, false);
   });
+
+  it("does not open a write transaction or rewrite unchanged snapshot rows", async () => {
+    const unchanged = entry({ id: "unchanged-snapshot" });
+    await db.putEntry(unchanged);
+    const local = {
+      entries: [unchanged],
+      all() { return this.entries; },
+      apply(changed) { this.entries.push(...changed); }
+    };
+    indexedDB._resetWriteLog();
+    indexedDB._resetTransactionLog();
+
+    assert.equal(await pullRemoteEntries(local, [unchanged]), 0);
+    assert.deepEqual(indexedDB._getWriteLog().filter((operation) => operation.store === "time_entries"), []);
+    assert.deepEqual(indexedDB._getTransactionLog().filter((transaction) =>
+      transaction.mode === "readwrite" && transaction.storeNames.includes("time_entries")
+    ), []);
+  });
+
+  it("persists remote-only rows in one bounded transaction", async () => {
+    const remoteEntries = [
+      entry({ id: "batched-remote-1", task: "Remote 1", updated_at: "2026-08-08T11:00:00.000Z" }),
+      entry({ id: "batched-remote-2", task: "Remote 2", updated_at: "2026-08-08T11:00:00.000Z" }),
+      entry({ id: "batched-remote-3", task: "Remote 3", updated_at: "2026-08-08T11:00:00.000Z" })
+    ];
+    const local = {
+      entries: [],
+      all() { return this.entries; },
+      apply(changed) { this.entries.push(...changed); }
+    };
+    indexedDB._resetWriteLog();
+    indexedDB._resetTransactionLog();
+
+    assert.equal(await pullRemoteEntries(local, remoteEntries), remoteEntries.length);
+    assert.deepEqual(
+      indexedDB._getWriteLog().filter((operation) => operation.store === "time_entries").map((operation) => operation.key).sort(),
+      remoteEntries.map((remote) => remote.id).sort()
+    );
+    assert.equal(indexedDB._getTransactionLog().filter((transaction) =>
+      transaction.mode === "readwrite" && transaction.storeNames.includes("time_entries")
+    ).length, 1);
+  });
+
+  it("splits an import at the bounded transaction cap", async () => {
+    const remoteEntries = Array.from({ length: 251 }, (_, index) => entry({
+      id: `batch-cap-${index}`,
+      updated_at: "2026-08-08T11:00:00.000Z"
+    }));
+    const local = {
+      entries: [],
+      all() { return this.entries; },
+      apply(changed) { this.entries.push(...changed); }
+    };
+    indexedDB._resetWriteLog();
+    indexedDB._resetTransactionLog();
+
+    assert.equal(await pullRemoteEntries(local, remoteEntries), remoteEntries.length);
+    assert.equal(indexedDB._getWriteLog().filter((operation) => operation.store === "time_entries").length, remoteEntries.length);
+    assert.equal(indexedDB._getTransactionLog().filter((transaction) =>
+      transaction.mode === "readwrite" && transaction.storeNames.includes("time_entries")
+    ).length, 2);
+  });
+
+  it("applies unrelated rows when a concurrent local edit rejects one batch member", async () => {
+    const observed = entry({ id: "concurrent-batch", updated_at: "2026-08-08T10:00:00.000Z" });
+    const localEdit = entry({
+      id: observed.id,
+      task: "Local edit",
+      revision: 2,
+      dirty: true,
+      updated_at: "2026-08-08T12:00:00.000Z"
+    });
+    const remoteChanged = entry({
+      id: observed.id,
+      task: "Remote value",
+      updated_at: "2026-08-08T11:00:00.000Z"
+    });
+    const remoteOnly = entry({ id: "concurrent-batch-remote-only", task: "Remote only", updated_at: "2026-08-08T11:00:00.000Z" });
+    await db.putEntry(localEdit);
+    const local = {
+      entries: [observed],
+      all() { return this.entries; },
+      apply(changed) { this.entries.push(...changed); }
+    };
+
+    assert.equal(await pullRemoteEntries(local, [remoteChanged, remoteOnly]), 1);
+    assert.deepEqual(await db.getEntry(observed.id), localEdit);
+    assert.equal((await db.getEntry(remoteOnly.id)).task, "Remote only");
+  });
 });

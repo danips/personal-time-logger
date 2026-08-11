@@ -95,9 +95,11 @@ class FakeDatabase {
   createObjectStore(name, options = {}) {
     if (this.state.stores.has(name)) throw new Error(`Store already exists: ${name}`);
     this.state.stores.set(name, {
+      name,
       keyPath: options.keyPath,
       indexes: new Map(),
-      records: new Map()
+      records: new Map(),
+      writeLog: []
     });
     return this.transactionStore(name, "versionchange");
   }
@@ -107,6 +109,7 @@ class FakeDatabase {
     for (const name of storeNames) {
       if (!this.state.stores.has(name)) throw new Error(`Unknown object store: ${name}`);
     }
+    this.state.transactionLog.push({ storeNames: [...storeNames], mode });
     const transaction = new FakeTransaction(this.state, storeNames, mode);
     this.state.transactions.push(transaction);
     this.state.runNextTransaction();
@@ -272,6 +275,7 @@ class FakeObjectStore {
       const key = value[this.store.keyPath];
       if (key === undefined) throw new Error(`Missing key path: ${this.store.keyPath}`);
       this.transaction.recordsFor(this.store).set(key, clone(value));
+      this.store.writeLog.push({ store: this.store.name, operation: "put", key });
       return key;
     });
   }
@@ -280,6 +284,7 @@ class FakeObjectStore {
     return this.request(() => {
       if (this.transaction.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
       this.transaction.recordsFor(this.store).delete(key);
+      this.store.writeLog.push({ store: this.store.name, operation: "delete", key });
       return undefined;
     });
   }
@@ -366,7 +371,7 @@ function createIndexedDB() {
         let database = databases.get(name);
         const isNew = !database;
         if (!database) {
-          database = { version: 0, stores: new Map(), transactions: [] };
+          database = { version: 0, stores: new Map(), transactions: [], transactionLog: [] };
           database.runNextTransaction = state.runNextTransaction;
           database.consumeWriteFailure = state.consumeWriteFailure.bind(state);
           database.takeCommitGate = () => state.commitGates.shift();
@@ -410,6 +415,28 @@ function createIndexedDB() {
 
     _failOnWrite(writeNumber = 1) {
       state.writeFailure = { remaining: Math.max(1, Number(writeNumber) || 1) };
+    },
+
+    _resetWriteLog() {
+      for (const database of databases.values()) {
+        for (const store of database.stores.values()) store.writeLog = [];
+      }
+    },
+
+    _getWriteLog() {
+      return [...databases.values()].flatMap((database) =>
+        [...database.stores.values()].flatMap((store) => store.writeLog.map((operation) => ({ ...operation })))
+      );
+    },
+
+    _resetTransactionLog() {
+      for (const database of databases.values()) database.transactionLog = [];
+    },
+
+    _getTransactionLog() {
+      return [...databases.values()].flatMap((database) =>
+        database.transactionLog.map((transaction) => ({ ...transaction, storeNames: [...transaction.storeNames] }))
+      );
     },
 
     _pauseNextCommit() {

@@ -1,4 +1,4 @@
-import { getSetting, mutateEntries, mutateEntry, mutateLocalState, mutateSetting, putEntry } from "./db.js";
+import { getSetting, mutateEntries, mutateEntry, mutateEntryState, mutateSetting, putEntry } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
@@ -266,7 +266,14 @@ export async function replaceActiveTimer(fields, { operationId = uuid() } = {}) 
   const timestamp = nowIso();
   const createFields = decodeEntryCreate(fields);
   const multiply = await selectedMultiplyValue(createFields.multiply);
-  const entry = await mutateLocalState([SETTING_KEY.DEVICE_ID, SETTING_KEY.ACTIVE_TIMER_OPERATION], ({ entries, settings }) => {
+  const entry = await mutateEntryState({
+    settingKeys: [SETTING_KEY.DEVICE_ID, SETTING_KEY.ACTIVE_TIMER_OPERATION],
+    includeActiveEntries: true,
+    additionalEntryIds(settings) {
+      const previousOperation = settings.get(SETTING_KEY.ACTIVE_TIMER_OPERATION);
+      return previousOperation?.entry_id ? [previousOperation.entry_id] : [];
+    }
+  }, ({ entries, settings }) => {
     const previousOperation = settings.get(SETTING_KEY.ACTIVE_TIMER_OPERATION);
     if (previousOperation && previousOperation.id === operationId) {
       const previousEntry = entries.get(previousOperation.entry_id);

@@ -45,10 +45,12 @@ Access/refresh tokens stay in IndexedDB. Entry changes are broadcast through
 `src/events.js`; receiving pages re-read data instead of trusting an event
 payload as state.
 
-Use `mutateEntries`, `mutateSettings`, or `mutateLocalState` for shared state
-changes. Their mutators are synchronous inside one IndexedDB transaction;
-entry mutations can require an expected revision. Do not replace an entry from
-an earlier read with `putEntry` when a conditional mutation is available.
+Use `mutateEntries`, `mutateEntryState`, `mutateAllLocalState`, or
+`mutateSettings` for shared state changes. Their mutators are synchronous
+inside one IndexedDB transaction; entry mutations can require an expected
+revision. `mutateAllLocalState` is reserved for intentional whole-history
+operations. Do not replace an entry from an earlier read with `putEntry` when a
+conditional mutation is available.
 
 ## Entry, time, and spreadsheet model
 
