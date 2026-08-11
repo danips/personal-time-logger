@@ -29,7 +29,7 @@ import {
 import { platform } from "../src/platform.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
-import { setActiveIcon } from "../src/icon.js";
+import { updateActiveIcon } from "../src/icon.js";
 import {
   MAX_WINDOW_SIZE,
   normalizeWindowSizePreset,
@@ -414,7 +414,7 @@ function updateElapsed() {
   $activeDot.classList.toggle("hidden", !latest);
   if (latest) $activeDot.style.setProperty("--project-color", projectColor(latest));
   if (hasActive) setNewTimerOpen(false);
-  setActiveIcon(hasActive);
+  void updateActiveIcon(hasActive);
 }
 
 function setNewTimerOpen(open) {
