@@ -5,11 +5,13 @@ popup totals, and Tempo upload.
 
 ## D-01 — Multiplied time at boundaries
 
-Calendar blocks always use the actual start and end timestamps. A completed
-entry's stored `duration_seconds` is its effective duration; when a day, week,
-or upload period clips the actual interval, that effective duration is divided
-proportionally by elapsed overlap. A multiplier never creates an additional
-visual tail or moves time into a later period.
+Calendar blocks begin at the actual start timestamp and extend to the effective
+duration. The lower multiplier-added tail is visually distinct so overlapping
+effective work is visible during review. A completed entry's stored
+`duration_seconds` is its effective duration; when a day, week, or upload
+period clips the actual interval, that effective duration is divided
+proportionally by elapsed overlap. The visual tail never moves time into a
+later period for daily totals, sync, or Tempo uploads.
 
 ## D-02 — Merge
 

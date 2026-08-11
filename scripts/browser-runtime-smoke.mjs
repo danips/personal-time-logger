@@ -96,6 +96,17 @@ async function exercisePopupTimer(baseUrl, sessionId) {
       && document.querySelector(".active-panel")?.getAttribute("aria-label") === "Start a new timer";
   `);
 
+  const configuredMultiplier = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      import(browser.runtime.getURL("src/db.js"))
+        .then((db) => db.setSetting("duration_multiplier", "1.5"))
+        .then(() => done(true), () => done(false));
+    `,
+    args: []
+  });
+  if (!configuredMultiplier) throw new Error("Could not configure the browser-smoke duration multiplier.");
+
   const started = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
       document.querySelector(".active-panel")?.click();
@@ -176,7 +187,9 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
   });
   if (!selectedWeek) throw new Error("Calendar smoke entry could not be selected.");
   await waitForCondition(baseUrl, sessionId, "Calendar entry render", `
-    return document.querySelectorAll(".entry-block").length > 0;
+    const multiplied = document.querySelector(".entry-block.multiplied-entry");
+    return document.querySelectorAll(".entry-block").length > 0
+      && Number.parseFloat(multiplied?.style.getPropertyValue("--actual-percent")) < 100;
   `, `
     return {
       week: document.querySelector("#weekPicker")?.value,

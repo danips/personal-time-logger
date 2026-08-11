@@ -23,6 +23,14 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+export function maxDate(a, b) {
+  return a.getTime() > b.getTime() ? a : b;
+}
+
+export function minDate(a, b) {
+  return a.getTime() < b.getTime() ? a : b;
+}
+
 export function isSameLocalDate(a, b) {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
@@ -77,10 +85,25 @@ export function actualDurationSeconds(rawStart, rawEnd) {
   return Math.max(0, (rawEnd.getTime() - rawStart.getTime()) / 1000);
 }
 
+function effectiveDurationSeconds(entry, rawStart, rawEnd) {
+  const actualSeconds = actualDurationSeconds(rawStart, rawEnd);
+  if (!actualSeconds) return 0;
+  const stored = Number(entry.duration_seconds) || 0;
+  return entry.end_at && stored ? stored : actualSeconds;
+}
+
+function effectiveEnd(entry, rawStart, rawEnd) {
+  const actualSeconds = actualDurationSeconds(rawStart, rawEnd);
+  const effectiveSeconds = Number(entry.multiply) > 0
+    ? effectiveDurationSeconds(entry, rawStart, rawEnd)
+    : actualSeconds;
+  return addMinutes(rawStart, Math.max(actualSeconds, effectiveSeconds) / 60);
+}
+
 /**
- * Splits entries into per-day segments for the displayed week, so an entry
- * crossing midnight is drawn once in each day it covers. Each segment carries the
- * share of the entry's duration that falls inside it.
+ * Splits entries into per-day visual segments for the displayed week. Multiplied
+ * entries include a distinct effective-duration tail; `totalSeconds` remains
+ * allocated only across the actual interval.
  */
 export function buildSegments(entries, weekStart) {
   const weekEnd = addDays(weekStart, DAY_COUNT);
@@ -88,29 +111,43 @@ export function buildSegments(entries, weekStart) {
 
   for (const entry of entries) {
     const interval = entryInterval(entry);
-    if (!interval || interval.start >= weekEnd || interval.end <= weekStart) continue;
+    if (!interval) continue;
+    const entryStart = interval.start;
+    const actualEnd = interval.end;
+    const displayEnd = effectiveEnd(entry, entryStart, actualEnd);
+    const effectiveSeconds = effectiveDurationSeconds(entry, entryStart, actualEnd);
+    const displaySeconds = actualDurationSeconds(entryStart, displayEnd);
+    if (entryStart >= weekEnd || displayEnd <= weekStart) continue;
 
     for (let index = 0; index < DAY_COUNT; index += 1) {
       const dayStart = addDays(weekStart, index);
       const dayEnd = addDays(dayStart, 1);
-      const allocation = allocateEntry(entry, dayStart, dayEnd, { now: interval.end });
-      if (!allocation) continue;
-      const { start: visibleStart, end: visibleEnd } = allocation;
+      const visibleStart = maxDate(entryStart, dayStart);
+      const visibleEnd = minDate(displayEnd, dayEnd);
+      if (visibleEnd <= visibleStart) continue;
+      const allocation = allocateEntry(entry, dayStart, dayEnd, { now: actualEnd });
 
       days[index].push({
         entry,
         dayIndex: index,
         visibleStart,
         visibleEnd,
-        totalSeconds: allocation.effectiveSeconds,
+        actualEnd,
+        displayEnd,
+        effectiveSeconds,
+        actualSeconds: actualDurationSeconds(entryStart, actualEnd),
+        displaySeconds,
+        // Reports and daily totals remain allocated across the real interval.
+        // The multiplier tail is a visual warning, not time moved into a later day.
+        totalSeconds: allocation?.effectiveSeconds || 0,
         startMinute: minutesSinceStartOfDay(visibleStart),
         // minutesSinceStartOfDay rolls midnight back to zero. Keep a segment
         // ending at the day boundary at the bottom of the calendar instead.
         endMinute: visibleEnd.getTime() === dayEnd.getTime()
           ? MINUTES_PER_DAY
           : minutesSinceStartOfDay(visibleEnd),
-        startsEntry: visibleStart.getTime() === interval.start.getTime(),
-        endsEntry: visibleEnd.getTime() === interval.end.getTime()
+        startsEntry: visibleStart.getTime() === entryStart.getTime(),
+        endsEntry: visibleStart < actualEnd && actualEnd <= visibleEnd
       });
     }
   }

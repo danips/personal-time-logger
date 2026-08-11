@@ -80,18 +80,22 @@ describe("buildSegments", () => {
     assert.equal(segments[0][0].startsEntry, false);
   });
 
-  it("keeps multiplier geometry on the actual interval", () => {
+  it("adds a visual multiplier tail after the actual interval", () => {
     const multiplied = entry(at(1, 9), at(1, 10), { duration_seconds: 5400, multiply: "1.5" });
     const [segment] = buildSegments([multiplied], weekStart)[1];
 
     assert.equal(segment.totalSeconds, 5400);
-    // A multiplier changes totals, not the chronology on the calendar.
+    assert.equal(segment.actualSeconds, 3600);
+    assert.equal(segment.effectiveSeconds, 5400);
+    assert.equal(segment.endMinute - segment.startMinute, 90);
+    assert.equal(segment.endsEntry, true);
+  });
+
+  it("does not extend an entry without a multiplier", () => {
+    const regular = entry(at(1, 9), at(1, 10), { duration_seconds: 5400, multiply: "" });
+    const [segment] = buildSegments([regular], weekStart)[1];
+
     assert.equal(segment.endMinute - segment.startMinute, 60);
-    assert.equal("actualEnd" in segment, false);
-    assert.equal("actualSeconds" in segment, false);
-    assert.equal("displayEnd" in segment, false);
-    assert.equal("displaySeconds" in segment, false);
-    assert.equal("effectiveSeconds" in segment, false);
   });
 
   it("allocates multiplied time proportionally across midnight", () => {
@@ -104,7 +108,7 @@ describe("buildSegments", () => {
     assert.equal(segments[0][0].totalSeconds, 3600);
     assert.equal(segments[1][0].totalSeconds, 3600);
     assert.equal(segments[0][0].endMinute - segments[0][0].startMinute, 30);
-    assert.equal(segments[1][0].endMinute - segments[1][0].startMinute, 30);
+    assert.equal(segments[1][0].endMinute - segments[1][0].startMinute, 90);
   });
 });
 
@@ -120,6 +124,14 @@ describe("layoutSegments", () => {
   it("puts overlapping segments side by side", () => {
     const segments = laid([540, 660], [600, 720]);
     assert.deepEqual(segments.map((segment) => segment.lane), [0, 1]);
+    assert.deepEqual(segments.map((segment) => segment.laneCount), [2, 2]);
+  });
+
+  it("treats a multiplier tail as an overlap", () => {
+    const multiplied = entry(at(1, 9), at(1, 10), { duration_seconds: 5400, multiply: "1.5" });
+    const following = entry(at(1, 10), at(1, 10, 30));
+    const segments = layoutSegments(buildSegments([multiplied, following], weekStart)[1]);
+
     assert.deepEqual(segments.map((segment) => segment.laneCount), [2, 2]);
   });
 
