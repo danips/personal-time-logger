@@ -33,6 +33,7 @@ const expectedFiles = [
   "src/auth.js",
   "src/background-schedule.js",
   "src/calendar-layout.js",
+  "src/chatgpt-account-cache.js",
   "src/chatgpt-containers.js",
   "src/codex-usage.js",
   "src/config-loader.js",

@@ -1,6 +1,6 @@
 import { getActiveEntries, getDirtyEntryCount, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
-import { getChatGptAccounts } from "../src/chatgpt-containers.js";
+import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-account-cache.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
@@ -652,7 +652,7 @@ async function loadWindowSizes() {
 }
 
 async function renderChatGptUsageSummary(isCurrent) {
-  const summaries = (await getChatGptAccounts())
+  const summaries = normalizeChatGptAccounts(await getSetting(CHATGPT_ACCOUNTS_KEY, []))
     .map((account) => ({
       label: account.email || account.label || "ChatGPT account",
       remaining: compactPercent(account.snapshot?.primary_window?.remaining_percent),

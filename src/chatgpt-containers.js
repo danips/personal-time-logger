@@ -1,12 +1,14 @@
 import { getSetting, mutateSetting, mutateSettings, removeSetting, setSetting } from "./db.js";
+import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "./chatgpt-account-cache.js";
 import { extractUsageIdentity, normalizeBridgeResult, OFFICIAL_USAGE_URL, UsageError } from "./codex-usage.js";
 import { platform } from "./platform.js";
+import { SETTING_KEY } from "./setting-keys.js";
 
-export const CHATGPT_ACCOUNTS_KEY = "chatgpt_usage_accounts";
-export const CHATGPT_ACCOUNT_GENERATION_KEY = "chatgpt_usage_account_generation";
-export const CHATGPT_PROFILE_SALT_KEY = "chatgpt_usage_profile_salt";
-export const CHATGPT_CACHE_VERSION_KEY = "chatgpt_usage_cache_version";
-export const CHATGPT_SESSION_TOKEN_CONSENT_KEY = "chatgpt_usage_session_token_consent";
+export { CHATGPT_ACCOUNTS_KEY };
+export const CHATGPT_ACCOUNT_GENERATION_KEY = SETTING_KEY.CHATGPT_USAGE_ACCOUNT_GENERATION;
+export const CHATGPT_PROFILE_SALT_KEY = SETTING_KEY.CHATGPT_USAGE_PROFILE_SALT;
+export const CHATGPT_CACHE_VERSION_KEY = SETTING_KEY.CHATGPT_USAGE_CACHE_VERSION;
+export const CHATGPT_SESSION_TOKEN_CONSENT_KEY = SETTING_KEY.CHATGPT_USAGE_SESSION_TOKEN_CONSENT;
 export const CHATGPT_CACHE_VERSION = 1;
 export const CHATGPT_USAGE_PAGE_URL = OFFICIAL_USAGE_URL;
 export const CHATGPT_HOST_PERMISSION = "https://chatgpt.com/*";
@@ -84,7 +86,7 @@ function ensureCrypto(cryptoApi) {
 
 async function readAccounts(deps) {
   const value = await deps.getSetting(CHATGPT_ACCOUNTS_KEY, []);
-  return Array.isArray(value) ? value : [];
+  return normalizeChatGptAccounts(value);
 }
 
 function accountGeneration(value) {
