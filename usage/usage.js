@@ -156,7 +156,6 @@ async function refreshOne(account, { automatic = false } = {}) {
       $status.textContent = `${account.label}: ${messageFor(error)}`;
     }
   }
-  await render({ autoRefresh: false });
 }
 
 function accountCard(account, enabled) {
@@ -305,7 +304,6 @@ function accountCard(account, enabled) {
       try {
         await verifyAccount(account.cookie_store_id);
         $status.textContent = `${account.label} is connected.`;
-        await render({ autoRefresh: false });
       } catch (error) {
         $status.textContent = `${account.label}: ${messageFor(error)}`;
       }
@@ -319,7 +317,6 @@ function accountCard(account, enabled) {
   disconnect.addEventListener("click", () => runUsageAction(`disconnect-account:${account.id}`, async () => {
     if (!confirm(`Disconnect ${account.label}? The Firefox container will remain.`)) return;
     await disconnectAccount(account.id);
-    await render({ autoRefresh: false });
   }, disconnect));
   actions.append(disconnect);
   card.append(actions);
@@ -369,29 +366,15 @@ function bindEvents() {
   $grant.addEventListener("click", () => runUsageAction("grant-chatgpt-access", async () => {
   if (!sessionTokenConsent) return consentRequired();
   $status.textContent = "Requesting ChatGPT access…";
-  try {
-    const granted = await platform.requestOptionalHostPermission(CHATGPT_HOST_PERMISSION);
-    if (!granted) throw new UsageError("permission_required", "ChatGPT access was not granted");
-    await render({ autoRefresh: false });
-  } catch (error) {
-    $status.textContent = messageFor(error);
-  }
+  const granted = await platform.requestOptionalHostPermission(CHATGPT_HOST_PERMISSION);
+  if (!granted) throw new UsageError("permission_required", "ChatGPT access was not granted");
   }, $grant));
 
   $("#addAccount").addEventListener("click", () => runUsageAction("add-chatgpt-account", async () => {
   if (!sessionTokenConsent) return consentRequired();
-  const button = $("#addAccount");
-  button.disabled = true;
-  try {
-    await createAccountContainer($label.value);
-    $label.value = `Account ${Math.min((await getChatGptAccounts()).length + 1, 3)}`;
-    $status.textContent = "Firefox opened a ChatGPT tab. Sign in there, then use Check signed-in account.";
-    await render({ autoRefresh: false });
-  } catch (error) {
-    $status.textContent = messageFor(error);
-  } finally {
-    button.disabled = false;
-  }
+  await createAccountContainer($label.value);
+  $label.value = `Account ${Math.min((await getChatGptAccounts()).length + 1, 3)}`;
+  $status.textContent = "Firefox opened a ChatGPT tab. Sign in there, then use Check signed-in account.";
   }, $("#addAccount")));
 
   $refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-accounts", async () => {
@@ -408,13 +391,11 @@ function bindEvents() {
   $clearData.addEventListener("click", () => runUsageAction("clear-chatgpt-data", async () => {
   if (!confirm("Clear all local ChatGPT usage bindings, snapshots, fingerprints, and the profile salt? Firefox containers and sessions will remain.")) return;
   await clearChatGptUsageData();
-  await render({ autoRefresh: false });
   }, $clearData));
 
   $sessionTokenConsent.addEventListener("change", () => runUsageAction("save-chatgpt-consent", async () => {
   sessionTokenConsent = $sessionTokenConsent.checked;
   await setSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, sessionTokenConsent);
-  await render({ autoRefresh: false });
   }, $sessionTokenConsent));
 }
 

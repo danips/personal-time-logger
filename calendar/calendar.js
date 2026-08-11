@@ -74,7 +74,7 @@ function setStatus(message) {
   $("#statusLine").textContent = message;
 }
 
-function runCalendarAction(key, action, { button = null, expectedRevision } = {}) {
+function runCalendarAction(key, action, { button = null, expectedRevision, afterRender } = {}) {
   return runAction(key, action, {
     expectedRevision,
     setBusy(next) {
@@ -83,8 +83,13 @@ function runCalendarAction(key, action, { button = null, expectedRevision } = {}
     onError(error) {
       setStatus(formatError(error));
     },
-    onFinally() {
-      return render().catch((error) => setStatus(formatError(error)));
+    async onFinally() {
+      try {
+        await render();
+        afterRender?.();
+      } catch (error) {
+        setStatus(formatError(error));
+      }
     }
   });
 }
@@ -462,7 +467,8 @@ function beginDrag(event) {
     target: null
   };
   dragState.finish = () => runCalendarAction(`drag-entry:${entry.id}`, endDrag, {
-    expectedRevision: entry.revision
+    expectedRevision: entry.revision,
+    afterRender: refreshSelectedEntryEditor
   });
   block.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveDrag);
@@ -516,7 +522,8 @@ function beginResize(event) {
     target: null
   };
   dragState.finish = () => runCalendarAction(`resize-entry:${entry.id}`, endResize, {
-    expectedRevision: entry.revision
+    expectedRevision: entry.revision,
+    afterRender: refreshSelectedEntryEditor
   });
   handle.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveResize);
@@ -574,7 +581,6 @@ async function endResize() {
   }
 
   if (!state.active || !state.target) {
-    await render();
     setStatus("Ready");
     return;
   }
@@ -594,18 +600,11 @@ async function endResize() {
     revision: null
   };
 
-  try {
-    const updated = await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
-    undo.revision = updated.revision;
-    setResizeUndo(undo);
-    setStatus("Entry resized");
-    await render();
-    if (editingEntryId === state.entry.id) refreshSelectedEntryEditor();
-    await runSync({ force: false });
-  } catch (error) {
-    setStatus(formatError(error));
-    await render();
-  }
+  const updated = await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
+  undo.revision = updated.revision;
+  setResizeUndo(undo);
+  setStatus("Entry resized");
+  await runSync({ force: false });
 }
 
 function moveDrag(event) {
@@ -637,7 +636,6 @@ async function endDrag() {
   }
 
   if (!state.active || !state.target) {
-    await render();
     setStatus("Ready");
     return;
   }
@@ -653,17 +651,10 @@ async function endDrag() {
     changes.end_at = new Date(newStart.getTime() + state.durationMs).toISOString();
   }
 
-  try {
-    setResizeUndo(null);
-    await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
-    setStatus("Entry moved");
-    await render();
-    if (editingEntryId === state.entry.id) refreshSelectedEntryEditor();
-    await runSync({ force: false });
-  } catch (error) {
-    setStatus(formatError(error));
-    await render();
-  }
+  setResizeUndo(null);
+  await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
+  setStatus("Entry moved");
+  await runSync({ force: false });
 }
 
 async function undoResize() {
@@ -677,12 +668,10 @@ async function undoResize() {
       end_at: undo.end_at
     }, { expectedRevision: undo.revision });
     setStatus("Resize undone");
-    await render();
-    if (editingEntryId === undo.id) refreshSelectedEntryEditor();
     await runSync({ force: false });
   } catch (error) {
     setResizeUndo(undo);
-    setStatus(formatError(error));
+    throw error;
   }
 }
 
@@ -694,49 +683,38 @@ async function runSync({ force = false } = {}) {
   } catch (error) {
     setStatus(`${statusFromError(error)}: ${formatError(error)}`);
   }
-  await render();
 }
 
 async function mergeSelectedEntry() {
   const sourceId = $("#calendarMergeTarget").value;
   if (!selectedEntryId || !sourceId) return;
 
-  try {
-    setResizeUndo(null);
-    const target = getEntryById(selectedEntryId);
-    const source = getEntryById(sourceId);
-    if (!target || !source) throw new Error("Entry changed in another window; refreshed");
-    await mergeEntries(selectedEntryId, sourceId, {
-      expectedRevisions: {
-        [selectedEntryId]: target.revision,
-        [sourceId]: source.revision
-      }
-    });
-    closeEditor();
-    setStatus("Entries merged");
-    await render();
-    await runSync({ force: false });
-  } catch (error) {
-    setStatus(formatError(error));
-  }
+  setResizeUndo(null);
+  const target = getEntryById(selectedEntryId);
+  const source = getEntryById(sourceId);
+  if (!target || !source) throw new Error("Entry changed in another window; refreshed");
+  await mergeEntries(selectedEntryId, sourceId, {
+    expectedRevisions: {
+      [selectedEntryId]: target.revision,
+      [sourceId]: source.revision
+    }
+  });
+  closeEditor();
+  setStatus("Entries merged");
+  await runSync({ force: false });
 }
 
 async function duplicateSelectedEntry() {
   if (!selectedEntryId) return;
 
-  try {
-    setResizeUndo(null);
-    const entry = getEntryById(selectedEntryId);
-    if (!entry) throw new Error("Entry changed in another window; refreshed");
-    const duplicate = await duplicateEntry(selectedEntryId, { expectedRevision: entry.revision });
-    closeEditor();
-    selectedEntryId = duplicate.id;
-    setStatus("Entry duplicated");
-    await render();
-    await runSync({ force: false });
-  } catch (error) {
-    setStatus(formatError(error));
-  }
+  setResizeUndo(null);
+  const entry = getEntryById(selectedEntryId);
+  if (!entry) throw new Error("Entry changed in another window; refreshed");
+  const duplicate = await duplicateEntry(selectedEntryId, { expectedRevision: entry.revision });
+  closeEditor();
+  selectedEntryId = duplicate.id;
+  setStatus("Entry duplicated");
+  await runSync({ force: false });
 }
 
 function closeEditor() {
@@ -784,17 +762,12 @@ function openSelectedEntryEditor() {
 async function deleteCalendarEntry() {
   if (!editingEntryId) return;
   if (!confirm("Delete this time log entry?")) return;
-  try {
-    setResizeUndo(null);
-    await softDeleteEntry(editingEntryId, { expectedRevision: editingEntryRevision });
-    closeEditor();
-    selectedEntryId = "";
-    setStatus("Entry deleted");
-    await render();
-    await runSync({ force: false });
-  } catch (error) {
-    setStatus(formatError(error));
-  }
+  setResizeUndo(null);
+  await softDeleteEntry(editingEntryId, { expectedRevision: editingEntryRevision });
+  closeEditor();
+  selectedEntryId = "";
+  setStatus("Entry deleted");
+  await runSync({ force: false });
 }
 
 async function saveCalendarEdit(event) {
@@ -812,20 +785,15 @@ async function saveCalendarEdit(event) {
     return;
   }
 
-  try {
-    setResizeUndo(null);
-    await updateEntry(
-      editingEntryId,
-      readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
-      { expectedRevision: editingEntryRevision }
-    );
-    closeEditor();
-    setStatus("Entry updated");
-    await render();
-    await runSync({ force: false });
-  } catch (error) {
-    setStatus(formatError(error));
-  }
+  setResizeUndo(null);
+  await updateEntry(
+    editingEntryId,
+    readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
+    { expectedRevision: editingEntryRevision }
+  );
+  closeEditor();
+  setStatus("Entry updated");
+  await runSync({ force: false });
 }
 
 async function clearSelection() {
@@ -856,7 +824,6 @@ async function changeWeek(nextStart) {
   setResizeUndo(null);
   weekStart = startOfWeek(nextStart);
   initialScrollDone = false;
-  await render();
   setStatus("Ready");
 }
 
@@ -972,7 +939,11 @@ function bindEvents() {
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
   $("#sendTempoButton").addEventListener("click", (event) => runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget }));
   $("#syncButton").addEventListener("click", (event) => runCalendarAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
-  $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, { button: event.currentTarget, expectedRevision: lastResizeUndo?.revision }));
+  $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, {
+    button: event.currentTarget,
+    expectedRevision: lastResizeUndo?.revision,
+    afterRender: refreshSelectedEntryEditor
+  }));
   $("#duplicateEntryButton").addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));
   $("#calendarMergeButton").addEventListener("click", (event) => runCalendarAction(`merge-entry:${selectedEntryId}`, mergeSelectedEntry, { button: event.currentTarget }));
   $("#calendarEditForm").addEventListener("submit", (event) => runCalendarAction(`save-entry:${editingEntryId}`, () => saveCalendarEdit(event), { expectedRevision: editingEntryRevision }));

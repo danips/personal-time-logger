@@ -698,7 +698,6 @@ async function runSync({ force = false } = {}) {
   } catch (error) {
     setStatus($syncStatus, statusFromError(error), formatError(error));
   }
-  await render();
 }
 
 function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
@@ -816,11 +815,8 @@ async function saveEdit() {
     hideEdit();
     await runSync({ force: false });
   } catch (error) {
-    if (error.code === "STORAGE_CONFLICT") {
-      hideEdit();
-      await render();
-    }
-    setStatus($syncStatus, "error", formatError(error));
+    if (error.code === "STORAGE_CONFLICT") hideEdit();
+    throw error;
   }
 }
 
@@ -838,11 +834,8 @@ async function deleteEdit() {
     hideEdit();
     await runSync({ force: false });
   } catch (error) {
-    if (error.code === "STORAGE_CONFLICT") {
-      hideEdit();
-      await render();
-    }
-    setStatus($syncStatus, "error", formatError(error));
+    if (error.code === "STORAGE_CONFLICT") hideEdit();
+    throw error;
   }
 }
 
@@ -860,11 +853,8 @@ async function mergeEdit() {
     hideEdit();
     await runSync({ force: false });
   } catch (error) {
-    if (error.code === "STORAGE_CONFLICT") {
-      hideEdit();
-      await render();
-    }
-    setStatus($syncStatus, "error", formatError(error));
+    if (error.code === "STORAGE_CONFLICT") hideEdit();
+    throw error;
   }
 }
 
@@ -998,6 +988,7 @@ async function init() {
   // Periodic syncing belongs to the background alarm; its notifyEntriesChanged
   // broadcast re-renders this popup, so no local poller is needed.
   await runSync({ force: false });
+  await render();
   if (!ticker) {
     ticker = setInterval(() => {
       void runPageTask({
