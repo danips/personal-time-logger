@@ -212,7 +212,8 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
   });
   await waitForCondition(baseUrl, sessionId, "Options save", `
     return Number(document.querySelector("#durationMultiplier")?.value) === 1.5
-      && document.querySelector("#statusLine")?.textContent.includes("Settings saved");
+      && document.querySelector("#statusLine")?.textContent.includes("Settings saved")
+      && !document.querySelector("#saveSettings")?.disabled;
   `);
 
   const multiplierUpdatedAt = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
@@ -236,7 +237,17 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
   });
   await waitForCondition(baseUrl, sessionId, "Options multiplier validation", `
     return document.querySelector("#durationMultiplier")?.value === "0.999"
-      && document.querySelector("#statusLine")?.textContent.includes("duration multiplier between 1 and 5.001");
+      && document.querySelector("#statusLine")?.textContent.includes("duration multiplier between 1 and 5.001")
+      && !document.querySelector("#saveSettings")?.disabled;
+  `, `
+    const multiplier = document.querySelector("#durationMultiplier");
+    const save = document.querySelector("#saveSettings");
+    return {
+      multiplier: multiplier?.value,
+      validationMessage: multiplier?.validationMessage,
+      saveDisabled: save?.disabled,
+      status: document.querySelector("#statusLine")?.textContent
+    };
   `);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
