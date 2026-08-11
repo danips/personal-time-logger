@@ -82,8 +82,23 @@ async function waitForCondition(baseUrl, sessionId, label, script, diagnosticScr
 }
 
 async function exercisePopupTimer(baseUrl, sessionId) {
+  const openedNewTimer = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.querySelector('.active-panel')?.click(); return !document.querySelector('#newTimerSection')?.classList.contains('hidden');",
+    args: []
+  });
+  if (!openedNewTimer) throw new Error("Inactive active-timer panel did not open the new-timer form.");
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.querySelector('.active-panel')?.click(); return true;",
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Inactive active-timer toggle", `
+    return document.querySelector("#newTimerSection")?.classList.contains("hidden")
+      && document.querySelector(".active-panel")?.getAttribute("aria-label") === "Start a new timer";
+  `);
+
   const started = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
+      document.querySelector(".active-panel")?.click();
       const toggle = document.querySelector("#newTimerToggle");
       const start = document.querySelector("#startButton");
       if (!toggle || !start) return false;
@@ -238,6 +253,69 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
   }
 }
 
+async function exercisePopupHistoryPagination(baseUrl, sessionId, origin) {
+  const seeded = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      import(browser.runtime.getURL("src/db.js")).then(async (db) => {
+        const currentWeek = new Date();
+        currentWeek.setHours(12, 0, 0, 0);
+        currentWeek.setDate(currentWeek.getDate() - ((currentWeek.getDay() + 6) % 7));
+        const entryForWeek = (id, weeksAgo, task) => {
+          const start = new Date(currentWeek);
+          start.setDate(start.getDate() - weeksAgo * 7 + 1);
+          start.setHours(10, 0, 0, 0);
+          const end = new Date(start);
+          end.setHours(end.getHours() + 1);
+          return {
+            id,
+            project: "Browser smoke history",
+            task,
+            description: "",
+            start_at: start.toISOString(),
+            end_at: end.toISOString(),
+            duration_seconds: 3600,
+            multiply: false,
+            dirty: false,
+            deleted_at: "",
+            status: "ok",
+            revision: 1
+          };
+        };
+        const history = [
+          entryForWeek("browser-smoke-last-week", 1, "Previous-week browser smoke"),
+          entryForWeek("browser-smoke-two-weeks", 2, "Older browser smoke")
+        ];
+        const existing = await db.getAllEntries();
+        await db.mutateEntries([...existing.map((entry) => entry.id), ...history.map((entry) => entry.id)], (entries) => {
+          for (const entry of existing) entries.delete(entry.id);
+          for (const entry of history) entries.set(entry.id, entry);
+        });
+        done(true);
+      }).catch(() => done(false));
+    `,
+    args: []
+  });
+  if (!seeded) throw new Error("Could not seed popup history pagination data.");
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
+  await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
+  await waitForCondition(baseUrl, sessionId, "Popup previous-week fallback", `
+    return document.querySelector("#loadMoreRecent")?.textContent === "Load previous week"
+      && document.querySelector("#recentEntries")?.textContent.includes("Previous-week browser smoke")
+      && [...document.querySelectorAll(".week-group-header strong")].some((label) => label.textContent === "Last week");
+  `);
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.querySelector('#loadMoreRecent')?.click(); return true;",
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Popup previous-week pagination", `
+    return document.querySelector("#recentEntries")?.textContent.includes("Older browser smoke")
+      && document.querySelectorAll(".week-group").length === 2;
+  `);
+}
+
 async function extensionOriginFromFirefox(baseUrl, sessionId) {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/moz/context`, { context: "chrome" });
   try {
@@ -322,6 +400,7 @@ try {
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await exercisePopupTimer(baseUrl, sessionId);
   await exerciseCalendarAndOptions(baseUrl, sessionId, origin);
+  await exercisePopupHistoryPagination(baseUrl, sessionId, origin);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);

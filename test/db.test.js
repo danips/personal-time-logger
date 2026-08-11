@@ -200,6 +200,10 @@ describe("IndexedDB repository", () => {
       ["index-active", "index-completed"]
     );
     assert.deepEqual(
+      (await db.getVisibleEntries({ before: "2026-08-10T11:00:00.000Z", limit: 2 })).map((entry) => entry.id),
+      ["index-completed"]
+    );
+    assert.deepEqual(
       (await db.getEntriesIntersecting("2026-08-10T09:30:00.000Z", "2026-08-10T12:00:00.000Z"))
         .map((entry) => entry.id),
       ["index-completed", "index-active"]

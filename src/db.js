@@ -502,12 +502,14 @@ export async function getDirtyEntryCount() {
 }
 
 /**
- * Reads the newest visible entries first. Supplying a limit keeps history pages
- * bounded; callers that need a specific time interval should use the interval
- * query below instead of scanning prior history.
+ * Reads the newest visible entries first. Supplying a limit or exclusive
+ * `before` timestamp keeps history probes bounded; callers that need a
+ * specific time interval should use the interval query below instead of
+ * scanning prior history.
  */
-export async function getVisibleEntries({ limit = Infinity } = {}) {
+export async function getVisibleEntries({ before = "", limit = Infinity } = {}) {
   return entriesFromIndex(ENTRY_INDEX.START_AT, {
+    range: before ? keyRange("upperBound", before, true) : null,
     direction: "prev",
     limit,
     filter: (entry) => !entry.deleted_at

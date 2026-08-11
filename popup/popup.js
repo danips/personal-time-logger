@@ -1,4 +1,4 @@
-import { getActiveEntries, getDirtyEntryCount, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
+import { getActiveEntries, getDirtyEntryCount, getEntriesIntersecting, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
 import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-account-cache.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
@@ -45,8 +45,7 @@ let ticker = null;
 let unsubscribeEntryEvents = null;
 let eventsBound = false;
 const expandedRecentGroups = new Set();
-const RECENT_PAGE_SIZE = 200;
-let recentEntryLimit = RECENT_PAGE_SIZE;
+let recentWeekCount = 1;
 let recentEntries = [];
 const WINDOW_SIZE_SETTING = SETTING_KEY.WINDOW_RESIZE_PRESETS;
 const DEFAULT_WINDOW_SIZES = [
@@ -206,12 +205,13 @@ function recentGroupKey(entry) {
   ].map((part) => encodeURIComponent(part)).join("|");
 }
 
-function groupRecentEntries(entries) {
+function groupRecentEntries(entries, { start, end }) {
   const weeks = [];
   const weekMap = new Map();
 
   for (const entry of entries) {
     for (const allocation of allocateEntryByLocalDay(entry)) {
+      if (allocation.end <= start || allocation.start >= end) continue;
       const displayEntry = {
         ...entry,
         start_at: allocation.start.toISOString(),
@@ -423,6 +423,7 @@ function setNewTimerOpen(open) {
   $newTimerToggle.setAttribute("aria-expanded", open ? "true" : "false");
   $newTimerPanel.classList.toggle("hidden", !open);
   $newTimerIcon.textContent = open ? "-" : "+";
+  if (!activeEntries[0]) $activePanel.setAttribute("aria-label", open ? "Hide new timer" : "Start a new timer");
 }
 
 function toggleNewTimer() {
@@ -444,13 +445,41 @@ async function renderActive(isCurrent) {
   return true;
 }
 
+function recentWeekRange(weekCount) {
+  const currentWeek = startOfLocalWeek(new Date());
+  return {
+    start: addDays(currentWeek, -7 * (weekCount - 1)),
+    end: addDays(currentWeek, 7)
+  };
+}
+
+function weeksBeforeCurrentWeek(iso) {
+  const entryWeek = startOfLocalWeek(new Date(iso));
+  const currentWeek = startOfLocalWeek(new Date());
+  const weeks = (currentWeek.getTime() - entryWeek.getTime()) / (7 * 24 * 60 * 60 * 1000);
+  return Number.isFinite(weeks) ? Math.max(0, Math.round(weeks)) : 0;
+}
+
 async function renderRecent(isCurrent) {
-  // The popup never needs the full time-log history. Ask for one extra row so
-  // the button can tell whether another bounded page is available.
-  const page = await getVisibleEntries({ limit: recentEntryLimit + 1 });
+  let range = recentWeekRange(recentWeekCount);
+  let entries = await getEntriesIntersecting(range.start, range.end);
   if (!isCurrent()) return false;
-  const hasMore = page.length > recentEntryLimit;
-  const entries = page.slice(0, recentEntryLimit);
+
+  // When this week is empty, start at the most recent populated week rather
+  // than making the user click through empty calendar weeks.
+  if (!entries.length && recentWeekCount === 1) {
+    const [newest] = await getVisibleEntries({ limit: 1 });
+    if (!isCurrent()) return false;
+    if (newest) {
+      recentWeekCount = Math.max(recentWeekCount, weeksBeforeCurrentWeek(newest.start_at) + 1);
+      range = recentWeekRange(recentWeekCount);
+      entries = await getEntriesIntersecting(range.start, range.end);
+      if (!isCurrent()) return false;
+    }
+  }
+  const [older] = await getVisibleEntries({ before: range.start.toISOString(), limit: 1 });
+  if (!isCurrent()) return false;
+  const hasMore = Boolean(older);
   recentEntries = entries;
 
   if (!entries.length) {
@@ -459,11 +488,11 @@ async function renderRecent(isCurrent) {
     empty.textContent = "No entries yet.";
     $recentEntries.replaceChildren(empty);
     $loadMoreRecent.classList.toggle("hidden", !hasMore);
-    $loadMoreRecent.textContent = hasMore ? `Load ${RECENT_PAGE_SIZE} more` : "";
+    $loadMoreRecent.textContent = hasMore ? "Load previous week" : "";
     return true;
   }
 
-  const weekElements = groupRecentEntries(entries).map((week) => {
+  const weekElements = groupRecentEntries(entries, range).map((week) => {
     const section = document.createElement("section");
     section.className = "week-group";
     const header = document.createElement("header");
@@ -499,7 +528,7 @@ async function renderRecent(isCurrent) {
   $recentEntries.replaceChildren(...weekElements);
 
   $loadMoreRecent.classList.toggle("hidden", !hasMore);
-  $loadMoreRecent.textContent = hasMore ? `Load ${RECENT_PAGE_SIZE} more` : "";
+  $loadMoreRecent.textContent = hasMore ? "Load previous week" : "";
   return true;
 }
 
@@ -760,8 +789,9 @@ function editActiveTimer(event) {
   if (event && event.target.closest("#stopButton")) return;
   const latest = activeEntries[0];
   if (!latest) {
-    setNewTimerOpen(true);
-    $("#project").focus();
+    const open = $newTimerSection.classList.contains("hidden");
+    setNewTimerOpen(open);
+    if (open) $("#project").focus();
     return;
   }
   showEdit(latest.id).catch((error) => setStatus($syncStatus, "error", formatError(error)));
@@ -875,7 +905,7 @@ function bindEvents() {
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
   $loadMoreRecent.addEventListener("click", () => {
-    recentEntryLimit += RECENT_PAGE_SIZE;
+    recentWeekCount += 1;
     render().catch((error) => {
       setStatus($syncStatus, "error", formatError(error));
     });
