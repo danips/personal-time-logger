@@ -288,7 +288,7 @@ let driverOutput = "";
 
 try {
   await packageExtension(xpiPath);
-  driver = spawn(driverBin, ["--port", String(port)], { stdio: ["ignore", "ignore", "pipe"] });
+  driver = spawn(driverBin, ["--port", String(port), "--allow-system-access"], { stdio: ["ignore", "ignore", "pipe"] });
   driver.stderr.on("data", (chunk) => { driverOutput += String(chunk); });
   await waitFor(`${baseUrl}/status`, "geckodriver");
 
@@ -296,7 +296,7 @@ try {
     alwaysMatch: {
       browserName: "firefox",
       "moz:firefoxOptions": {
-        args: ["-headless", "-remote-allow-system-access"],
+        args: ["-headless"],
         ...(firefoxBinary ? { binary: firefoxBinary } : {})
       }
     }
