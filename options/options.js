@@ -1,6 +1,6 @@
 import { getAllEntries, getSetting, mutateSettings } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
-import { getDeviceId, normalizeMultiplierText } from "../src/entries.js";
+import { getDeviceId } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
 import { clearDiagnostics, diagnosticsText, getDiagnostics } from "../src/diagnostics.js";
@@ -16,6 +16,7 @@ import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
+import { normalizeOptionsSettings, planOptionsSettingsSave } from "../src/options-settings.js";
 
 let diagnostics = [];
 let eventsBound = false;
@@ -102,7 +103,12 @@ function setStatus(message) {
 }
 
 function runOptionsAction(key, action, button) {
-  return runAction(key, action, {
+  let refreshAfterAction = true;
+  return runAction(key, async (options) => {
+    const result = await action(options);
+    refreshAfterAction = result !== false;
+    return result;
+  }, {
     setBusy(next) {
       if (button) button.disabled = next;
     },
@@ -110,6 +116,7 @@ function runOptionsAction(key, action, button) {
       setStatus(formatError(error));
     },
     onFinally() {
+      if (!refreshAfterAction) return undefined;
       return refresh().catch((error) => setStatus(formatError(error)));
     }
   });
@@ -138,38 +145,73 @@ function setDeviceAuthPanel(details = null) {
 }
 
 async function saveSettings() {
-  const interval = Math.max(30, Number($("#syncInterval").value) || 60);
-  const multiplier = normalizeMultiplierText($("#durationMultiplier").value) || "1";
-  const multiplierUpdatedAt = nowIso();
-  await mutateSettings([
+  const multiplierInput = $("#durationMultiplier");
+  const next = normalizeOptionsSettings({
+    interval: $("#syncInterval").value,
+    multiplier: multiplierInput.value
+  });
+  if (!next.valid) {
+    multiplierInput.setCustomValidity(next.message);
+    multiplierInput.reportValidity();
+    multiplierInput.focus();
+    setStatus(next.message);
+    return false;
+  }
+  multiplierInput.setCustomValidity("");
+
+  const saved = await mutateSettings([
     SETTING_KEY.SYNC_INTERVAL_SECONDS,
     SETTING_KEY.DURATION_MULTIPLIER,
     SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
     NEXT_DUE_KEY
   ], (settings) => {
-    settings.set(SETTING_KEY.SYNC_INTERVAL_SECONDS, interval);
-    settings.set(SETTING_KEY.DURATION_MULTIPLIER, multiplier);
-    settings.set(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, multiplierUpdatedAt);
-    // Discard the old long-interval due time before replacing the alarm.
-    settings.set(NEXT_DUE_KEY, 0);
-  });
-  $("#syncInterval").value = String(interval);
-  $("#durationMultiplier").value = String(multiplier);
-  try {
-    if (!scheduleSyncHeartbeat(interval)) throw new Error("Browser alarms are unavailable");
-    setStatus("Settings saved and sync schedule reset");
-  } catch (error) {
-    setStatus(`Settings saved, but could not reset the schedule: ${formatError(error)}`);
-  }
-  void runPageTask({
-    page: "options",
-    phase: "settings-sync",
-    task: () => syncNow({ force: true }),
-    onError(error) {
-      setStatus(`Settings saved, but sync could not start: ${formatError(error)}`);
+    const plan = planOptionsSettingsSave({
+      currentInterval: settings.get(SETTING_KEY.SYNC_INTERVAL_SECONDS),
+      currentMultiplier: settings.get(SETTING_KEY.DURATION_MULTIPLIER),
+      currentMultiplierUpdatedAt: settings.get(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT),
+      interval: next.interval,
+      multiplier: next.multiplier
+    });
+    if (plan.intervalChanged) {
+      settings.set(SETTING_KEY.SYNC_INTERVAL_SECONDS, next.interval);
+      // Discard the old long-interval due time before replacing the alarm.
+      settings.set(NEXT_DUE_KEY, 0);
     }
+    if (plan.multiplierSyncNeeded) {
+      settings.set(SETTING_KEY.DURATION_MULTIPLIER, next.multiplier);
+      settings.set(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, nowIso());
+    }
+    return plan;
   });
-  await refresh();
+  $("#syncInterval").value = String(next.interval);
+  multiplierInput.value = String(next.multiplier);
+
+  if (!saved.intervalChanged && !saved.multiplierSyncNeeded) {
+    setStatus("Settings unchanged");
+    return;
+  }
+
+  if (saved.intervalChanged) {
+    try {
+      if (!scheduleSyncHeartbeat(next.interval)) throw new Error("Browser alarms are unavailable");
+      setStatus("Settings saved and sync schedule reset");
+    } catch (error) {
+      setStatus(`Settings saved, but could not reset the schedule: ${formatError(error)}`);
+    }
+  } else {
+    setStatus("Settings saved");
+  }
+
+  if (saved.multiplierSyncNeeded) {
+    void runPageTask({
+      page: "options",
+      phase: "settings-sync",
+      task: () => syncNow({ force: true }),
+      onError(error) {
+        setStatus(`Settings saved, but sync could not start: ${formatError(error)}`);
+      }
+    });
+  }
 }
 
 async function saveGoogleCredentials() {

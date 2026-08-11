@@ -186,6 +186,56 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
     return Number(document.querySelector("#durationMultiplier")?.value) === 1.5
       && document.querySelector("#statusLine")?.textContent.includes("Settings saved");
   `);
+
+  const multiplierUpdatedAt = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      import(browser.runtime.getURL("src/db.js")).then(async (db) => {
+        done(await db.getSetting("duration_multiplier_updated_at", ""));
+      }).catch(() => done(""));
+    `,
+    args: []
+  });
+  if (!multiplierUpdatedAt) throw new Error("Options save did not publish a multiplier timestamp.");
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      document.querySelector("#durationMultiplier").value = "0.999";
+      document.querySelector("#saveSettings").click();
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Options multiplier validation", `
+    return document.querySelector("#durationMultiplier")?.value === "0.999"
+      && document.querySelector("#statusLine")?.textContent.includes("duration multiplier between 1 and 5.001");
+  `);
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      document.querySelector("#syncInterval").value = "60";
+      document.querySelector("#durationMultiplier").value = "1.5";
+      document.querySelector("#saveSettings").click();
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Options interval-only save", `
+    return Number(document.querySelector("#syncInterval")?.value) === 60
+      && document.querySelector("#statusLine")?.textContent.includes("sync schedule reset");
+  `);
+  const unchangedTimestamp = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      import(browser.runtime.getURL("src/db.js")).then(async (db) => {
+        done(await db.getSetting("duration_multiplier_updated_at", ""));
+      }).catch(() => done(""));
+    `,
+    args: []
+  });
+  if (unchangedTimestamp !== multiplierUpdatedAt) {
+    throw new Error("An interval-only Options save changed the multiplier timestamp.");
+  }
 }
 
 async function extensionOriginFromFirefox(baseUrl, sessionId) {
