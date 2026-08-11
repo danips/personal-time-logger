@@ -205,6 +205,11 @@ function recentGroupKey(entry) {
   ].map((part) => encodeURIComponent(part)).join("|");
 }
 
+function compareRecentEntries(left, right) {
+  const byStart = String(right.start_at || "").localeCompare(String(left.start_at || ""));
+  return byStart || String(right.id || "").localeCompare(String(left.id || ""));
+}
+
 function groupRecentEntries(entries, { start, end }) {
   const weeks = [];
   const weekMap = new Map();
@@ -260,10 +265,15 @@ function groupRecentEntries(entries, { start, end }) {
 
   for (const week of weeks) {
     delete week.dayMap;
+    week.days.sort((left, right) => right.key.localeCompare(left.key));
     for (const day of week.days) {
       delete day.groupMap;
+      day.groups.sort((left, right) => compareRecentEntries(left.entries[0], right.entries[0]));
+      for (const group of day.groups) group.entries.sort(compareRecentEntries);
     }
   }
+
+  weeks.sort((left, right) => right.start.getTime() - left.start.getTime());
 
   return weeks;
 }
