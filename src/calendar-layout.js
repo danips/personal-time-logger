@@ -23,10 +23,6 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function maxDate(a, b) {
-  return a.getTime() > b.getTime() ? a : b;
-}
-
 export function isSameLocalDate(a, b) {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
@@ -68,12 +64,6 @@ export function snapDateToGrid(date, direction) {
     ? Math.ceil(minutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES
     : Math.floor(minutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES;
   return addMinutes(day, snapped);
-}
-
-/** Whether an entry is visible in a week. A running entry is measured to now. */
-export function intersectsWeek(entry, start, end) {
-  const interval = entryInterval(entry);
-  return Boolean(interval && interval.start < end && interval.end > start);
 }
 
 /** Duration a drag preserves, never shorter than one grid slot. */

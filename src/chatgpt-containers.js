@@ -9,7 +9,6 @@ export const CHATGPT_ACCOUNT_GENERATION_KEY = SETTING_KEY.CHATGPT_USAGE_ACCOUNT_
 export const CHATGPT_PROFILE_SALT_KEY = SETTING_KEY.CHATGPT_USAGE_PROFILE_SALT;
 export const CHATGPT_CACHE_VERSION_KEY = SETTING_KEY.CHATGPT_USAGE_CACHE_VERSION;
 export const CHATGPT_SESSION_TOKEN_CONSENT_KEY = SETTING_KEY.CHATGPT_USAGE_SESSION_TOKEN_CONSENT;
-export const CHATGPT_CACHE_VERSION = 1;
 export const CHATGPT_USAGE_PAGE_URL = OFFICIAL_USAGE_URL;
 export const CHATGPT_HOST_PERMISSION = "https://chatgpt.com/*";
 export const CHATGPT_MESSAGE_TYPE = "GET_CHATGPT_USAGE";
@@ -229,7 +228,6 @@ export async function createAccountContainer(label, overrides = {}) {
     label: normalizedLabel,
     cookie_store_id: identity.cookieStoreId,
     pending_setup: true,
-    provisioning_state: "awaiting_sign_in",
     fingerprint: "",
     email: "",
     plan_type: "",

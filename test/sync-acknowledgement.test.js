@@ -45,7 +45,7 @@ describe("sync acknowledgements", () => {
   it("does not resurrect an entry deleted while its remote write was pending", async () => {
     const pushed = entry({ id: "ack-deleted" });
     await db.putEntry(pushed);
-    await db.deleteEntry(pushed.id);
+    await db.mutateEntry(pushed.id, () => undefined);
 
     const acknowledgement = await markSynced(pushed);
 

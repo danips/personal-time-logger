@@ -190,8 +190,9 @@ describe("IndexedDB repository", () => {
     assert.equal(await db.getDirtyEntryCount(), 2);
     await db.mutateEntry("index-completed", (entry) => ({ ...entry, dirty: false }));
     assert.equal(await db.getDirtyEntryCount(), 1);
-    assert.deepEqual((await db.getDeletedEntries()).map((entry) => entry.id), ["index-deleted"]);
-    assert.deepEqual((await db.getEntriesByStatus("needs_review")).map((entry) => entry.id), ["index-active"]);
+    const allEntries = await db.getAllEntries();
+    assert.deepEqual(allEntries.filter((entry) => entry.deleted_at).map((entry) => entry.id), ["index-deleted"]);
+    assert.deepEqual(allEntries.filter((entry) => entry.status === "needs_review").map((entry) => entry.id), ["index-active"]);
     assert.deepEqual((await db.getActiveEntries()).map((entry) => entry.id), ["index-active"]);
     assert.deepEqual(
       (await db.getVisibleEntries({ limit: 2 })).map((entry) => entry.id),

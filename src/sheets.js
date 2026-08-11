@@ -218,12 +218,6 @@ export async function setSpreadsheetId(spreadsheetId) {
   return setSetting(SETTING_KEY.SPREADSHEET_ID, String(spreadsheetId || "").trim());
 }
 
-/** Clears only the selected remote binding; local time entries remain intact. */
-export async function resetSpreadsheetBinding() {
-  resetSheetCache();
-  return setProvisioningState("", "");
-}
-
 /**
  * Selects an existing compatible spreadsheet after proving that its entries
  * tab uses the expected schema. The following sync repairs or initializes the

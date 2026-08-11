@@ -1,4 +1,4 @@
-import { getSetting, mutateEntries, mutateEntry, mutateEntryState, mutateSetting, putEntry } from "./db.js";
+import { getSetting, mutateEntries, mutateEntry, mutateEntryState, mutateSetting } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
@@ -232,29 +232,6 @@ export function normalizeEntry(entry) {
   }
 
   return normalized;
-}
-
-export async function createEntry(fields) {
-  const timestamp = nowIso();
-  const createFields = decodeEntryCreate(fields);
-  const multiply = await selectedMultiplyValue(createFields.multiply);
-  const entry = normalizeEntry({
-    ...createFields,
-    id: uuid(),
-    start_at: timestamp,
-    end_at: "",
-    duration_seconds: 0,
-    multiply,
-    status: "ok",
-    created_at: timestamp,
-    updated_at: timestamp,
-    device_id: await getDeviceId(),
-    revision: 1,
-    dirty: true
-  });
-  await putEntry(entry);
-  notifyEntriesChanged({ action: "create", ids: [entry.id] });
-  return entry;
 }
 
 /**

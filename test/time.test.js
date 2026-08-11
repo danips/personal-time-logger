@@ -5,7 +5,6 @@ import {
   addDays,
   durationSeconds,
   formatElapsed,
-  formatHours,
   fromLocalInputValue,
   localDateKey,
   startOfLocalDay,
@@ -92,14 +91,6 @@ describe("formatElapsed", () => {
   it("floors fractional elapsed seconds", () => {
     assert.equal(formatElapsed(59.999), "00:00:59");
     assert.equal(formatElapsed(3600.75), "01:00:00");
-  });
-});
-
-describe("formatHours", () => {
-  it("reports hours to two decimals", () => {
-    assert.equal(formatHours(3600), "1.00");
-    assert.equal(formatHours(5400), "1.50");
-    assert.equal(formatHours(0), "0.00");
   });
 });
 

@@ -319,10 +319,6 @@ export async function isLockCurrent(key, holder, generation, ttlMs) {
   });
 }
 
-export async function deleteEntry(id) {
-  await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.delete(id)));
-}
-
 export async function removeSetting(key) {
   await store(SETTINGS_STORE, "readwrite", (s) => requestToPromise(s.delete(key)));
 }
@@ -331,11 +327,13 @@ export async function getEntry(id) {
   return store(ENTRY_STORE, "readonly", async (s) => entryFromStorage(await requestToPromise(s.get(id))));
 }
 
+/** Test fixture seam for seeding normalized entries through IndexedDB. */
 export async function putEntry(entry) {
   await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.put(entryForStorage(entry))));
   return entry;
 }
 
+/** Test fixture seam for seeding normalized entries through IndexedDB. */
 export async function putEntries(entries) {
   if (!entries.length) return;
   await store(ENTRY_STORE, "readwrite", async (s) => {
@@ -391,24 +389,6 @@ export async function mutateEntry(id, expectedRevision, mutator) {
     if (next === undefined) entries.delete(id);
     else entries.set(id, next);
     return next;
-  });
-}
-
-/** Mutates every entry in one transaction, for operations defined by a query. */
-export async function mutateAllEntries(mutator) {
-  if (typeof mutator !== "function") throw new TypeError("An entry mutator is required");
-  return stores(ENTRY_STORE, "readwrite", async (objectStores) => {
-    const objectStore = objectStores.get(ENTRY_STORE);
-    const existing = await requestToPromise(objectStore.getAll());
-    const original = new Map(existing.map((entry) => [entry.id, clone(entry)]));
-    const entries = new Map(existing.map((entry) => [entry.id, entryFromStorage(entry)]));
-    const result = mutator(entries);
-    if (result && typeof result.then === "function") {
-      throw new TypeError("Entry mutators must not return a Promise");
-    }
-
-    await writeChangedEntries(objectStore, original, entries);
-    return result;
   });
 }
 
@@ -546,16 +526,6 @@ export async function getVisibleEntries({ limit = Infinity } = {}) {
     limit,
     filter: (entry) => !entry.deleted_at
   });
-}
-
-export async function getDeletedEntries() {
-  return entriesFromIndex(ENTRY_INDEX.DELETED_AT, {
-    range: keyRange("lowerBound", "", true)
-  });
-}
-
-export async function getEntriesByStatus(status) {
-  return entriesFromIndex(ENTRY_INDEX.STATUS, { range: keyRange("only", String(status || "")) });
 }
 
 export async function getActiveEntries() {

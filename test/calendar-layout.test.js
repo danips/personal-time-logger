@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { normalizeEntry } from "../src/entries.js";
-import { addDays, startOfLocalWeek } from "../src/time.js";
+import { startOfLocalWeek } from "../src/time.js";
 import {
   DAY_COUNT,
   buildSegments,
@@ -10,7 +10,6 @@ import {
   dailyTotalsFromSegments,
   dayIndexInWeek,
   durationMsForDrag,
-  intersectsWeek,
   isoWeekValue,
   layoutSegments,
   minutesSinceStartOfDay,
@@ -157,25 +156,6 @@ describe("dailyTotalsFromSegments", () => {
     assert.equal(totals[0], 7200);
     assert.equal(totals[3], 1800);
     assert.equal(totals[1], 0);
-  });
-});
-
-describe("intersectsWeek", () => {
-  const weekEnd = addDays(weekStart, DAY_COUNT);
-
-  it("accepts an entry inside the week", () => {
-    assert.equal(intersectsWeek(entry(at(2, 9), at(2, 10)), weekStart, weekEnd), true);
-  });
-
-  it("accepts an entry overlapping either boundary", () => {
-    assert.equal(intersectsWeek(entry(at(-1, 22), at(0, 2)), weekStart, weekEnd), true);
-    assert.equal(intersectsWeek(entry(at(6, 22), at(7, 2)), weekStart, weekEnd), true);
-  });
-
-  it("rejects entries entirely outside and unparseable starts", () => {
-    assert.equal(intersectsWeek(entry(at(-5, 9), at(-5, 10)), weekStart, weekEnd), false);
-    assert.equal(intersectsWeek(entry(at(20, 9), at(20, 10)), weekStart, weekEnd), false);
-    assert.equal(intersectsWeek({ start_at: "nonsense" }, weekStart, weekEnd), false);
   });
 });
 

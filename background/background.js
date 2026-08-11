@@ -17,8 +17,6 @@ import {
   tempoXhrRequest
 } from "../src/tempo.js";
 
-const SCHEDULE_ERROR_KEY = SETTING_KEY.BACKGROUND_SCHEDULE_ERROR;
-
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
  * settings. Adapting the alarm period itself would mean one-shot alarms, where a
@@ -58,7 +56,6 @@ async function scheduleHeartbeat() {
       return scheduleSyncHeartbeat(MIN_SYNC_INTERVAL_SECONDS);
     },
     async saveDiagnostic(diagnostic) {
-      await setSetting(SCHEDULE_ERROR_KEY, diagnostic);
       if (diagnostic) {
         await recordDiagnostic({
           subsystem: "background",

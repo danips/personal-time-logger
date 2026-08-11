@@ -78,10 +78,6 @@ export function formatElapsed(seconds) {
   return [hours, minutes, secs].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
-export function formatHours(seconds) {
-  return ((Number(seconds) || 0) / 3600).toFixed(2);
-}
-
 export function toLocalInputValue(iso) {
   if (!iso) return "";
   const date = new Date(iso);

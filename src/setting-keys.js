@@ -6,7 +6,6 @@
 export const SETTING_KEY = Object.freeze({
   ACTIVE_TIMER_OPERATION: "active_timer_operation",
   AUTH_GENERATION: "auth_generation",
-  BACKGROUND_SCHEDULE_ERROR: "background_schedule_error",
   BACKGROUND_SYNC_DUE_AT: "background_sync_due_at",
   CHATGPT_USAGE_ACCOUNT_GENERATION: "chatgpt_usage_account_generation",
   CHATGPT_USAGE_ACCOUNTS: "chatgpt_usage_accounts",
