@@ -27,10 +27,6 @@ export function maxDate(a, b) {
   return a.getTime() > b.getTime() ? a : b;
 }
 
-export function minDate(a, b) {
-  return a.getTime() < b.getTime() ? a : b;
-}
-
 export function isSameLocalDate(a, b) {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
@@ -116,11 +112,6 @@ export function buildSegments(entries, weekStart) {
         dayIndex: index,
         visibleStart,
         visibleEnd,
-        actualEnd: interval.end,
-        displayEnd: interval.end,
-        effectiveSeconds: allocation.entryEffectiveSeconds,
-        actualSeconds: allocation.entryActualSeconds,
-        displaySeconds: allocation.entryActualSeconds,
         totalSeconds: allocation.effectiveSeconds,
         startMinute: minutesSinceStartOfDay(visibleStart),
         // minutesSinceStartOfDay rolls midnight back to zero. Keep a segment

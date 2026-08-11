@@ -85,11 +85,14 @@ describe("buildSegments", () => {
     const multiplied = entry(at(1, 9), at(1, 10), { duration_seconds: 5400, multiply: "1.5" });
     const [segment] = buildSegments([multiplied], weekStart)[1];
 
-    assert.equal(segment.actualSeconds, 3600);
-    assert.equal(segment.effectiveSeconds, 5400);
     assert.equal(segment.totalSeconds, 5400);
     // A multiplier changes totals, not the chronology on the calendar.
     assert.equal(segment.endMinute - segment.startMinute, 60);
+    assert.equal("actualEnd" in segment, false);
+    assert.equal("actualSeconds" in segment, false);
+    assert.equal("displayEnd" in segment, false);
+    assert.equal("displaySeconds" in segment, false);
+    assert.equal("effectiveSeconds" in segment, false);
   });
 
   it("allocates multiplied time proportionally across midnight", () => {

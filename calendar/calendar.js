@@ -1,6 +1,6 @@
 import { getEntriesIntersecting, getSetting, mutateSetting } from "../src/db.js";
 import { isActionRunning, runAction } from "../src/action-runner.js";
-import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
+import { canMergeEntries, duplicateEntry, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import {
   normalizeTempoIssueId,
@@ -42,7 +42,6 @@ import {
   isSameLocalDate,
   isoWeekValue,
   layoutSegments,
-  minDate,
   minutesSinceStartOfDay,
   snapDateToGrid,
   weekStartFromInput
@@ -160,20 +159,12 @@ function renderEntryBlock(column, segment) {
   const laneWidth = 100 / laneCount;
   const top = segment.startMinute * PX_PER_MINUTE + 2;
   const height = Math.max(22, (segment.endMinute - segment.startMinute) * PX_PER_MINUTE - 4);
-  const actualSegmentSeconds = actualDurationSeconds(segment.visibleStart, minDate(segment.visibleEnd, segment.actualEnd));
-  const effectiveSegmentSeconds = actualDurationSeconds(segment.visibleStart, segment.visibleEnd);
-  const multipliedSeconds = Math.max(0, effectiveSegmentSeconds - actualSegmentSeconds);
-  const actualPercent = effectiveSegmentSeconds
-    ? clamp((actualSegmentSeconds / effectiveSegmentSeconds) * 100, 0, 100)
-    : 100;
-  const isMultiplied = hasMultiplier(entry) && multipliedSeconds > 0;
 
   const block = document.createElement("article");
   block.className = [
     "entry-block",
     entry.end_at ? "" : "active-entry",
     entry.status === "needs_review" ? "needs-review" : "",
-    isMultiplied ? "multiplied-entry" : "",
     entry.id === selectedEntryId ? "selected-entry" : ""
   ].filter(Boolean).join(" ");
   block.dataset.entryId = entry.id;
@@ -193,9 +184,6 @@ function renderEntryBlock(column, segment) {
     detailsLabel,
     durationLabel
   ].filter(Boolean).join("\n");
-  if (isMultiplied) {
-    block.style.setProperty("--actual-percent", `${actualPercent}%`);
-  }
   const fill = document.createElement("div");
   fill.className = "entry-fill";
   fill.setAttribute("aria-hidden", "true");

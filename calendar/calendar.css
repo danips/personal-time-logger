@@ -14,13 +14,10 @@
   --accent: #0b57d0;
   --event: #d9ecff;
   --event-border: #7aa7d9;
-  --event-extra: rgba(11, 87, 208, 0.18);
   --active: #dff4e7;
   --active-border: #5fa979;
-  --active-extra: rgba(24, 128, 56, 0.18);
   --review: #fff2cc;
   --review-border: #c89522;
-  --review-extra: rgba(200, 149, 34, 0.2);
 }
 
 * {
@@ -384,7 +381,6 @@ textarea {
 }
 
 .entry-block {
-  --actual-percent: 100%;
   padding: 0;
   cursor: grab;
   user-select: none;
@@ -451,34 +447,6 @@ textarea {
   background: var(--event);
 }
 
-.entry-block.multiplied-entry .entry-fill {
-  background:
-    linear-gradient(
-      to bottom,
-      var(--event) 0,
-      var(--event) var(--actual-percent),
-      var(--event-extra) var(--actual-percent),
-      var(--event-extra) 100%
-    );
-}
-
-.entry-block.multiplied-entry .entry-fill::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: var(--actual-percent);
-  bottom: 0;
-  background:
-    repeating-linear-gradient(
-      -45deg,
-      transparent 0,
-      transparent 5px,
-      rgba(255, 255, 255, 0.32) 5px,
-      rgba(255, 255, 255, 0.32) 7px
-    );
-}
-
 .entry-block:active {
   cursor: grabbing;
 }
@@ -498,17 +466,6 @@ textarea {
   background: var(--active);
 }
 
-.entry-block.active-entry.multiplied-entry .entry-fill {
-  background:
-    linear-gradient(
-      to bottom,
-      var(--active) 0,
-      var(--active) var(--actual-percent),
-      var(--active-extra) var(--actual-percent),
-      var(--active-extra) 100%
-    );
-}
-
 .entry-block.needs-review {
   border-color: var(--review-border);
   background: var(--review);
@@ -517,17 +474,6 @@ textarea {
 
 .entry-block.needs-review .entry-fill {
   background: var(--review);
-}
-
-.entry-block.needs-review.multiplied-entry .entry-fill {
-  background:
-    linear-gradient(
-      to bottom,
-      var(--review) 0,
-      var(--review) var(--actual-percent),
-      var(--review-extra) var(--actual-percent),
-      var(--review-extra) 100%
-    );
 }
 
 .entry-block.drag-source {
@@ -623,13 +569,10 @@ textarea {
     --accent: #8ab4f8;
     --event: #1f3a55;
     --event-border: #5f8bbb;
-    --event-extra: rgba(138, 180, 248, 0.24);
     --active: #21482e;
     --active-border: #75b987;
-    --active-extra: rgba(129, 201, 149, 0.24);
     --review: #4b3b15;
     --review-border: #d4a72c;
-    --review-extra: rgba(253, 214, 99, 0.22);
   }
 
   button,
@@ -653,14 +596,4 @@ textarea {
     background: rgba(0, 0, 0, 0.22);
   }
 
-  .entry-block.multiplied-entry .entry-fill::after {
-    background:
-      repeating-linear-gradient(
-        -45deg,
-        transparent 0,
-        transparent 5px,
-        rgba(255, 255, 255, 0.18) 5px,
-        rgba(255, 255, 255, 0.18) 7px
-      );
-  }
 }
