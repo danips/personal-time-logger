@@ -1,18 +1,19 @@
 import { ERROR_CODE } from "./error-codes.js";
 
 const DB_NAME = "timelogger_db";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const ENTRY_STORE = "time_entries";
 const SETTINGS_STORE = "settings";
 const LOCK_GENERATION_SUFFIX = ":generation";
 const ENTRY_INDEX = {
   ACTIVE: "active_by_start",
-  DIRTY: "dirty",
+  DIRTY: "dirty_key",
   DELETED_AT: "deleted_at",
   END_AT: "end_at",
   START_AT: "start_at",
   STATUS: "status"
 };
+const LEGACY_DIRTY_INDEX = "dirty";
 
 let dbPromise = null;
 
@@ -46,12 +47,13 @@ function openDb() {
   const pending = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       const entries = db.objectStoreNames.contains(ENTRY_STORE)
         ? request.transaction.objectStore(ENTRY_STORE)
         : db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
       ensureEntryIndexes(entries);
+      if (event.oldVersion < 4) migrateDirtyEntryKeys(entries);
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
       }
@@ -80,8 +82,9 @@ function openDb() {
 }
 
 function ensureEntryIndexes(entries) {
+  if (entries.indexNames.contains(LEGACY_DIRTY_INDEX)) entries.deleteIndex(LEGACY_DIRTY_INDEX);
   const indexes = [
-    [ENTRY_INDEX.DIRTY, "dirty"],
+    [ENTRY_INDEX.DIRTY, "dirty_key"],
     [ENTRY_INDEX.DELETED_AT, "deleted_at"],
     [ENTRY_INDEX.START_AT, "start_at"],
     [ENTRY_INDEX.END_AT, "end_at"],
@@ -111,6 +114,19 @@ async function store(name, mode, fn) {
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
+}
+
+function entryForStorage(entry) {
+  const stored = { ...entry };
+  delete stored.dirty_key;
+  return entry.dirty === true ? { ...stored, dirty_key: 1 } : stored;
+}
+
+function entryFromStorage(entry) {
+  if (entry === undefined) return undefined;
+  const publicEntry = { ...entry };
+  delete publicEntry.dirty_key;
+  return publicEntry;
 }
 
 function sameStoredValue(left, right) {
@@ -161,10 +177,21 @@ async function writeChangedEntries(objectStore, original, entries) {
       continue;
     }
     if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
-    if (!original.has(id) || original.get(id) === undefined || !sameStoredValue(original.get(id), entry)) {
-      await requestToPromise(objectStore.put(entry));
+    const stored = entryForStorage(entry);
+    if (!original.has(id) || original.get(id) === undefined || !sameStoredValue(original.get(id), stored)) {
+      await requestToPromise(objectStore.put(stored));
     }
   }
+}
+
+function migrateDirtyEntryKeys(entries) {
+  const request = entries.getAll();
+  request.onsuccess = () => {
+    for (const entry of request.result || []) {
+      const migrated = entryForStorage(entry);
+      if (!sameStoredValue(entry, migrated)) entries.put(migrated);
+    }
+  };
 }
 
 function expectedRevisionFor(id, expectedRevisions, ids) {
@@ -301,18 +328,18 @@ export async function removeSetting(key) {
 }
 
 export async function getEntry(id) {
-  return store(ENTRY_STORE, "readonly", (s) => requestToPromise(s.get(id)));
+  return store(ENTRY_STORE, "readonly", async (s) => entryFromStorage(await requestToPromise(s.get(id))));
 }
 
 export async function putEntry(entry) {
-  await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.put(entry)));
+  await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.put(entryForStorage(entry))));
   return entry;
 }
 
 export async function putEntries(entries) {
   if (!entries.length) return;
   await store(ENTRY_STORE, "readwrite", async (s) => {
-    for (const entry of entries) await requestToPromise(s.put(entry));
+    for (const entry of entries) await requestToPromise(s.put(entryForStorage(entry)));
   });
 }
 
@@ -337,7 +364,7 @@ export async function mutateEntries(ids, expectedRevisions, mutator) {
       const entry = await requestToPromise(objectStore.get(id));
       assertExpectedRevision(id, entry, expectedRevisionFor(id, expectedRevisions, uniqueIds));
       original.set(id, clone(entry));
-      entries.set(id, clone(entry));
+      entries.set(id, entryFromStorage(entry));
     }
 
     const result = mutator(entries);
@@ -373,26 +400,20 @@ export async function mutateAllEntries(mutator) {
   return stores(ENTRY_STORE, "readwrite", async (objectStores) => {
     const objectStore = objectStores.get(ENTRY_STORE);
     const existing = await requestToPromise(objectStore.getAll());
-    const entries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const original = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const entries = new Map(existing.map((entry) => [entry.id, entryFromStorage(entry)]));
     const result = mutator(entries);
     if (result && typeof result.then === "function") {
       throw new TypeError("Entry mutators must not return a Promise");
     }
 
-    const nextIds = new Set(entries.keys());
-    for (const entry of existing) {
-      if (!nextIds.has(entry.id)) await requestToPromise(objectStore.delete(entry.id));
-    }
-    for (const [id, entry] of entries) {
-      if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
-      await requestToPromise(objectStore.put(entry));
-    }
+    await writeChangedEntries(objectStore, original, entries);
     return result;
   });
 }
 
 export async function getAllEntries() {
-  return store(ENTRY_STORE, "readonly", (s) => requestToPromise(s.getAll()));
+  return store(ENTRY_STORE, "readonly", async (s) => (await requestToPromise(s.getAll())).map(entryFromStorage));
 }
 
 function keyRange(method, ...args) {
@@ -422,7 +443,7 @@ function readEntriesFromIndex(objectStore, name, { range = null, direction = "ne
 }
 
 async function entriesFromIndex(name, options = {}) {
-  return store(ENTRY_STORE, "readonly", (objectStore) => readEntriesFromIndex(objectStore, name, options));
+  return store(ENTRY_STORE, "readonly", async (objectStore) => (await readEntriesFromIndex(objectStore, name, options)).map(entryFromStorage));
 }
 
 /**
@@ -450,7 +471,7 @@ export async function mutateEntryState({
     const addEntry = (entry) => {
       const value = clone(entry);
       originalEntries.set(entry.id, value);
-      entries.set(entry.id, clone(value));
+      entries.set(entry.id, entryFromStorage(value));
     };
 
     if (includeActiveEntries) {
@@ -464,7 +485,7 @@ export async function mutateEntryState({
       const entry = await requestToPromise(entryStore.get(id));
       const value = clone(entry);
       originalEntries.set(id, value);
-      entries.set(id, clone(value));
+      entries.set(id, entryFromStorage(value));
     }
 
     const result = mutator({ entries, settings });
@@ -490,7 +511,7 @@ export async function mutateAllLocalState(settingKeys, mutator) {
     const settingsStore = objectStores.get(SETTINGS_STORE);
     const existing = await requestToPromise(entryStore.getAll());
     const originalEntries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
-    const entries = new Map(existing.map((entry) => [entry.id, clone(entry)]));
+    const entries = new Map(existing.map((entry) => [entry.id, entryFromStorage(entry)]));
     const { original: originalSettings, settings } = await readSettings(settingsStore, uniqueKeys);
 
     const result = mutator({ entries, settings });
@@ -505,11 +526,13 @@ export async function mutateAllLocalState(settingKeys, mutator) {
 }
 
 export async function getDirtyEntries() {
-  // Boolean values are not valid IndexedDB keys in Firefox. They may be used
-  // as an indexed property, but a boolean IDBKeyRange throws before the query
-  // runs. Keep this small status query portable rather than blocking page
-  // startup on an unsupported range.
-  return (await getAllEntries()).filter((entry) => entry.dirty === true);
+  return entriesFromIndex(ENTRY_INDEX.DIRTY, { range: keyRange("only", 1) });
+}
+
+export async function getDirtyEntryCount() {
+  return store(ENTRY_STORE, "readonly", (objectStore) => requestToPromise(
+    objectStore.index(ENTRY_INDEX.DIRTY).count(keyRange("only", 1))
+  ));
 }
 
 /**

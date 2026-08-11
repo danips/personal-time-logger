@@ -2,8 +2,9 @@
 
 The local UI is deliberately bounded: the popup reads the newest 200 entries
 and adds another 200 only when requested; the calendar asks IndexedDB for rows
-that can intersect its displayed week. The entry store has indexes for dirty,
-deleted, start, end, status, and active-timer queries. Sync still reads the
+that can intersect its displayed week. The entry store uses a numeric
+`dirty_key` index for the popup's dirty count (present only on dirty records),
+alongside deleted, start, end, status, and active-timer indexes. Sync still reads the
 complete selected spreadsheet because the current `time_entries` tab is one
 canonical ordered dataset; local indexes cannot make that remote read smaller.
 

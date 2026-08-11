@@ -1,4 +1,4 @@
-import { getActiveEntries, getDirtyEntries, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
+import { getActiveEntries, getDirtyEntryCount, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
 import { getChatGptAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
@@ -505,7 +505,7 @@ async function renderRecent(isCurrent) {
 
 async function renderDirtyBadge(isCurrent) {
   if (!$dirtyBadge) return true;
-  const count = (await getDirtyEntries()).length;
+  const count = await getDirtyEntryCount();
   if (!isCurrent()) return false;
   const label = count > 99 ? "99+ pending" : `${count} pending`;
   $dirtyBadge.textContent = label;

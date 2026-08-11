@@ -12,7 +12,7 @@ before(async () => {
 });
 
 describe("IndexedDB repository", () => {
-  it("creates the version-3 stores and round-trips entries and settings", async () => {
+  it("creates the version-4 stores and round-trips entries and settings", async () => {
     const entry = { id: "entry-1", project: "Project", revision: 1, dirty: true };
 
     await db.setSetting("profile", { name: "Test user" });
@@ -39,8 +39,8 @@ describe("IndexedDB repository", () => {
   });
 
   it("shares committed data across independent database connections", async () => {
-    const first = indexedDB.open("timelogger_db", 3);
-    const second = indexedDB.open("timelogger_db", 3);
+    const first = indexedDB.open("timelogger_db", 4);
+    const second = indexedDB.open("timelogger_db", 4);
     const [firstConnection, secondConnection] = await Promise.all([
       new Promise((resolve, reject) => {
         first.onsuccess = () => resolve(first.result);
@@ -169,7 +169,7 @@ describe("IndexedDB repository", () => {
     assert.equal(await db.isLockCurrent("generation-lock", "second-holder", second.generation, 120_000), true);
   });
 
-  it("filters dirty entries portably and indexes deleted, status, active, and interval queries", async () => {
+  it("indexes dirty counts and entries alongside deleted, status, active, and interval queries", async () => {
     const entries = [
       {
         id: "index-completed", dirty: true, deleted_at: "", status: "ok",
@@ -187,6 +187,9 @@ describe("IndexedDB repository", () => {
     await db.putEntries(entries);
 
     assert.deepEqual((await db.getDirtyEntries()).map((entry) => entry.id), ["entry-1", "index-completed"]);
+    assert.equal(await db.getDirtyEntryCount(), 2);
+    await db.mutateEntry("index-completed", (entry) => ({ ...entry, dirty: false }));
+    assert.equal(await db.getDirtyEntryCount(), 1);
     assert.deepEqual((await db.getDeletedEntries()).map((entry) => entry.id), ["index-deleted"]);
     assert.deepEqual((await db.getEntriesByStatus("needs_review")).map((entry) => entry.id), ["index-active"]);
     assert.deepEqual((await db.getActiveEntries()).map((entry) => entry.id), ["index-active"]);

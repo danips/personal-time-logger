@@ -238,10 +238,6 @@ class FakeObjectStore {
     this.mode = mode;
   }
 
-  request(operation) {
-    return this.transaction.enqueue(operation);
-  }
-
   get indexNames() {
     this.store.indexes ||= new Map();
     return new FakeIndexNames(this.store.indexes);
@@ -254,6 +250,11 @@ class FakeObjectStore {
     return new FakeIndex(this.store, this.transaction, this.store.indexes.get(name));
   }
 
+  deleteIndex(name) {
+    this.store.indexes ||= new Map();
+    this.store.indexes.delete(name);
+  }
+
   index(name) {
     this.store.indexes ||= new Map();
     const definition = this.store.indexes.get(name);
@@ -262,19 +263,19 @@ class FakeObjectStore {
   }
 
   get(key) {
-    return this.request(() => clone(this.transaction.recordsFor(this.store).get(key)));
+    return this.request(() => clone(this.records().get(key)));
   }
 
   getAll() {
-    return this.request(() => [...this.transaction.recordsFor(this.store).values()].map(clone));
+    return this.request(() => [...this.records().values()].map(clone));
   }
 
   put(value) {
     return this.request(() => {
-      if (this.transaction.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
+      if (this.transaction?.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
       const key = value[this.store.keyPath];
       if (key === undefined) throw new Error(`Missing key path: ${this.store.keyPath}`);
-      this.transaction.recordsFor(this.store).set(key, clone(value));
+      this.records().set(key, clone(value));
       this.store.writeLog.push({ store: this.store.name, operation: "put", key });
       return key;
     });
@@ -282,11 +283,28 @@ class FakeObjectStore {
 
   delete(key) {
     return this.request(() => {
-      if (this.transaction.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
-      this.transaction.recordsFor(this.store).delete(key);
+      if (this.transaction?.consumeWriteFailure()) throw new Error("Injected IndexedDB write failure");
+      this.records().delete(key);
       this.store.writeLog.push({ store: this.store.name, operation: "delete", key });
       return undefined;
     });
+  }
+
+  records() {
+    return this.transaction ? this.transaction.recordsFor(this.store) : this.store.records;
+  }
+
+  request(operation) {
+    if (this.transaction) return this.transaction.enqueue(operation);
+    const request = new FakeRequest();
+    queueMicrotask(() => {
+      try {
+        request.succeed(operation());
+      } catch (error) {
+        request.fail(error);
+      }
+    });
+    return request;
   }
 }
 
@@ -338,6 +356,10 @@ class FakeIndex {
     }
     request = transaction.enqueue(() => nextCursor());
     return request;
+  }
+
+  count(range = null) {
+    return this.transaction.enqueue(() => this.records(range).length);
   }
 }
 
@@ -393,6 +415,11 @@ function createIndexedDB() {
             }
           };
           request.onupgradeneeded?.({ target: request, oldVersion, newVersion: requestedVersion });
+          // Versionchange requests scheduled by onupgradeneeded must settle
+          // before the connection is exposed, matching IndexedDB upgrade
+          // transaction completion semantics.
+          setTimeout(() => request.succeed(connection), 0);
+          return;
         }
         request.succeed(connection);
       }, 0);

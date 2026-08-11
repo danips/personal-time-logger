@@ -36,7 +36,7 @@ stores:
 
 | Store | Contents | Important access paths |
 | --- | --- | --- |
-| `time_entries` | Local-first time records, including `dirty`, tombstone, sync-error, and revision bookkeeping. | Primary ID plus indexes for active timers, dirty entries, deletion, start/end time, and status. |
+| `time_entries` | Local-first time records, including `dirty`, tombstone, sync-error, and revision bookkeeping. Dirty records persist a derived `dirty_key: 1`; clean records omit it. | Primary ID plus indexes for active timers, dirty-entry counts, deletion, start/end time, and status. |
 | `settings` | Device-local configuration, sync/reconciliation state, locks, diagnostics, tokens, and ChatGPT account data. | Named keys; general extension keys live in `src/setting-keys.js`. |
 
 The OAuth client ID and secret are the deliberate exception: they live in
