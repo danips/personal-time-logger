@@ -301,15 +301,15 @@ npm test
 
 Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic Google API barriers before response, response body, and commit acknowledgement. Run `npm ci` first so the pinned static-analysis and packaging tools are available; the extension itself has no runtime npm dependencies.
 
-For an opt-in Firefox WebDriver smoke test of popup, calendar, reconcile, options, and an extension-context lock, install Firefox, `geckodriver`, and `zip`, then run:
+For a Firefox WebDriver behavior smoke test, install Firefox, `geckodriver`, and `zip`, then run:
 
 ```bash
 npm run test:browser
 ```
 
-Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. This smoke test uses a temporary unsigned extension and never contacts Google APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
+Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies its calendar rendering, saves Options, and checks the cross-context lock. It never contacts Google APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
 
-GitHub Actions runs them on every push and pull request, and the release workflow runs them before signing, so a failing test blocks a release.
+GitHub Actions runs the Node checks and Firefox behavior smoke on every push and pull request. The release workflow also requires the Firefox smoke before signing, so either test path can block a release.
 
 ## Files
 

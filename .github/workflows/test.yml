@@ -29,3 +29,30 @@ jobs:
 
       - name: Run static analysis and extension lint
         run: timeout 10m npm run lint
+
+  browser-runtime:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install pinned development tooling
+        run: timeout 10m npm ci
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@2ddc1281882c66dd6a359947714eed0a4b91afc1 # v1
+
+      - name: Install geckodriver
+        uses: browser-actions/setup-geckodriver@fac5b0424c584257f32cf12c5eb4ba86014c34f8 # latest
+
+      - name: Run Firefox behavior smoke
+        run: timeout 10m npm run test:browser

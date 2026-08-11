@@ -66,6 +66,128 @@ async function waitForPage(baseUrl, sessionId, selectors) {
   throw new Error(`Page did not render expected controls: ${selectors.join(", ")} (runtime ${lastState.state}: ${lastState.fatal || "no fatal panel"})`);
 }
 
+async function waitForCondition(baseUrl, sessionId, label, script, diagnosticScript = "") {
+  let diagnostic = "";
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, { script, args: [] })) return;
+    if (diagnosticScript) {
+      diagnostic = JSON.stringify(await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+        script: diagnosticScript,
+        args: []
+      }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`${label} did not complete.${diagnostic ? ` Last state: ${diagnostic}` : ""}`);
+}
+
+async function exercisePopupTimer(baseUrl, sessionId) {
+  const started = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const toggle = document.querySelector("#newTimerToggle");
+      const start = document.querySelector("#startButton");
+      if (!toggle || !start) return false;
+      if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+      document.querySelector("#project").value = "Browser smoke";
+      document.querySelector("#task").value = "Timer lifecycle";
+      document.querySelector("#description").value = "Created by Firefox smoke";
+      document.querySelector("#multiply").checked = true;
+      start.click();
+      return true;
+    `,
+    args: []
+  });
+  if (!started) throw new Error("Popup timer controls are unavailable.");
+  await waitForCondition(baseUrl, sessionId, "Popup timer start", `
+    return document.querySelector("#activeTitle")?.textContent.includes("Browser smoke")
+      && !document.querySelector("#stopButton")?.classList.contains("hidden");
+  `);
+  // Completed entries with a zero-length interval have no calendar segment.
+  // Wait for a real elapsed second so the calendar assertion covers rendering.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.querySelector('#stopButton')?.click(); return true;",
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Popup timer stop", `
+    return document.querySelector("#activeTitle")?.textContent === "No active timer"
+      && Boolean(document.querySelector(".entry-row[data-edit-id]"));
+  `);
+
+  const openedEditor = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const entry = document.querySelector(".entry-row[data-edit-id]");
+      if (!entry) return false;
+      entry.click();
+      return true;
+    `,
+    args: []
+  });
+  if (!openedEditor) throw new Error("Stopped timer was not rendered as an editable popup entry.");
+  await waitForCondition(baseUrl, sessionId, "Popup entry editor", "return !document.querySelector('#editPanel')?.classList.contains('hidden');");
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      document.querySelector("#editDescription").value = "Edited by Firefox smoke";
+      document.querySelector("#saveEdit").click();
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Popup entry save", "return document.querySelector('#editPanel')?.classList.contains('hidden');");
+}
+
+async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
+  await waitForPage(baseUrl, sessionId, ["#calendarGrid", "#statusLine"]);
+  const selectedWeek = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      Promise.all([
+        import(browser.runtime.getURL("src/db.js")),
+        import(browser.runtime.getURL("src/calendar-layout.js"))
+      ]).then(async ([db, calendarLayout]) => {
+        const entry = (await db.getAllEntries()).find((item) => item.project === "Browser smoke");
+        if (!entry) return done(false);
+        const picker = document.querySelector("#weekPicker");
+        const selectedWeek = calendarLayout.isoWeekValue(new Date(entry.start_at));
+        picker.value = selectedWeek;
+        picker.dispatchEvent(new Event("change", { bubbles: true }));
+        done(selectedWeek);
+      }).catch(() => done(false));
+    `,
+    args: []
+  });
+  if (!selectedWeek) throw new Error("Calendar smoke entry could not be selected.");
+  await waitForCondition(baseUrl, sessionId, "Calendar entry render", `
+    return document.querySelectorAll(".entry-block").length > 0;
+  `, `
+    return {
+      week: document.querySelector("#weekPicker")?.value,
+      expectedWeek: ${JSON.stringify(selectedWeek)},
+      blocks: document.querySelectorAll(".entry-block").length,
+      status: document.querySelector("#statusLine")?.textContent
+    };
+  `);
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html` });
+  await waitForPage(baseUrl, sessionId, ["#durationMultiplier", "#saveSettings"]);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      document.querySelector("#syncInterval").value = "30";
+      document.querySelector("#durationMultiplier").value = "1.5";
+      document.querySelector("#saveSettings").click();
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Options save", `
+    return Number(document.querySelector("#durationMultiplier")?.value) === 1.5
+      && document.querySelector("#statusLine")?.textContent.includes("Settings saved");
+  `);
+}
+
 async function extensionOriginFromFirefox(baseUrl, sessionId) {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/moz/context`, { context: "chrome" });
   try {
@@ -148,6 +270,11 @@ try {
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
+  await exercisePopupTimer(baseUrl, sessionId);
+  await exerciseCalendarAndOptions(baseUrl, sessionId, origin);
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
+  await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   if (!await extensionLock(baseUrl, sessionId, "popup")) throw new Error("Popup context could not claim its runtime lock.");
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
   await waitForPage(baseUrl, sessionId, ["#calendarGrid"]);
@@ -155,7 +282,7 @@ try {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await extensionLock(baseUrl, sessionId, "popup", true);
 
-  console.log("Browser runtime smoke passed: popup, calendar, reconcile, options, usage, and cross-context lock.");
+  console.log("Browser runtime smoke passed: page readiness, popup timer lifecycle/edit, calendar render, options save, and cross-context lock.");
 } finally {
   if (sessionId) await webdriver(baseUrl, "DELETE", `/session/${sessionId}`).catch(() => {});
   if (driver && !driver.killed) driver.kill("SIGTERM");
