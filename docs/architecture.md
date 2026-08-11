@@ -31,7 +31,7 @@ flavour.
 
 ## Local data and settings
 
-`src/db.js` opens IndexedDB database `timelogger_db` (version 3) with two
+`src/db.js` opens IndexedDB database `timelogger_db` (version 4) with two
 stores:
 
 | Store | Contents | Important access paths |

@@ -331,7 +331,7 @@ test/
 
 `background/` holds the sync alarm, `reconcile/` the comparison screen, `scripts/` the release packaging, and `test/` the unit tests. Only the extension directories are copied into a release; `test/`, `package.json`, `scripts/`, and documentation are excluded from the package.
 
-OAuth credentials are stored in IndexedDB through the Options page and are not part of the extension package.
+OAuth client credentials are stored in Firefox synchronized extension storage through the Options page; access and refresh tokens remain in local IndexedDB. None are part of the extension package.
 
 ## Next Improvements
 

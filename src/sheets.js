@@ -421,7 +421,7 @@ export function spreadsheetUrl(spreadsheetId) {
 }
 
 /**
- * Adds any missing tab and rewrites both header rows, in three requests at most.
+ * Adds any missing tab and rewrites both header rows, in up to five requests.
  *
  * This is the repair path, not a precondition. A read proves the layout is sound
  * far more cheaply than checking it first does, so this only runs once a read has
