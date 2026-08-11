@@ -76,11 +76,14 @@ result afterward.
 
 ## Sync, reconciliation, and fencing
 
-`syncNow()` coalesces same-context calls, while an IndexedDB lease coordinates
-popup, calendar, and background contexts. A lease has a holder and monotonic
-generation. The owner renews it and calls `lease.assert()` before mutating
-phases; losing the lease aborts the cycle, and `releaseLock` may only clear the
-generation it acquired.
+`syncNow()` coalesces same-context calls with one registered drain: a stronger
+request queues one follow-up cycle while the drain remains registered, so no
+third call can overlap that queued work. Individual callers still receive the
+active or queued cycle's result. An IndexedDB lease coordinates popup, calendar,
+and background contexts. A lease has a holder and monotonic generation. The
+owner renews it and calls `lease.assert()` before mutating phases; losing the
+lease aborts the cycle, and `releaseLock` may only clear the generation it
+acquired.
 
 The sync sequence is:
 

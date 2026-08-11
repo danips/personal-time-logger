@@ -45,9 +45,20 @@ const PULL_MUTATION_BATCH_SIZE = 250;
 const CONTEXT_ID = uuid();
 let inFlightSync = null;
 let inFlightOptions = null;
+let currentSync = null;
 let queuedSync = null;
 let queuedOptions = null;
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function codedError(code, message) {
   if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
@@ -801,29 +812,53 @@ export async function nextSyncDelayMinutes() {
 
 
 
-export async function syncNow({ interactiveAuth = false, force = false } = {}) {
-  // Collapse overlapping calls from the same context, such as the poller firing
-  // while a user action is still syncing.
-  if (inFlightSync) {
-    const stronger = force && !inFlightOptions.force || interactiveAuth && !inFlightOptions.interactiveAuth;
-    if (!stronger) return queuedSync || inFlightSync;
-    queuedOptions = {
-      force: force || queuedOptions?.force || false,
-      interactiveAuth: interactiveAuth || queuedOptions?.interactiveAuth || false
-    };
-    if (!queuedSync) {
-      queuedSync = inFlightSync.catch(() => undefined).then(() => runSyncCycle(queuedOptions)).finally(() => {
-        queuedSync = null;
-        queuedOptions = null;
-      });
-    }
-    return queuedSync;
-  }
+function startSyncCycle(options) {
+  inFlightOptions = options;
+  currentSync = runSyncCycle(options);
+  return currentSync;
+}
 
-  inFlightOptions = { interactiveAuth, force };
-  inFlightSync = runSyncCycle({ interactiveAuth, force }).finally(() => {
+function startSyncDrain(options) {
+  let cycle = startSyncCycle(options);
+  // Keep this promise registered until every stronger request that arrived
+  // during the active cycle has run. The individual cycle promises preserve
+  // caller-specific success/failure while this drain remains the context gate.
+  inFlightSync = (async () => {
+    while (cycle) {
+      try {
+        await cycle;
+      } catch {
+        // A queued stronger request must still run after a failed cycle.
+      }
+
+      if (!queuedSync) return;
+      const next = queuedSync;
+      const nextOptions = queuedOptions;
+      queuedSync = null;
+      queuedOptions = null;
+      cycle = startSyncCycle(nextOptions);
+      cycle.then(next.resolve, next.reject);
+    }
+  })().finally(() => {
     inFlightSync = null;
     inFlightOptions = null;
+    currentSync = null;
   });
-  return inFlightSync;
+  return cycle;
+}
+
+export function syncNow({ interactiveAuth = false, force = false } = {}) {
+  // Collapse overlapping calls from the same context, such as the poller firing
+  // while a user action is still syncing.
+  if (!inFlightSync) return startSyncDrain({ interactiveAuth, force });
+
+  const stronger = force && !inFlightOptions.force || interactiveAuth && !inFlightOptions.interactiveAuth;
+  if (!stronger) return queuedSync?.promise || currentSync;
+
+  queuedOptions = {
+    force: force || queuedOptions?.force || false,
+    interactiveAuth: interactiveAuth || queuedOptions?.interactiveAuth || false
+  };
+  queuedSync ||= deferred();
+  return queuedSync.promise;
 }
