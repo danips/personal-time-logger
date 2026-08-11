@@ -107,6 +107,68 @@ describe("token refresh", () => {
     assert.deepEqual(await db.getSetting("token_data"), tokenData);
   });
 
+  it("aborts a stalled OAuth refresh and releases its lock", async () => {
+    await db.setSetting("token_data", {
+      access_token: "expired-token",
+      refresh_token: "stalled-refresh-token",
+      expires_at: Date.now() - 1
+    });
+    const auth = await authContext("timeout");
+    const previousFetch = globalThis.fetch;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let aborted = false;
+    let timeoutHandle;
+    let cleared = false;
+
+    globalThis.fetch = (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        aborted = true;
+        reject(new Error("OAuth request aborted"));
+      }, { once: true });
+    });
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      const handle = originalSetTimeout(callback, delay === 30_000 ? 0 : delay, ...args);
+      if (delay === 30_000) timeoutHandle = handle;
+      return handle;
+    };
+    globalThis.clearTimeout = (handle) => {
+      if (handle === timeoutHandle) cleared = true;
+      return originalClearTimeout(handle);
+    };
+
+    try {
+      await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "API_TIMEOUT");
+      assert.equal(aborted, true);
+      assert.equal(cleared, true);
+      assert.equal(await db.getSetting("token_refresh_lock"), null);
+    } finally {
+      globalThis.fetch = previousFetch;
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  it("maps OAuth network failures to the shared network code", async () => {
+    await db.setSetting("token_data", {
+      access_token: "expired-token",
+      refresh_token: "offline-refresh-token",
+      expires_at: Date.now() - 1
+    });
+    const auth = await authContext("network-failure");
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("network unavailable");
+    };
+
+    try {
+      await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "API_NETWORK");
+      assert.equal(await db.getSetting("token_refresh_lock"), null);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it("does not restore credentials when a refresh completes after sign-out", async () => {
     await db.setSetting("token_data", {
       access_token: "expired-token",

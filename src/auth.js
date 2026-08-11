@@ -8,6 +8,7 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_REFRESH_LOCK_KEY = "token_refresh_lock";
 const TOKEN_REFRESH_LOCK_TTL_MS = 30_000;
 const TOKEN_REFRESH_POLL_MS = 50;
+const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
 const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
 let refreshInFlight = null;
@@ -43,14 +44,24 @@ function sleep(ms) {
 }
 
 async function formRequest(url, params) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params).toString()
-  });
-
-  const data = await response.json().catch(() => ({}));
-  return { response, data };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OAUTH_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    return { response, data };
+  } catch (error) {
+    if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google OAuth request timed out");
+    if (error?.code) throw error;
+    throw codedError("API_NETWORK", error?.message || "Google OAuth network request failed");
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function deviceCodeRequest(config) {
