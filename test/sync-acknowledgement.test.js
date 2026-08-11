@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -34,7 +35,7 @@ describe("sync acknowledgements", () => {
   it("does not clear a same-revision local edit whose fingerprint changed", async () => {
     const pushed = entry();
     const localEdit = entry({ task: "Edited after push", sync_error: "keep this error" });
-    await db.putEntry(localEdit);
+    await seedEntry(db, localEdit);
 
     const acknowledgement = await markSynced(pushed);
 
@@ -44,7 +45,7 @@ describe("sync acknowledgements", () => {
 
   it("does not resurrect an entry deleted while its remote write was pending", async () => {
     const pushed = entry({ id: "ack-deleted" });
-    await db.putEntry(pushed);
+    await seedEntry(db, pushed);
     await db.mutateEntry(pushed.id, () => undefined);
 
     const acknowledgement = await markSynced(pushed);

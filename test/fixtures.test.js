@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { before, describe, it } from "node:test";
 
 import { SHEET_HEADERS } from "../src/entries.js";
+import { seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
 const fixturesDirectory = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -26,7 +27,7 @@ describe("migration fixtures", () => {
     assert.equal(snapshot.database, "timelogger_db");
     assert.equal(snapshot.version, 2);
 
-    await db.putEntries(snapshot.stores.time_entries);
+    await seedEntries(db, snapshot.stores.time_entries);
     await Promise.all(snapshot.stores.settings.map(({ key, value }) => db.setSetting(key, value)));
 
     assert.equal((await db.getEntry("v2-active-entry")).end_at, "");

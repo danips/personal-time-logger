@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createDbContexts } from "./support/multi-context.js";
+import { seedEntry } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 
@@ -15,8 +16,8 @@ describe("multi-context database harness", () => {
     assert.equal(await calendar.getSetting("writer"), "popup");
 
     await Promise.all([
-      popup.putEntry({ id: "popup-entry", revision: 1 }),
-      calendar.putEntry({ id: "calendar-entry", revision: 1 })
+      seedEntry(popup, { id: "popup-entry", revision: 1 }),
+      seedEntry(calendar, { id: "calendar-entry", revision: 1 })
     ]);
 
     const entries = await calendar.getAllEntries();

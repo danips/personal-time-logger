@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -33,7 +34,7 @@ const entry = (over = {}) => ({
 describe("sync pull CAS", () => {
   it("does not overwrite an edit committed after the sync snapshot", async () => {
     const observed = entry();
-    await db.putEntry(observed);
+    await seedEntry(db, observed);
     const local = {
       entries: [observed],
       all() { return this.entries; },
@@ -41,7 +42,7 @@ describe("sync pull CAS", () => {
     };
     const localEdit = entry({ task: "Local edit", revision: 2, dirty: true, updated_at: "2026-08-08T12:00:00.000Z" });
     const remote = entry({ task: "Remote value", revision: 1, updated_at: "2026-08-08T11:00:00.000Z" });
-    await db.putEntry(localEdit);
+    await seedEntry(db, localEdit);
 
     const pulled = await pullRemoteEntries(local, [remote]);
 
@@ -57,7 +58,7 @@ describe("sync pull CAS", () => {
       apply(changed) { this.entries.push(...changed); }
     };
     const created = entry({ id: "appeared-locally", task: "Local create", revision: 1, dirty: true });
-    await db.putEntry(created);
+    await seedEntry(db, created);
 
     assert.equal(await pullRemoteEntries(local, [remote]), 0);
     assert.deepEqual(await db.getEntry(created.id), created);
@@ -78,7 +79,7 @@ describe("sync pull CAS", () => {
 
   it("does not open a write transaction or rewrite unchanged snapshot rows", async () => {
     const unchanged = entry({ id: "unchanged-snapshot" });
-    await db.putEntry(unchanged);
+    await seedEntry(db, unchanged);
     const local = {
       entries: [unchanged],
       all() { return this.entries; },
@@ -153,7 +154,7 @@ describe("sync pull CAS", () => {
       updated_at: "2026-08-08T11:00:00.000Z"
     });
     const remoteOnly = entry({ id: "concurrent-batch-remote-only", task: "Remote only", updated_at: "2026-08-08T11:00:00.000Z" });
-    await db.putEntry(localEdit);
+    await seedEntry(db, localEdit);
     const local = {
       entries: [observed],
       all() { return this.entries; },

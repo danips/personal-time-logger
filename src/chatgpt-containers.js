@@ -7,7 +7,6 @@ import { SETTING_KEY } from "./setting-keys.js";
 export { CHATGPT_ACCOUNTS_KEY };
 export const CHATGPT_ACCOUNT_GENERATION_KEY = SETTING_KEY.CHATGPT_USAGE_ACCOUNT_GENERATION;
 export const CHATGPT_PROFILE_SALT_KEY = SETTING_KEY.CHATGPT_USAGE_PROFILE_SALT;
-export const CHATGPT_CACHE_VERSION_KEY = SETTING_KEY.CHATGPT_USAGE_CACHE_VERSION;
 export const CHATGPT_SESSION_TOKEN_CONSENT_KEY = SETTING_KEY.CHATGPT_USAGE_SESSION_TOKEN_CONSENT;
 export const CHATGPT_USAGE_PAGE_URL = OFFICIAL_USAGE_URL;
 export const CHATGPT_HOST_PERMISSION = "https://chatgpt.com/*";
@@ -417,7 +416,6 @@ export async function clearChatGptUsageData(overrides = {}) {
     CHATGPT_ACCOUNTS_KEY,
     CHATGPT_ACCOUNT_GENERATION_KEY,
     CHATGPT_PROFILE_SALT_KEY,
-    CHATGPT_CACHE_VERSION_KEY,
     CHATGPT_SESSION_TOKEN_CONSENT_KEY
   ], (settings) => {
     settings.delete(CHATGPT_ACCOUNTS_KEY);
@@ -426,7 +424,6 @@ export async function clearChatGptUsageData(overrides = {}) {
       accountGeneration(settings.get(CHATGPT_ACCOUNT_GENERATION_KEY)) + 1
     );
     settings.delete(CHATGPT_PROFILE_SALT_KEY);
-    settings.delete(CHATGPT_CACHE_VERSION_KEY);
     settings.delete(CHATGPT_SESSION_TOKEN_CONSENT_KEY);
   });
 }

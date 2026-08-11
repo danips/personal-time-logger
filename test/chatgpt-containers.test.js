@@ -229,17 +229,15 @@ describe("ChatGPT container orchestration", () => {
     assert.deepEqual(calls.removedTabs, []);
   });
 
-  it("clears usage records and the profile salt without touching browser containers", async () => {
+  it("clears current usage settings without touching browser containers", async () => {
     const { calls, values, overrides } = harness();
     values.set("chatgpt_usage_accounts", [{ id: "a" }]);
     values.set("chatgpt_usage_profile_salt", "salt");
-    values.set("chatgpt_usage_cache_version", 1);
     values.set("chatgpt_usage_session_token_consent", true);
     await clearChatGptUsageData(overrides);
 
     assert.equal(values.has("chatgpt_usage_accounts"), false);
     assert.equal(values.has("chatgpt_usage_profile_salt"), false);
-    assert.equal(values.has("chatgpt_usage_cache_version"), false);
     assert.equal(values.has("chatgpt_usage_session_token_consent"), false);
     assert.deepEqual(calls.removedTabs, []);
   });

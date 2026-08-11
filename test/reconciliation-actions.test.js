@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../src/entries.js";
+import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
 
@@ -66,7 +67,7 @@ describe("reconciliation actions", () => {
   it("does not overwrite a local edit made after the reconciliation scan", async () => {
     const remote = fixture({ id: "stale-local", task: "Spreadsheet task" });
     const editedLocal = fixture({ id: remote.id, task: "New local task", revision: 2 });
-    await db.putEntry(editedLocal);
+    await seedEntry(db, editedLocal);
     enqueueSnapshot([remote]);
 
     await assert.rejects(
@@ -81,7 +82,7 @@ describe("reconciliation actions", () => {
     const remote = fixture({ id: "stale-remote", task: "Scanned spreadsheet task" });
     const local = fixture({ id: remote.id, task: "Local task" });
     const changedRemote = fixture({ id: remote.id, task: "Edited spreadsheet task", updated_at: "2026-08-08T11:00:00.000Z" });
-    await db.putEntry(local);
+    await seedEntry(db, local);
     enqueueSnapshot([changedRemote]);
 
     await assert.rejects(
@@ -95,7 +96,7 @@ describe("reconciliation actions", () => {
   it("does not tombstone a local record that appeared after a remote-only scan", async () => {
     const remote = fixture({ id: "new-local-after-scan" });
     const local = fixture({ id: remote.id, task: "New local record", revision: 3 });
-    await db.putEntry(local);
+    await seedEntry(db, local);
     enqueueSnapshot([remote]);
 
     await assert.rejects(
@@ -116,7 +117,7 @@ describe("reconciliation actions", () => {
       task: "Second spreadsheet changed",
       updated_at: "2026-08-08T11:00:00.000Z"
     });
-    await db.putEntries([firstLocal, secondLocal]);
+    await seedEntries(db, [firstLocal, secondLocal]);
     enqueueSnapshot([firstRemote, changedSecondRemote]);
 
     await assert.rejects(
@@ -135,7 +136,7 @@ describe("reconciliation actions", () => {
     const secondLocal = fixture({ id: "batch-apply-second", task: "Second local", dirty: false });
     const firstRemote = fixture({ id: firstLocal.id, task: "First spreadsheet" });
     const secondRemote = fixture({ id: secondLocal.id, task: "Second spreadsheet" });
-    await db.putEntries([firstLocal, secondLocal]);
+    await seedEntries(db, [firstLocal, secondLocal]);
     google.calls.length = 0;
     enqueueSnapshot([firstRemote, secondRemote]);
 
@@ -156,7 +157,7 @@ describe("reconciliation actions", () => {
   it("updates only the selected local entry", async () => {
     const selected = fixture({ id: "scoped-reconcile-selected", dirty: false });
     const unrelated = fixture({ id: "scoped-reconcile-unrelated", task: "Leave untouched", revision: 6 });
-    await db.putEntries([selected, unrelated]);
+    await seedEntries(db, [selected, unrelated]);
     indexedDB._resetWriteLog();
 
     await reconcile.keepLocal(selected.id, null, { expectedRevision: selected.revision });

@@ -327,20 +327,6 @@ export async function getEntry(id) {
   return store(ENTRY_STORE, "readonly", async (s) => entryFromStorage(await requestToPromise(s.get(id))));
 }
 
-/** Test fixture seam for seeding normalized entries through IndexedDB. */
-export async function putEntry(entry) {
-  await store(ENTRY_STORE, "readwrite", (s) => requestToPromise(s.put(entryForStorage(entry))));
-  return entry;
-}
-
-/** Test fixture seam for seeding normalized entries through IndexedDB. */
-export async function putEntries(entries) {
-  if (!entries.length) return;
-  await store(ENTRY_STORE, "readwrite", async (s) => {
-    for (const entry of entries) await requestToPromise(s.put(entryForStorage(entry)));
-  });
-}
-
 /**
  * Mutates named entries in one transaction. A mutator can add new ids to the
  * supplied Map, which is useful for duplicate and replacement-timer actions.

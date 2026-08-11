@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { normalizeEntry, SHEET_HEADERS } from "../src/entries.js";
+import { seedEntry } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
 
@@ -57,7 +58,7 @@ after(() => google.restore());
 
 describe("sync lease fencing", () => {
   it("does not acknowledge an append or release a newer lease after losing ownership", async () => {
-    await db.putEntry(entry);
+    await seedEntry(db, entry);
     google.enqueue(snapshotPath, google.json({
       valueRanges: [
         { range: "time_entries!A:N", values: [SHEET_HEADERS] },

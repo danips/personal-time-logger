@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 
@@ -16,7 +17,7 @@ describe("IndexedDB repository", () => {
     const entry = { id: "entry-1", project: "Project", revision: 1, dirty: true };
 
     await db.setSetting("profile", { name: "Test user" });
-    await db.putEntry(entry);
+    await seedEntry(db, entry);
 
     assert.deepEqual(await db.getSetting("profile"), { name: "Test user" });
     assert.deepEqual(await db.getEntry("entry-1"), entry);
@@ -29,7 +30,7 @@ describe("IndexedDB repository", () => {
       { id: "entry-3", revision: 1 }
     ];
 
-    await db.putEntries(entries);
+    await seedEntries(db, entries);
 
     assert.deepEqual(await db.getAllEntries(), [
       { id: "entry-1", project: "Project", revision: 1, dirty: true },
@@ -69,7 +70,7 @@ describe("IndexedDB repository", () => {
   });
 
   it("compare-and-swaps an entry revision and reports a typed conflict", async () => {
-    await db.putEntry({ id: "entry-cas", revision: 4, task: "before" });
+    await seedEntry(db, { id: "entry-cas", revision: 4, task: "before" });
 
     const updated = await db.mutateEntry("entry-cas", 4, (entry) => ({
       ...entry,
@@ -87,7 +88,7 @@ describe("IndexedDB repository", () => {
   });
 
   it("commits multi-entry and multi-setting mutations together", async () => {
-    await db.putEntries([
+    await seedEntries(db, [
       { id: "entry-left", revision: 1, task: "left" },
       { id: "entry-right", revision: 2, task: "right" }
     ]);
@@ -123,7 +124,7 @@ describe("IndexedDB repository", () => {
 
   it("skips writes for unchanged entries in an atomic mutation", async () => {
     const unchanged = { id: "unchanged-entry", revision: 1, task: "same" };
-    await db.putEntry(unchanged);
+    await seedEntry(db, unchanged);
     indexedDB._resetWriteLog();
 
     await db.mutateEntries([unchanged.id], () => {});
@@ -132,7 +133,7 @@ describe("IndexedDB repository", () => {
   });
 
   it("rolls back scoped entry and setting changes together", async () => {
-    await db.putEntry({ id: "scoped-rollback", revision: 1, task: "before" });
+    await seedEntry(db, { id: "scoped-rollback", revision: 1, task: "before" });
     await db.setSetting("scoped-rollback-setting", "before");
     indexedDB._failOnWrite(2);
 
@@ -184,7 +185,7 @@ describe("IndexedDB repository", () => {
         start_at: "2026-08-11T09:00:00.000Z", end_at: "2026-08-11T10:00:00.000Z"
       }
     ];
-    await db.putEntries(entries);
+    await seedEntries(db, entries);
 
     assert.deepEqual((await db.getDirtyEntries()).map((entry) => entry.id), ["entry-1", "index-completed"]);
     assert.equal(await db.getDirtyEntryCount(), 2);

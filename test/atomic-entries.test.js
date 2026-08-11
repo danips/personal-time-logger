@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -37,7 +38,7 @@ describe("atomic entry mutations", () => {
   });
 
   it("rejects a stale edit without overwriting the current revision", async () => {
-    await db.putEntry(fixture());
+    await seedEntry(db, fixture());
     const updated = await entries.updateEntry("entry-1", { task: "Fresh edit" }, { expectedRevision: 1 });
 
     assert.equal(updated.revision, 2);
@@ -52,7 +53,7 @@ describe("atomic entry mutations", () => {
 
   it("rejects protected edit fields before opening a local write", async () => {
     const original = fixture({ id: "protected-edit" });
-    await db.putEntry(original);
+    await seedEntry(db, original);
 
     await assert.rejects(
       () => entries.updateEntry(original.id, { id: "replacement-id" }, { expectedRevision: original.revision }),
@@ -62,7 +63,7 @@ describe("atomic entry mutations", () => {
   });
 
   it("merges the target and source in one committed mutation", async () => {
-    await db.putEntries([
+    await seedEntries(db, [
       fixture({ id: "merge-target", revision: 3 }),
       fixture({
         id: "merge-source",
@@ -85,7 +86,7 @@ describe("atomic entry mutations", () => {
   });
 
   it("appends actual time to the selected target and retains its multiplier", async () => {
-    await db.putEntries([
+    await seedEntries(db, [
       fixture({
         id: "multiplied-target",
         start_at: "2026-08-08T12:00:00.000Z",
@@ -114,7 +115,7 @@ describe("atomic entry mutations", () => {
   });
 
   it("rolls back a merge when a later write in its transaction fails", async () => {
-    await db.putEntries([
+    await seedEntries(db, [
       fixture({ id: "rollback-target", revision: 1 }),
       fixture({
         id: "rollback-source",
@@ -135,7 +136,7 @@ describe("atomic entry mutations", () => {
   });
 
   it("replaces every active timer atomically and makes retries idempotent", async () => {
-    await db.putEntries([
+    await seedEntries(db, [
       fixture({ id: "active-first", end_at: "", duration_seconds: 0, revision: 2 }),
       fixture({ id: "active-second", end_at: "", duration_seconds: 0, revision: 5 })
     ]);
@@ -154,7 +155,7 @@ describe("atomic entry mutations", () => {
   });
 
   it("does not rewrite completed history when replacing the active timer", async () => {
-    await db.putEntries([
+    await seedEntries(db, [
       fixture({ id: "unrelated-completed-history", revision: 4 }),
       fixture({ id: "scoped-active-timer", end_at: "", duration_seconds: 0, revision: 2 })
     ]);

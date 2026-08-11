@@ -9,7 +9,6 @@ export const SETTING_KEY = Object.freeze({
   BACKGROUND_SYNC_DUE_AT: "background_sync_due_at",
   CHATGPT_USAGE_ACCOUNT_GENERATION: "chatgpt_usage_account_generation",
   CHATGPT_USAGE_ACCOUNTS: "chatgpt_usage_accounts",
-  CHATGPT_USAGE_CACHE_VERSION: "chatgpt_usage_cache_version",
   CHATGPT_USAGE_PROFILE_SALT: "chatgpt_usage_profile_salt",
   CHATGPT_USAGE_SESSION_TOKEN_CONSENT: "chatgpt_usage_session_token_consent",
   DEVICE_ID: "device_id",

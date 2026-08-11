@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -53,7 +54,7 @@ describe("sync maintenance transactions", () => {
   it("does not purge a tombstone restored after the sync snapshot", async () => {
     const snapshot = entry({ id: "restored-tombstone", deleted_at: "2020-01-01T00:00:00.000Z" });
     const restored = entry({ id: snapshot.id, task: "Restored", revision: 2, dirty: true });
-    await db.putEntry(restored);
+    await seedEntry(db, restored);
     const local = localState([snapshot]);
 
     assert.equal(await purgeDeletedEntries(local, [], new Map()), 0);
@@ -64,7 +65,7 @@ describe("sync maintenance transactions", () => {
     const newest = entry({ id: "newest", start_at: "2026-08-08T10:00:00.000Z" });
     const observedOlder = entry({ id: "older", start_at: "2026-08-08T09:00:00.000Z" });
     const localEdit = entry({ id: "older", task: "Edited", revision: 2, dirty: true });
-    await db.putEntries([newest, localEdit]);
+    await seedEntries(db, [newest, localEdit]);
     const local = localState([newest, observedOlder]);
 
     assert.deepEqual(await markMultipleActiveTimers(local), []);
@@ -74,7 +75,7 @@ describe("sync maintenance transactions", () => {
   it("preserves an edit made while a replacement spreadsheet is being seeded", async () => {
     const snapshot = entry({ id: "reseeded" });
     const localEdit = entry({ id: snapshot.id, task: "Edited", revision: 2, dirty: true, sync_error: "" });
-    await db.putEntry(localEdit);
+    await seedEntry(db, localEdit);
     const local = localState([snapshot]);
 
     assert.equal(await reseedForNewSpreadsheet(local), 0);
@@ -83,7 +84,7 @@ describe("sync maintenance transactions", () => {
 
   it("clears remote-specific reconciliation intents while replacing a spreadsheet", async () => {
     const snapshot = entry({ id: "reseed-clears-intent" });
-    await db.putEntry(snapshot);
+    await seedEntry(db, snapshot);
     await db.setSetting(RECONCILIATION_INTENTS_KEY, [{
       entry_id: snapshot.id,
       resolution_id: "old-sheet-resolution",

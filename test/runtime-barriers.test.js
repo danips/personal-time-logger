@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { SHEET_HEADERS } from "../src/entries.js";
+import { seedEntry } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
 
@@ -52,7 +53,7 @@ describe("deterministic runtime barriers", () => {
 
   it("holds an IndexedDB commit until a test releases it", async () => {
     const gate = indexedDB._pauseNextCommit();
-    const write = db.putEntry({ id: "commit-barrier", revision: 1 });
+    const write = seedEntry(db, { id: "commit-barrier", revision: 1 });
     await gate.waitForCommit();
 
     let writeComplete = false;

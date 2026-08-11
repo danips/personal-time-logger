@@ -49,9 +49,8 @@ Use `mutateEntries`, `mutateEntryState`, `mutateAllLocalState`, or
 `mutateSettings` for shared state changes. Their mutators are synchronous
 inside one IndexedDB transaction; entry mutations can require an expected
 revision. `mutateAllLocalState` is reserved for intentional whole-history
-operations. Do not replace an entry from an earlier read with `putEntry` when a
-conditional mutation is available; `putEntry`/`putEntries` are test-fixture
-seams rather than runtime mutation APIs.
+operations. Do not replace an entry from an earlier read with a non-atomic
+write when a conditional mutation is available.
 
 ## Entry, time, and spreadsheet model
 

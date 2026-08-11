@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../src/entries.js";
+import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
 
@@ -84,7 +85,7 @@ beforeEach(() => {
 describe("append idempotency", () => {
   it("keeps an append dirty until read-back confirms a response without a range", async () => {
     const entry = fixture({ id: "append-missing-range" });
-    await db.putEntry(entry);
+    await seedEntry(db, entry);
     google.enqueue(appendPath, google.json({ updates: {} }));
     const readBack = google.barrier("append read-back");
     google.enqueue(snapshotPath, readBack);
@@ -107,7 +108,7 @@ describe("append idempotency", () => {
   it("does not append again after a committed append loses its response", async () => {
     const entry = fixture({ id: "append-timeout" });
     const local = localState([entry]);
-    await db.putEntry(entry);
+    await seedEntry(db, entry);
     google.enqueue(appendPath, async () => {
       enqueueSnapshot([entry]);
       throw new Error("connection lost after the server committed the append");
@@ -126,7 +127,7 @@ describe("append idempotency", () => {
   it("acknowledges only the confirmed prefix of a partial append response", async () => {
     const first = fixture({ id: "append-prefix-first" });
     const second = fixture({ id: "append-prefix-second" });
-    await db.putEntries([first, second]);
+    await seedEntries(db, [first, second]);
     google.enqueue(appendPath, google.json({ updates: { updatedRange: "time_entries!A2:N2" } }));
     enqueueSnapshot([first]);
 
@@ -141,7 +142,7 @@ describe("append idempotency", () => {
   it("treats a same-id row with different contents as an append conflict", async () => {
     const entry = fixture({ id: "append-conflict" });
     const remote = fixture({ id: entry.id, task: "Manual spreadsheet edit", dirty: false });
-    await db.putEntry(entry);
+    await seedEntry(db, entry);
     google.enqueue(appendPath, google.json({ updates: {} }));
     enqueueSnapshot([remote]);
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry } from "./support/db-fixtures.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -32,7 +33,7 @@ const local = {
 describe("reconciliation intent", () => {
   it("records the exact local revision and remote value selected by the user", async () => {
     const remote = { ...local, task: "Spreadsheet choice", updated_at: "2026-08-08T11:00:00.000Z", revision: 4 };
-    await db.putEntry(local);
+    await seedEntry(db, local);
 
     const chosen = await reconcile.keepLocal(local.id, remote, { expectedRevision: 2 });
     const intents = await db.getSetting(reconcile.RECONCILIATION_INTENTS_KEY);
@@ -59,7 +60,7 @@ describe("reconciliation intent", () => {
   it("assigns a fresh operation id when the same choice is recorded again", async () => {
     const entry = { ...local, id: "reselected-entry" };
     const remote = { ...entry, task: "Spreadsheet choice", updated_at: "2026-08-08T11:00:00.000Z", revision: 4 };
-    await db.putEntry(entry);
+    await seedEntry(db, entry);
 
     await reconcile.keepLocal(entry.id, remote, { expectedRevision: entry.revision });
     const firstId = (await db.getSetting(reconcile.RECONCILIATION_INTENTS_KEY))
@@ -73,7 +74,7 @@ describe("reconciliation intent", () => {
   });
 
   it("refuses to record a choice made from a stale reconciliation screen", async () => {
-    await db.putEntry({ ...local, id: "stale-entry", revision: 3 });
+    await seedEntry(db, { ...local, id: "stale-entry", revision: 3 });
     await assert.rejects(
       () => reconcile.keepLocal("stale-entry", { ...local, id: "stale-entry" }, { expectedRevision: 2 }),
       (error) => error.code === "STORAGE_CONFLICT" && error.reason === "revision_mismatch"
