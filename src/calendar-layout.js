@@ -172,28 +172,13 @@ function layoutGroup(group) {
 }
 
 /**
- * Assigns overlapping segments to side-by-side lanes. Segments are grouped by
- * overlap so a lane count is shared only within a cluster, and a busy morning does
- * not narrow an isolated afternoon entry.
+ * Assigns a stable swimlane to every segment in a displayed day. Keeping the
+ * same lane count across the day avoids blocks widening and narrowing as an
+ * overlap cluster starts or ends, which makes concurrent work easier to scan.
  */
 export function layoutSegments(segments) {
   const sorted = [...segments].sort((a, b) => a.startMinute - b.startMinute || a.endMinute - b.endMinute);
-  let group = [];
-  let groupEnd = -1;
-
-  for (const segment of sorted) {
-    if (!group.length || segment.startMinute < groupEnd) {
-      group.push(segment);
-      groupEnd = Math.max(groupEnd, segment.endMinute);
-      continue;
-    }
-
-    layoutGroup(group);
-    group = [segment];
-    groupEnd = segment.endMinute;
-  }
-
-  if (group.length) layoutGroup(group);
+  layoutGroup(sorted);
   return sorted;
 }
 
