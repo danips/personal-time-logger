@@ -161,17 +161,18 @@ export function buildSegments(entries, weekStart) {
 
 function layoutGroup(group) {
   const lanes = [];
+  const renderedEnd = (segment) => Math.max(
+    segment.startMinute + MIN_RENDER_MINUTES,
+    segment.endMinute - 5
+  );
+
   for (const segment of group) {
     let lane = lanes.findIndex((endMinute) => endMinute <= segment.startMinute);
     if (lane === -1) {
       lane = lanes.length;
       lanes.push(0);
     }
-    const renderedEnd = Math.max(
-      segment.startMinute + MIN_RENDER_MINUTES,
-      segment.endMinute - 5
-    );
-    lanes[lane] = Math.max(segment.endMinute, renderedEnd);
+    lanes[lane] = renderedEnd(segment);
     segment.lane = lane;
   }
   for (const segment of group) {
@@ -179,14 +180,28 @@ function layoutGroup(group) {
   }
 }
 
-/**
- * Assigns a stable swimlane to every segment in a displayed day. Keeping the
- * same lane count across the day avoids blocks widening and narrowing as an
- * overlap cluster starts or ends, which makes concurrent work easier to scan.
- */
+/** Assigns side-by-side lanes only within each visual overlap cluster. */
 export function layoutSegments(segments) {
   const sorted = [...segments].sort((a, b) => a.startMinute - b.startMinute || a.endMinute - b.endMinute);
-  layoutGroup(sorted);
+  const renderedEnd = (segment) => Math.max(
+    segment.startMinute + MIN_RENDER_MINUTES,
+    segment.endMinute - 5
+  );
+  let group = [];
+  let groupEnd = -1;
+
+  for (const segment of sorted) {
+    if (!group.length || segment.startMinute < groupEnd) {
+      group.push(segment);
+      groupEnd = Math.max(groupEnd, renderedEnd(segment));
+      continue;
+    }
+    layoutGroup(group);
+    group = [segment];
+    groupEnd = renderedEnd(segment);
+  }
+
+  if (group.length) layoutGroup(group);
   return sorted;
 }
 

@@ -146,12 +146,10 @@ describe("layoutSegments", () => {
     assert.deepEqual(segments.map((segment) => segment.laneCount), [2, 2]);
   });
 
-  it("keeps a stable swimlane count for the displayed day", () => {
-    // Two overlap in the morning and establish the two day lanes; the later
-    // entry stays in its assigned lane instead of widening to fill the day.
+  it("scopes lanes to the overlapping visual cluster", () => {
     const segments = laid([540, 660], [600, 720], [900, 960]);
     assert.deepEqual(segments.map((segment) => segment.lane), [0, 1, 0]);
-    assert.deepEqual(segments.map((segment) => segment.laneCount), [2, 2, 2]);
+    assert.deepEqual(segments.map((segment) => segment.laneCount), [2, 2, 1]);
   });
 
   it("orders by start then end", () => {
