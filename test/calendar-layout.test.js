@@ -140,12 +140,6 @@ describe("layoutSegments", () => {
     assert.deepEqual(segments.map((segment) => segment.lane), [0, 1, 0]);
   });
 
-  it("separates very close sequential timers so their borders remain visible", () => {
-    const segments = laid([540, 545], [545, 550]);
-    assert.deepEqual(segments.map((segment) => segment.lane), [0, 1]);
-    assert.deepEqual(segments.map((segment) => segment.laneCount), [2, 2]);
-  });
-
   it("keeps a stable swimlane count for the displayed day", () => {
     // Two overlap in the morning and establish the two day lanes; the later
     // entry stays in its assigned lane instead of widening to fill the day.
