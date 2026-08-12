@@ -52,4 +52,26 @@ describe("page action render ownership", () => {
       }
     });
   }
+
+  const localMutations = [
+    {
+      file: "popup/popup.js",
+      actions: ["startTimer", "restartFromEntry", "stopTimer", "saveEdit", "deleteEdit", "mergeEdit"]
+    },
+    {
+      file: "calendar/calendar.js",
+      actions: ["endResize", "endDrag", "undoResize", "mergeSelectedEntry", "duplicateSelectedEntry", "deleteCalendarEntry", "saveCalendarEdit"]
+    }
+  ];
+
+  for (const page of localMutations) {
+    it(`${page.file} renders local mutations before remote sync completes`, () => {
+      const code = source(page.file);
+      for (const action of page.actions) {
+        const body = functionSource(code, action);
+        assert.match(body, /\bqueueSync\(/, `${action} must request background sync`);
+        assert.doesNotMatch(body, /\bawait\s+runSync\(/, `${action} must not wait for remote sync`);
+      }
+    });
+  }
 });

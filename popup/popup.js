@@ -4,7 +4,7 @@ import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-a
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { onEntriesChanged } from "../src/events.js";
-import { syncNow } from "../src/sync.js";
+import { requestBackgroundSync } from "../src/sync-request.js";
 import { allocateEntryByLocalDay } from "../src/time-allocation.js";
 import {
   addDays,
@@ -732,11 +732,17 @@ async function render() {
 async function runSync({ force = false } = {}) {
   setStatus($syncStatus, "pending");
   try {
-    const result = await syncNow({ interactiveAuth: false, force });
+    const result = await requestBackgroundSync({ force });
     setStatus($syncStatus, result.status, result.warning);
   } catch (error) {
     setStatus($syncStatus, statusFromError(error), formatError(error));
   }
+}
+
+function queueSync() {
+  // The edit is already committed locally. Let the background keep the remote
+  // sync alive if this short-lived popup closes before it completes.
+  void runSync({ force: false });
 }
 
 function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
@@ -757,7 +763,7 @@ function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
 async function startTimer() {
   await replaceActiveTimer(formFields());
   setNewTimerOpen(false);
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function restartFromEntry(id) {
@@ -770,14 +776,14 @@ async function restartFromEntry(id) {
     multiply: entry.multiply || ""
   });
   hideEdit();
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function stopTimer({ expectedRevision } = {}) {
   const active = await getActiveEntries();
   if (!active.length) return;
   await stopEntry(active[0].id, { expectedRevision: expectedRevision ?? active[0].revision });
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function showEdit(id) {
@@ -853,7 +859,7 @@ async function saveEdit() {
       { expectedRevision: editingRevision }
     );
     hideEdit();
-    await runSync({ force: false });
+    queueSync();
   } catch (error) {
     if (error.code === "STORAGE_CONFLICT") hideEdit();
     throw error;
@@ -872,7 +878,7 @@ async function deleteEdit() {
   try {
     await softDeleteEntry(editingId, { expectedRevision: editingRevision });
     hideEdit();
-    await runSync({ force: false });
+    queueSync();
   } catch (error) {
     if (error.code === "STORAGE_CONFLICT") hideEdit();
     throw error;
@@ -891,7 +897,7 @@ async function mergeEdit() {
       }
     });
     hideEdit();
-    await runSync({ force: false });
+    queueSync();
   } catch (error) {
     if (error.code === "STORAGE_CONFLICT") hideEdit();
     throw error;

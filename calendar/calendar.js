@@ -11,7 +11,7 @@ import {
 } from "../src/tempo.js";
 import { ERROR_CODE } from "../src/error-codes.js";
 import { onEntriesChanged } from "../src/events.js";
-import { syncNow } from "../src/sync.js";
+import { requestBackgroundSync } from "../src/sync-request.js";
 import {
   addDays,
   bindMinuteRollover,
@@ -602,7 +602,7 @@ async function endResize() {
   undo.revision = updated.revision;
   setResizeUndo(undo);
   setStatus("Entry resized");
-  await runSync({ force: false });
+  queueSync();
 }
 
 function moveDrag(event) {
@@ -652,7 +652,7 @@ async function endDrag() {
   setResizeUndo(null);
   await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
   setStatus("Entry moved");
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function undoResize() {
@@ -666,7 +666,7 @@ async function undoResize() {
       end_at: undo.end_at
     }, { expectedRevision: undo.revision });
     setStatus("Resize undone");
-    await runSync({ force: false });
+    queueSync();
   } catch (error) {
     setResizeUndo(undo);
     throw error;
@@ -676,11 +676,17 @@ async function undoResize() {
 async function runSync({ force = false } = {}) {
   setStatus("Syncing...");
   try {
-    const result = await syncNow({ interactiveAuth: false, force });
+    const result = await requestBackgroundSync({ force });
     setStatus(result.warning || result.status);
   } catch (error) {
     setStatus(`${statusFromError(error)}: ${formatError(error)}`);
   }
+}
+
+function queueSync() {
+  // Rendering belongs to the local transaction; remote sync continues in the
+  // background even if this page is navigated away from.
+  void runSync({ force: false });
 }
 
 async function mergeSelectedEntry() {
@@ -699,7 +705,7 @@ async function mergeSelectedEntry() {
   });
   closeEditor();
   setStatus("Entries merged");
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function duplicateSelectedEntry() {
@@ -712,7 +718,7 @@ async function duplicateSelectedEntry() {
   closeEditor();
   selectedEntryId = duplicate.id;
   setStatus("Entry duplicated");
-  await runSync({ force: false });
+  queueSync();
 }
 
 function closeEditor() {
@@ -765,7 +771,7 @@ async function deleteCalendarEntry() {
   closeEditor();
   selectedEntryId = "";
   setStatus("Entry deleted");
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function saveCalendarEdit(event) {
@@ -791,7 +797,7 @@ async function saveCalendarEdit(event) {
   );
   closeEditor();
   setStatus("Entry updated");
-  await runSync({ force: false });
+  queueSync();
 }
 
 async function clearSelection() {

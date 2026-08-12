@@ -11,6 +11,7 @@ import { platform } from "../src/platform.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { ERROR_CODE } from "../src/error-codes.js";
+import { SYNC_REQUEST_MESSAGE } from "../src/sync-request.js";
 import {
   sendTempoWorklogs,
   TEMPO_UPLOAD_MESSAGE,
@@ -44,6 +45,36 @@ async function runBackgroundSync() {
   // Set from the idle streak, so a quiet profile stretches its polling out and
   // snaps back to the configured interval as soon as anything changes.
   await setSetting(NEXT_DUE_KEY, Date.now() + await nextSyncDelayMinutes() * 60000);
+}
+
+async function runRequestedSync(message) {
+  try {
+    const result = await syncNow({
+      interactiveAuth: false,
+      force: Boolean(message?.force)
+    });
+    return { ok: true, result };
+  } catch (error) {
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "requested_sync",
+      error,
+      recovery: "Open Options, review diagnostics, then retry sync."
+    }).catch(() => {});
+    return {
+      ok: false,
+      error: { code: error?.code || "SYNC_FAILED", message: error?.message || "Sync failed" }
+    };
+  } finally {
+    // A failed requested sync must still bring the next alarm forward. Without
+    // this, an idle backoff due time could defer recovery long after a new edit.
+    try {
+      await setSetting(NEXT_DUE_KEY, Date.now() + await nextSyncDelayMinutes() * 60000);
+    } catch {
+      // The existing heartbeat remains armed if its due time cannot be updated.
+    }
+    await scheduleHeartbeat();
+  }
 }
 
 async function scheduleHeartbeat() {
@@ -145,6 +176,7 @@ async function uploadTempoWorklogs(message, sender) {
 }
 
 platform.onRuntimeMessage((message, sender) => {
+  if (message?.type === SYNC_REQUEST_MESSAGE) return runRequestedSync(message);
   if (message?.type !== TEMPO_UPLOAD_MESSAGE) return undefined;
   return uploadTempoWorklogs(message, sender);
 });
