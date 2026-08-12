@@ -5,6 +5,10 @@ export const DAY_COUNT = 7;
 export const MINUTES_PER_DAY = 24 * 60;
 export const SNAP_MINUTES = 15;
 export const RESIZE_SNAP_MINUTES = 1;
+// Calendar blocks have a 22px minimum height. Include that visual footprint in
+// lane assignment so short, adjacent timers do not paint over each other's
+// borders even when their recorded intervals only touch.
+const MIN_RENDER_MINUTES = 28;
 export const SLOT_HEIGHT = 12;
 export const PX_PER_MINUTE = SLOT_HEIGHT / SNAP_MINUTES;
 export const MINUTE_MS = 60 * 1000;
@@ -163,7 +167,11 @@ function layoutGroup(group) {
       lane = lanes.length;
       lanes.push(0);
     }
-    lanes[lane] = segment.endMinute;
+    const renderedEnd = Math.max(
+      segment.startMinute + MIN_RENDER_MINUTES,
+      segment.endMinute - 5
+    );
+    lanes[lane] = Math.max(segment.endMinute, renderedEnd);
     segment.lane = lane;
   }
   for (const segment of group) {
