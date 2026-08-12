@@ -125,7 +125,7 @@ async function exercisePopupTimer(baseUrl, sessionId) {
   });
   if (!started) throw new Error("Popup timer controls are unavailable.");
   await waitForCondition(baseUrl, sessionId, "Popup timer start", `
-    return document.querySelector("#activeTitle")?.textContent.includes("Browser smoke")
+    return document.querySelector("#activeTitle")?.textContent.includes("Timer lifecycle")
       && !document.querySelector("#stopButton")?.classList.contains("hidden");
   `);
   // Completed entries with a zero-length interval have no calendar segment.
@@ -137,7 +137,7 @@ async function exercisePopupTimer(baseUrl, sessionId) {
     args: []
   });
   await waitForCondition(baseUrl, sessionId, "Popup timer stop", `
-    return document.querySelector("#activeTitle")?.textContent === "No active timer"
+    return document.querySelector("#activeTitle")?.textContent === "No task"
       && Boolean(document.querySelector(".entry-row[data-edit-id]"));
   `);
 
