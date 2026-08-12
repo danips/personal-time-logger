@@ -299,7 +299,6 @@ textarea {
 .entry-block,
 .drag-preview {
   position: absolute;
-  min-height: 22px;
   border: 1px solid var(--event-border);
   border-radius: 6px;
   overflow: hidden;
@@ -314,6 +313,63 @@ textarea {
   cursor: grab;
   user-select: none;
   touch-action: none;
+}
+
+.drag-preview {
+  min-height: 22px;
+}
+
+/* Short entries cannot fit the full card layout at the calendar's time scale.
+   Keep their border at the real interval, but let the one-line label remain
+   visible without making the entry overlap the next same-lane block. */
+.entry-block.compact-entry {
+  overflow: visible;
+}
+
+.entry-block.compact-entry .entry-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+.entry-block.compact-entry .entry-project {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.entry-block.compact-entry .entry-details {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.entry-block.compact-entry .entry-details:empty {
+  display: none;
+}
+
+.entry-block.compact-entry .entry-details:not(:empty)::before {
+  content: " · ";
+}
+
+.entry-block.compact-entry .entry-duration {
+  position: static;
+  flex: 0 0 auto;
+  max-width: none;
+  padding: 0;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .resize-handle {

@@ -33,7 +33,7 @@
 
 .entry-editor-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 6px;
   margin-top: 6px;
 }
@@ -56,8 +56,8 @@
 }
 
 .entry-editor-status {
-  display: grid !important;
-  gap: 3px !important;
+  /*display: grid !important;
+  gap: 3px !important;*/
   margin-left: auto;
 }
 

@@ -131,6 +131,14 @@ function formatTotalHours(seconds) {
   return formatElapsed(Math.round(Math.max(0, Number(seconds) || 0)));
 }
 
+function formatCompactElapsed(seconds) {
+  const numeric = Number(seconds);
+  const total = Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
+  const minutes = Math.floor(total / 60);
+  const remainingSeconds = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
 function renderHeader(dailyTotals = []) {
   const header = $("#dayHeader");
   const today = startOfDay(new Date());
@@ -179,7 +187,11 @@ function renderEntryBlock(column, segment) {
   const laneCount = segment.laneCount || 1;
   const laneWidth = 100 / laneCount;
   const top = segment.startMinute * PX_PER_MINUTE + 2;
-  const height = Math.max(22, (segment.endMinute - segment.startMinute) * PX_PER_MINUTE - 4);
+  // Keep the block inside its real interval. A fixed minimum height makes a
+  // short entry extend into the next same-lane entry and hide its borders.
+  // Two pixels are enough to retain the top and bottom borders for very short
+  // entries; compact entries receive a separate one-line label treatment.
+  const height = Math.max(2, (segment.endMinute - segment.startMinute) * PX_PER_MINUTE - 4);
   const actualSegmentSeconds = actualDurationSeconds(segment.visibleStart, minDate(segment.visibleEnd, segment.actualEnd));
   const effectiveSegmentSeconds = actualDurationSeconds(segment.visibleStart, segment.visibleEnd);
   const multipliedSeconds = Math.max(0, effectiveSegmentSeconds - actualSegmentSeconds);
@@ -189,11 +201,13 @@ function renderEntryBlock(column, segment) {
   const isMultiplied = hasMultiplier(entry) && multipliedSeconds > 0;
 
   const block = document.createElement("article");
+  const isCompact = height < 22;
   block.className = [
     "entry-block",
     entry.end_at ? "" : "active-entry",
     entry.status === "needs_review" ? "needs-review" : "",
     isMultiplied ? "multiplied-entry" : "",
+    isCompact ? "compact-entry" : "",
     entry.id === selectedEntryId ? "selected-entry" : ""
   ].filter(Boolean).join(" ");
   block.dataset.entryId = entry.id;
@@ -207,7 +221,9 @@ function renderEntryBlock(column, segment) {
   block.setAttribute("aria-label", `Edit ${entryTitle(entry)}`);
   const projectLabel = entry.project || "Untitled project";
   const detailsLabel = [entry.task, entry.description].filter(Boolean).join(" - ") || "No task or description";
-  const durationLabel = formatElapsed(Math.round(segment.totalSeconds || 0));
+  const durationLabel = isCompact
+    ? formatCompactElapsed(segment.totalSeconds || 0)
+    : formatElapsed(Math.round(segment.totalSeconds || 0));
   block.title = [
     projectLabel,
     detailsLabel,
