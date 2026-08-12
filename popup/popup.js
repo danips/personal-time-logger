@@ -975,7 +975,7 @@ function bindEvents() {
       platform.openExtensionPage("usage/usage.html").catch((error) => setStatus($syncStatus, "error", formatError(error)));
     }
   });
-  $("#openOptions").addEventListener("click", () => platform.openOptionsPage().catch((error) => setStatus($syncStatus, "error", formatError(error))));
+  $("#openOptions").addEventListener("click", () => platform.openExtensionPage("options/options.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
   $("#saveEdit").addEventListener("click", (event) => runPopupAction(`save-entry:${editingId}`, saveEdit, {
     button: event.currentTarget,
     expectedRevision: editingRevision

@@ -44,27 +44,45 @@ async function getTab(tabId) {
   }
 }
 
+async function openOrFocusExtensionPage(path) {
+  const url = rawApi.runtime.getURL(path);
+  if (!rawApi.tabs || !rawApi.tabs.create) {
+    throw new Error("Browser tabs API is unavailable");
+  }
+
+  try {
+    if (rawApi.tabs.query && rawApi.tabs.update) {
+      const existing = await apiCall(rawApi.tabs.query, rawApi.tabs, { url });
+      const tab = Array.isArray(existing)
+        ? existing.find((candidate) => Number.isInteger(candidate?.id))
+        : null;
+      if (tab) {
+        if (rawApi.windows?.update && Number.isInteger(tab.windowId)) {
+          await apiCall(rawApi.windows.update, rawApi.windows, tab.windowId, { focused: true });
+        }
+        return apiCall(rawApi.tabs.update, rawApi.tabs, tab.id, { active: true });
+      }
+    }
+    return await apiCall(rawApi.tabs.create, rawApi.tabs, { url });
+  } catch (error) {
+    throw new Error(`Could not open extension page: ${error.message || error}`, { cause: error });
+  }
+}
+
 export const platform = {
   getURL(path) {
     return rawApi.runtime.getURL(path);
   },
 
   async openOptionsPage() {
+    if (rawApi.tabs?.create) return openOrFocusExtensionPage("options/options.html");
     if (!rawApi.runtime.openOptionsPage) return;
     if (usesPromiseApi) return rawApi.runtime.openOptionsPage();
     return callbackOrPromiseApi(rawApi.runtime.openOptionsPage, rawApi.runtime);
   },
 
   async openExtensionPage(path) {
-    const url = rawApi.runtime.getURL(path);
-    if (rawApi.tabs && rawApi.tabs.create) {
-      try {
-        return await apiCall(rawApi.tabs.create, rawApi.tabs, { url });
-      } catch (error) {
-        throw new Error(`Could not open extension page: ${error.message || error}`, { cause: error });
-      }
-    }
-    throw new Error("Browser tabs API is unavailable");
+    return openOrFocusExtensionPage(path);
   },
 
   async hasOptionalHostPermission(origin) {
