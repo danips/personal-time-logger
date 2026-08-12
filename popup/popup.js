@@ -80,6 +80,7 @@ const $editEnd = $("#editEnd");
 const $editStatus = $("#editStatus");
 const $mergeTarget = $("#mergeTarget");
 const $mergeEdit = $("#mergeEdit");
+const $mergeTools = $(".merge-tools");
 const $newTimerToggle = $("#newTimerToggle");
 const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
@@ -827,6 +828,7 @@ function hideEdit() {
   mergeTargetRevisions = new Map();
   $mergeTarget.replaceChildren();
   $mergeEdit.disabled = true;
+  $mergeTools.classList.add("hidden");
   $editProjectDot.classList.add("hidden");
   $editPanel.classList.add("hidden");
 }
@@ -840,14 +842,9 @@ function renderMergeTargets(entry, entries) {
     option.textContent = `${shortDateTime(candidate.start_at)} · ${formatElapsed(candidate.duration_seconds || durationSeconds(candidate.start_at, candidate.end_at))}`;
     return option;
   });
-  if (!options.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No matching completed entries";
-    options.push(option);
-  }
   $mergeTarget.replaceChildren(...options);
   $mergeEdit.disabled = !candidates.length;
+  $mergeTools.classList.toggle("hidden", !candidates.length);
 }
 
 async function saveEdit() {

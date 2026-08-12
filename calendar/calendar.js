@@ -742,14 +742,9 @@ function openSelectedEntryEditor() {
     option.textContent = `${shortDay(new Date(e.start_at))} ${localTime(new Date(e.start_at))} · ${formatElapsed(e.duration_seconds || durationSeconds(e.start_at, e.end_at))}`;
     return option;
   });
-  if (!mergeOptions.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No matching completed entries this week";
-    mergeOptions.push(option);
-  }
   $("#calendarMergeTarget").replaceChildren(...mergeOptions);
   $("#calendarMergeButton").disabled = !candidates.length;
+  $("#calendarMergeControl").hidden = !candidates.length;
   $("#duplicateEntryButton").disabled = !entry.end_at;
   $("#duplicateEntryButton").title = entry.end_at
     ? "Create a copy at the same date and time"

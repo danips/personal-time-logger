@@ -229,7 +229,14 @@ textarea {
 
 .edit-popup-merge {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 6px;
+}
+
+.edit-popup-merge-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: end;
   gap: 6px;
 }
