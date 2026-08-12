@@ -59,8 +59,8 @@ let windowSizeEditorOpen = false;
 let renderGeneration = 0;
 
 const $activePanel = $(".active-panel");
-const $activeDot = $("#activeProjectDot");
 const $activeTitle = $("#activeTitle");
+const $activeDescription = $("#activeDescription");
 const $elapsed = $("#elapsed");
 const $stopButton = $("#stopButton");
 const $activeWarning = $("#activeWarning");
@@ -415,15 +415,15 @@ function updateElapsed() {
     return;
   }
   renderedActiveId = activeId;
-  $activeTitle.textContent = latest ? entryTitle(latest) : "No active timer";
+  $activeTitle.textContent = latest?.task || "No task";
+  $activeDescription.textContent = latest?.description || "";
+  $activeDescription.title = latest?.description || "";
   $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
   $stopButton.classList.toggle("hidden", !latest);
   $activePanel.classList.toggle("is-running", hasActive);
   $activePanel.tabIndex = 0;
   $activePanel.setAttribute("role", "button");
   $activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "Start a new timer");
-  $activeDot.classList.toggle("hidden", !latest);
-  if (latest) $activeDot.style.setProperty("--project-color", projectColor(latest));
   if (hasActive) setNewTimerOpen(false);
   void updateActiveIcon(hasActive);
 }
