@@ -442,8 +442,7 @@ h2 {
   gap: 8px;
 }
 
-.entry-form,
-#editForm {
+.entry-form {
   display: grid;
   gap: 8px;
 }
@@ -487,8 +486,7 @@ textarea {
   width: auto;
 }
 
-.actions,
-.edit-actions {
+.actions {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
@@ -501,19 +499,11 @@ textarea {
 }
 
 .edit-panel {
-  margin: 12px 0;
-  padding: 10px;
+  margin: 8px 0;
+  padding: 8px;
   border: 1px solid #dadce0;
   border-radius: 8px;
   background: #ffffff;
-}
-
-.merge-tools {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: end;
-  gap: 8px;
-  margin-top: 8px;
 }
 
 .recent {

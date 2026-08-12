@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Time Logger</title>
+    <link rel="stylesheet" href="../src/entry-editor.css">
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
@@ -105,53 +106,7 @@
           <span id="editProjectDot" class="project-dot hidden" aria-hidden="true"></span>
           <span>Edit Entry</span>
         </h2>
-        <form id="editForm">
-          <label>
-            Project
-            <input id="editProject">
-          </label>
-          <label>
-            Task
-            <input id="editTask">
-          </label>
-          <label>
-            Description
-            <textarea id="editDescription" rows="2"></textarea>
-          </label>
-          <div class="checkbox-group">
-            <label class="checkbox-row">
-              <input id="editMultiply" type="checkbox">
-              <span>Multiply</span>
-            </label>
-          </div>
-          <label>
-            Start
-            <input id="editStart" type="datetime-local" step="1">
-          </label>
-          <label>
-            End
-            <input id="editEnd" type="datetime-local" step="1">
-          </label>
-          <label>
-            Status
-            <select id="editStatus">
-              <option value="ok">ok</option>
-              <option value="needs_review">needs_review</option>
-            </select>
-          </label>
-        </form>
-        <div class="merge-tools">
-          <label>
-            Merge with matching entry
-            <select id="mergeTarget"></select>
-          </label>
-          <button id="mergeEdit" type="button">Merge</button>
-        </div>
-        <div class="edit-actions">
-          <button id="saveEdit" type="button">Save</button>
-          <button id="cancelEdit" type="button">Cancel</button>
-          <button id="deleteEdit" class="danger" type="button">Delete</button>
-        </div>
+        <div id="popupEntryEditor"></div>
       </section>
 
       <section class="recent">

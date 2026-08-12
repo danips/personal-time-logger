@@ -3,6 +3,7 @@ import { runAction } from "../src/action-runner.js";
 import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-account-cache.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
+import { mountEntryEditor } from "../src/entry-editor.js";
 import { onEntriesChanged } from "../src/events.js";
 import { requestBackgroundSync } from "../src/sync-request.js";
 import { allocateEntryByLocalDay } from "../src/time-allocation.js";
@@ -35,6 +36,23 @@ import {
   normalizeWindowSizePreset,
   resizeCurrentWindow
 } from "../src/window-resize.js";
+
+mountEntryEditor(document.getElementById("popupEntryEditor"), {
+  formId: "editForm",
+  projectId: "editProject",
+  taskId: "editTask",
+  descriptionId: "editDescription",
+  multiplyId: "editMultiply",
+  statusId: "editStatus",
+  startId: "editStart",
+  endId: "editEnd",
+  mergeControlId: "editMergeControl",
+  mergeTargetId: "mergeTarget",
+  mergeButtonId: "mergeEdit",
+  saveButtonId: "saveEdit",
+  cancelButtonId: "cancelEdit",
+  deleteButtonId: "deleteEdit"
+});
 
 let activeEntries = [];
 let editingId = "";
@@ -80,7 +98,7 @@ const $editEnd = $("#editEnd");
 const $editStatus = $("#editStatus");
 const $mergeTarget = $("#mergeTarget");
 const $mergeEdit = $("#mergeEdit");
-const $mergeTools = $(".merge-tools");
+const $mergeTools = $("#editMergeControl");
 const $newTimerToggle = $("#newTimerToggle");
 const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
@@ -828,7 +846,7 @@ function hideEdit() {
   mergeTargetRevisions = new Map();
   $mergeTarget.replaceChildren();
   $mergeEdit.disabled = true;
-  $mergeTools.classList.add("hidden");
+  $mergeTools.hidden = true;
   $editProjectDot.classList.add("hidden");
   $editPanel.classList.add("hidden");
 }
@@ -844,7 +862,7 @@ function renderMergeTargets(entry, entries) {
   });
   $mergeTarget.replaceChildren(...options);
   $mergeEdit.disabled = !candidates.length;
-  $mergeTools.classList.toggle("hidden", !candidates.length);
+  $mergeTools.hidden = !candidates.length;
 }
 
 async function saveEdit() {

@@ -2,6 +2,7 @@ import { getEntriesIntersecting, getSetting, mutateSetting } from "../src/db.js"
 import { isActionRunning, runAction } from "../src/action-runner.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
+import { mountEntryEditor } from "../src/entry-editor.js";
 import {
   normalizeTempoIssueId,
   normalizeTempoTaskIssueIds,
@@ -50,6 +51,25 @@ import {
 import { bindPopupDrag } from "./popup-drag.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { platform } from "../src/platform.js";
+
+mountEntryEditor(document.getElementById("calendarEntryEditor"), {
+  formId: "calendarEditForm",
+  projectId: "calendarEditProject",
+  taskId: "calendarEditTask",
+  descriptionId: "calendarEditDescription",
+  multiplyId: "calendarEditMultiply",
+  statusId: "calendarEditStatus",
+  startId: "calendarEditStart",
+  endId: "calendarEditEnd",
+  mergeControlId: "calendarMergeControl",
+  mergeTargetId: "calendarMergeTarget",
+  mergeButtonId: "calendarMergeButton",
+  duplicateButtonId: "duplicateEntryButton",
+  saveButtonId: "calendarSaveEntry",
+  cancelButtonId: "cancelCalendarEditButton",
+  deleteButtonId: "deleteCalendarEntry",
+  saveType: "submit"
+});
 
 const DRAG_THRESHOLD_PX = 5;
 const DEFAULT_VISIBLE_HOUR = 7;

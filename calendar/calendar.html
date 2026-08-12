@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Time Logger Calendar</title>
+    <link rel="stylesheet" href="../src/entry-editor.css">
     <link rel="stylesheet" href="calendar.css">
   </head>
   <body>
@@ -31,56 +32,7 @@
 
       <div id="calendarEditOverlay" class="edit-overlay" hidden>
         <div class="edit-popup">
-          <form id="calendarEditForm" class="edit-popup-form">
-            <label>
-              Project
-              <input id="calendarEditProject">
-            </label>
-            <label>
-              Task
-              <input id="calendarEditTask">
-            </label>
-            <label>
-              Description
-              <textarea id="calendarEditDescription" rows="2"></textarea>
-            </label>
-            <div class="edit-popup-checkboxes">
-              <label>
-                <input id="calendarEditMultiply" type="checkbox">
-                Multiply
-              </label>
-              <label class="status-inline">
-                Status
-                <select id="calendarEditStatus">
-                  <option value="ok">ok</option>
-                  <option value="needs_review">needs_review</option>
-                </select>
-              </label>
-            </div>
-            <label>
-              Start
-              <input id="calendarEditStart" type="datetime-local" step="1" required>
-            </label>
-            <label>
-              End
-              <input id="calendarEditEnd" type="datetime-local" step="1">
-            </label>
-            <div class="edit-popup-merge">
-              <div id="calendarMergeControl" class="edit-popup-merge-control">
-                <label>
-                  Merge with
-                  <select id="calendarMergeTarget"></select>
-                </label>
-                <button id="calendarMergeButton" type="button">Merge</button>
-              </div>
-              <button id="duplicateEntryButton" type="button">Duplicate</button>
-            </div>
-            <div class="edit-popup-actions">
-              <button type="submit">Save</button>
-              <button id="cancelCalendarEditButton" type="button">Cancel</button>
-              <button id="deleteCalendarEntry" class="danger" type="button">Delete</button>
-            </div>
-          </form>
+          <div id="calendarEntryEditor"></div>
         </div>
       </div>
 

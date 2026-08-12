@@ -40,6 +40,8 @@ const expectedFiles = [
   "src/db.js",
   "src/diagnostics.js",
   "src/entries.js",
+  "src/entry-editor.css",
+  "src/entry-editor.js",
   "src/entry-form.js",
   "src/error-codes.js",
   "src/error-registry.js",
