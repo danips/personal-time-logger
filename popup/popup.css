@@ -2,6 +2,7 @@
   color-scheme: light dark;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
+  --muted: #5f6368;
 }
 
 body {
@@ -779,6 +780,10 @@ textarea {
 }
 
 @media (prefers-color-scheme: dark) {
+  :root {
+    --muted: #bdc1c6;
+  }
+
   body {
     color: #e8eaed;
     background: #202124;

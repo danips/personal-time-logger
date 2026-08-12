@@ -72,3 +72,9 @@
   align-items: end;
   gap: 6px;
 }
+
+/* The grid declaration above would otherwise override the user-agent rule for
+ * the hidden attribute, leaving an empty merge control visible. */
+.entry-editor-merge-control[hidden] {
+  display: none;
+}
