@@ -324,6 +324,7 @@ textarea {
    visible without making the entry overlap the next same-lane block. */
 .entry-block.compact-entry {
   overflow: visible;
+  min-height: 8px;
 }
 
 .entry-block.compact-entry .entry-content {

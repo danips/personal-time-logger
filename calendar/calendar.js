@@ -142,28 +142,34 @@ function formatCompactElapsed(seconds) {
 function renderHeader(dailyTotals = []) {
   const header = $("#dayHeader");
   const today = startOfDay(new Date());
-  header.replaceChildren();
+  const needsBuild = header.children.length !== DAY_COUNT + 1;
+  if (needsBuild) header.replaceChildren();
 
-  const corner = document.createElement("div");
-  corner.className = "corner-header";
-  const cornerLabel = document.createElement("span");
-  cornerLabel.textContent = "Time";
-  const weekTotal = document.createElement("em");
+  const corner = needsBuild ? document.createElement("div") : header.firstElementChild;
+  if (needsBuild) {
+    corner.className = "corner-header";
+    const cornerLabel = document.createElement("span");
+    cornerLabel.textContent = "Time";
+    const weekTotal = document.createElement("em");
+    corner.append(cornerLabel, weekTotal);
+    header.append(corner);
+  }
+  const weekTotal = corner.querySelector("em");
   weekTotal.textContent = formatTotalHours(dailyTotals.reduce((sum, seconds) => sum + (Number(seconds) || 0), 0));
   weekTotal.title = "Total logged for the displayed week";
-  corner.append(cornerLabel, weekTotal);
-  header.append(corner);
 
   for (let index = 0; index < DAY_COUNT; index += 1) {
     const date = addDays(weekStart, index);
-    const element = document.createElement("div");
+    const element = needsBuild ? document.createElement("div") : header.children[index + 1];
+    if (needsBuild) {
+      const dateLabel = document.createElement("strong");
+      const total = document.createElement("em");
+      element.append(dateLabel, total);
+      header.append(element);
+    }
     element.className = `day-heading${isSameLocalDate(date, today) ? " today" : ""}`;
-    const dateLabel = document.createElement("strong");
-    dateLabel.textContent = calendarHeaderDate(date);
-    const total = document.createElement("em");
-    total.textContent = formatTotalHours(dailyTotals[index] || 0);
-    element.append(dateLabel, total);
-    header.append(element);
+    element.querySelector("strong").textContent = calendarHeaderDate(date);
+    element.querySelector("em").textContent = formatTotalHours(dailyTotals[index] || 0);
   }
 }
 
@@ -182,7 +188,7 @@ function renderTimeAxis(grid) {
   grid.append(axis);
 }
 
-function renderEntryBlock(column, segment) {
+function renderEntryBlock(column, segment, existingBlock = null) {
   const entry = segment.entry;
   const laneCount = segment.laneCount || 1;
   const laneWidth = 100 / laneCount;
@@ -200,7 +206,7 @@ function renderEntryBlock(column, segment) {
     : 100;
   const isMultiplied = hasMultiplier(entry) && multipliedSeconds > 0;
 
-  const block = document.createElement("article");
+  const block = existingBlock || document.createElement("article");
   const isCompact = height < 22;
   block.className = [
     "entry-block",
@@ -230,39 +236,58 @@ function renderEntryBlock(column, segment) {
     durationLabel
   ].filter(Boolean).join("\n");
   if (isMultiplied) block.style.setProperty("--actual-percent", `${actualPercent}%`);
-  const fill = document.createElement("div");
-  fill.className = "entry-fill";
+  let fill = block.querySelector(".entry-fill");
+  let content = block.querySelector(".entry-content");
+  if (!fill || !content) {
+    fill = document.createElement("div");
+    fill.className = "entry-fill";
+    fill.setAttribute("aria-hidden", "true");
+    content = document.createElement("div");
+    content.className = "entry-content";
+    const project = document.createElement("div");
+    project.className = "entry-project";
+    const dot = document.createElement("span");
+    dot.className = "calendar-project-dot";
+    dot.setAttribute("aria-hidden", "true");
+    const taskText = document.createElement("span");
+    taskText.className = "entry-project-text";
+    project.append(dot, taskText);
+    const details = document.createElement("div");
+    details.className = "entry-details";
+    const duration = document.createElement("div");
+    duration.className = "entry-duration";
+    content.append(project, details, duration);
+    block.append(fill, content);
+  }
   fill.setAttribute("aria-hidden", "true");
-  const content = document.createElement("div");
-  content.className = "entry-content";
-  const project = document.createElement("div");
-  project.className = "entry-project";
-  const dot = document.createElement("span");
-  dot.className = "calendar-project-dot";
+  const project = content.querySelector(".entry-project");
+  const dot = project.querySelector(".calendar-project-dot");
   dot.title = projectLabel;
-  dot.setAttribute("aria-hidden", "true");
-  const taskText = document.createElement("span");
-  taskText.className = "entry-project-text";
-  taskText.textContent = entry.task || "No task";
-  project.append(dot, taskText);
-  const details = document.createElement("div");
-  details.className = "entry-details";
-  details.textContent = entry.description || "";
-  const duration = document.createElement("div");
-  duration.className = "entry-duration";
-  duration.textContent = durationLabel;
-  content.append(project, details, duration);
-  block.append(fill, content);
-  if (entry.end_at && entry.id === selectedEntryId && segment.startsEntry) {
-    block.append(createResizeHandle("top", entry));
+  content.querySelector(".entry-project-text").textContent = entry.task || "No task";
+  content.querySelector(".entry-details").textContent = entry.description || "";
+  content.querySelector(".entry-duration").textContent = durationLabel;
+
+  const resizeEdges = new Set();
+  if (entry.end_at && entry.id === selectedEntryId && segment.startsEntry) resizeEdges.add("top");
+  if (entry.end_at && entry.id === selectedEntryId && segment.endsEntry) resizeEdges.add("bottom");
+  for (const handle of block.querySelectorAll(".resize-handle")) {
+    if (!resizeEdges.has(handle.dataset.resizeEdge)) handle.remove();
   }
-  if (entry.end_at && entry.id === selectedEntryId && segment.endsEntry) {
-    block.append(createResizeHandle("bottom", entry));
+  for (const edge of resizeEdges) {
+    const handle = block.querySelector(`.resize-handle-${edge}`) || createResizeHandle(edge, entry);
+    handle.setAttribute("aria-label", `${edge === "top" ? "Change start" : "Change end"} of ${entryTitle(entry)}`);
+    handle.title = edge === "top" ? "Drag to change start time" : "Drag to change end time";
+    if (!handle.parentElement) block.append(handle);
   }
-  block.addEventListener("pointerdown", beginDrag);
-  block.addEventListener("click", selectEntryFromBlock);
-  block.addEventListener("keydown", selectEntryFromKeyboard);
-  column.append(block);
+  if (!existingBlock) {
+    block.addEventListener("pointerdown", beginDrag);
+    block.addEventListener("click", selectEntryFromBlock);
+    block.addEventListener("keydown", selectEntryFromKeyboard);
+  }
+  // The caller reconciles the column order after all blocks are updated. Do
+  // not append reused blocks here: moving every block on every refresh creates
+  // unnecessary DOM mutations even when the layout has not changed.
+  return block;
 }
 
 function createResizeHandle(edge, entry) {
@@ -280,21 +305,37 @@ function createResizeHandle(edge, entry) {
 function renderCalendar(segmentsByDay) {
   const grid = $("#calendarGrid");
   const today = startOfDay(new Date());
-  grid.replaceChildren();
-  renderTimeAxis(grid);
+  if (!grid.querySelector(".time-axis")) renderTimeAxis(grid);
 
   for (let index = 0; index < DAY_COUNT; index += 1) {
-    const column = document.createElement("div");
+    let column = grid.querySelector(`.day-column[data-day-index="${index}"]`);
+    if (!column) {
+      column = document.createElement("div");
+      column.dataset.dayIndex = String(index);
+      grid.append(column);
+    }
     column.className = `day-column${isSameLocalDate(addDays(weekStart, index), today) ? " today" : ""}`;
-    column.dataset.dayIndex = String(index);
-    grid.append(column);
 
     const segments = layoutSegments(segmentsByDay[index]);
+    const existingBlocks = new Map([...column.querySelectorAll(".entry-block")]
+      .map((block) => [block.dataset.entryId, block]));
+    const usedBlocks = new Set();
+    const nextBlocks = [];
     for (const segment of segments) {
-      renderEntryBlock(column, segment);
+      const block = renderEntryBlock(column, segment, existingBlocks.get(segment.entry.id));
+      usedBlocks.add(block);
+      nextBlocks.push(block);
+    }
+    for (let position = 0; position < nextBlocks.length; position += 1) {
+      const block = nextBlocks[position];
+      if (column.children[position] !== block) {
+        column.insertBefore(block, column.children[position] || null);
+      }
+    }
+    for (const block of existingBlocks.values()) {
+      if (!usedBlocks.has(block)) block.remove();
     }
   }
-
 }
 
 function syncScrollbarGutter() {
@@ -324,6 +365,14 @@ async function render() {
   renderCalendar(segmentsByDay);
   syncScrollbarGutter();
   scrollToWorkingHours();
+}
+
+function refreshActiveTimers() {
+  if (dragState || !renderedEntries.some((entry) => !entry.end_at && !entry.deleted_at)) return;
+  const segmentsByDay = buildSegments(renderedEntries, weekStart);
+  renderHeader(dailyTotalsFromSegments(segmentsByDay));
+  renderCalendar(segmentsByDay);
+  syncScrollbarGutter();
 }
 
 async function selectEntryFromBlock(event) {
@@ -1016,10 +1065,11 @@ async function init() {
   runCalendarAction("initial-sync", () => runSync({ force: false }));
   if (!refreshTimer) {
     refreshTimer = setInterval(() => {
+      if (!renderedEntries.some((entry) => !entry.end_at && !entry.deleted_at)) return;
       void runPageTask({
         page: "calendar",
-        phase: "periodic-render",
-        task: render,
+        phase: "active-timer-refresh",
+        task: refreshActiveTimers,
         onError(error) {
           setStatus(formatError(error));
         }

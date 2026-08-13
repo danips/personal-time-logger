@@ -758,7 +758,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     await lease.assert();
     await clearBackoff();
     await recordCycleActivity({ changed, force });
-    notifyEntriesChanged({ action: "sync" });
+    if (changed) notifyEntriesChanged({ action: "sync" });
     return {
       status: conflictChanges.length ? "needs review" : "synced",
       warning: conflictChanges.length ? "multiple active timers flagged" : "",
