@@ -46,11 +46,13 @@ import {
   minDate,
   minutesSinceStartOfDay,
   snapDateToGrid,
+  scrollTopForStartHour,
   weekStartFromInput
 } from "../src/calendar-layout.js";
 import { bindPopupDrag } from "./popup-drag.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { platform } from "../src/platform.js";
+import { DEFAULT_WORKDAY_START_HOUR, normalizeWorkdayStartHour } from "../src/options-settings.js";
 
 mountEntryEditor(document.getElementById("calendarEntryEditor"), {
   formId: "calendarEditForm",
@@ -72,7 +74,6 @@ mountEntryEditor(document.getElementById("calendarEntryEditor"), {
 });
 
 const DRAG_THRESHOLD_PX = 5;
-const DEFAULT_VISIBLE_HOUR = 7;
 
 let weekStart = startOfWeek(new Date());
 let renderedEntries = [];
@@ -356,15 +357,19 @@ async function render() {
   if (dragState) return;
   const generation = ++renderGeneration;
   const weekEnd = addDays(weekStart, DAY_COUNT);
-  const nextEntries = await getEntriesIntersecting(weekStart, weekEnd);
+  const [nextEntries, configuredStart] = await Promise.all([
+    getEntriesIntersecting(weekStart, weekEnd),
+    getSetting(SETTING_KEY.WORKDAY_START_HOUR, DEFAULT_WORKDAY_START_HOUR)
+  ]);
   if (generation !== renderGeneration) return;
   renderedEntries = nextEntries;
+  const startHour = normalizeWorkdayStartHour(configuredStart);
   const segmentsByDay = buildSegments(nextEntries, weekStart);
   $("#weekPicker").value = isoWeekValue(weekStart);
   renderHeader(dailyTotalsFromSegments(segmentsByDay));
   renderCalendar(segmentsByDay);
   syncScrollbarGutter();
-  scrollToWorkingHours();
+  scrollToWorkingHours(startHour.valid ? startHour.start : DEFAULT_WORKDAY_START_HOUR);
 }
 
 function refreshActiveTimers() {
@@ -403,11 +408,11 @@ function selectEntryFromKeyboard(event) {
   selectEntryFromBlock(event);
 }
 
-function scrollToWorkingHours() {
+function scrollToWorkingHours(startHour) {
   if (initialScrollDone) return;
   initialScrollDone = true;
   const scroll = $("#calendarScroll");
-  scroll.scrollTop = DEFAULT_VISIBLE_HOUR * 60 * PX_PER_MINUTE;
+  scroll.scrollTop = scrollTopForStartHour(startHour, scroll.clientHeight, scroll.scrollHeight);
 }
 
 function getEntryById(id) {

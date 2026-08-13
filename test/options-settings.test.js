@@ -3,11 +3,29 @@ import { describe, it } from "node:test";
 
 import {
   INVALID_MULTIPLIER_MESSAGE,
+  INVALID_WORKDAY_START_HOUR_MESSAGE,
   normalizeOptionsSettings,
+  normalizeWorkdayStartHour,
   planOptionsSettingsSave
 } from "../src/options-settings.js";
 
 describe("Options settings save plan", () => {
+  it("accepts a calendar start hour", () => {
+    assert.deepEqual(normalizeWorkdayStartHour("09"), {
+      valid: true,
+      start: 9
+    });
+  });
+
+  it("rejects empty, fractional, and out-of-range calendar start hours", () => {
+    for (const hour of ["", "9.5", "-1", "24"]) {
+      assert.deepEqual(normalizeWorkdayStartHour(hour), {
+        valid: false,
+        message: INVALID_WORKDAY_START_HOUR_MESSAGE
+      });
+    }
+  });
+
   it("normalizes the accepted form domain", () => {
     assert.deepEqual(normalizeOptionsSettings({ interval: "20", multiplier: "1,25" }), {
       valid: true,

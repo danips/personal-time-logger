@@ -23,6 +23,14 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+/** Returns the scroll offset that starts the calendar at a configured hour. */
+export function scrollTopForStartHour(startHour, viewportHeight, contentHeight) {
+  const viewport = Math.max(0, Number(viewportHeight) || 0);
+  const content = Math.max(viewport, Number(contentHeight) || 0);
+  const desiredTop = Number(startHour) * 60 * PX_PER_MINUTE;
+  return clamp(desiredTop, 0, content - viewport);
+}
+
 export function maxDate(a, b) {
   return a.getTime() > b.getTime() ? a : b;
 }

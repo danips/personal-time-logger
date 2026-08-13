@@ -105,6 +105,11 @@
           <input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001">
         </label>
         <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
+        <label>
+          Calendar starts at hour
+          <input id="workdayStartHour" type="number" min="0" max="23" step="1">
+        </label>
+        <p class="note">The Calendar initially starts displaying at this hour.</p>
         <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
         <div class="actions">
           <button id="saveSettings" type="button">Save Settings</button>

@@ -16,7 +16,12 @@ import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
-import { normalizeOptionsSettings, planOptionsSettingsSave } from "../src/options-settings.js";
+import {
+  DEFAULT_WORKDAY_START_HOUR,
+  normalizeOptionsSettings,
+  normalizeWorkdayStartHour,
+  planOptionsSettingsSave
+} from "../src/options-settings.js";
 
 let diagnostics = [];
 let eventsBound = false;
@@ -146,6 +151,7 @@ function setDeviceAuthPanel(details = null) {
 
 async function saveSettings() {
   const multiplierInput = $("#durationMultiplier");
+  const workdayStartInput = $("#workdayStartHour");
   const next = normalizeOptionsSettings({
     interval: $("#syncInterval").value,
     multiplier: multiplierInput.value
@@ -159,10 +165,21 @@ async function saveSettings() {
   }
   multiplierInput.setCustomValidity("");
 
+  const workdayStart = normalizeWorkdayStartHour(workdayStartInput.value);
+  if (!workdayStart.valid) {
+    workdayStartInput.setCustomValidity(workdayStart.message);
+    workdayStartInput.reportValidity();
+    workdayStartInput.focus();
+    setStatus(workdayStart.message);
+    return false;
+  }
+  workdayStartInput.setCustomValidity("");
+
   const saved = await mutateSettings([
     SETTING_KEY.SYNC_INTERVAL_SECONDS,
     SETTING_KEY.DURATION_MULTIPLIER,
     SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
+    SETTING_KEY.WORKDAY_START_HOUR,
     NEXT_DUE_KEY
   ], (settings) => {
     const plan = planOptionsSettingsSave({
@@ -181,12 +198,18 @@ async function saveSettings() {
       settings.set(SETTING_KEY.DURATION_MULTIPLIER, next.multiplier);
       settings.set(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, nowIso());
     }
-    return plan;
+    const currentStart = Number(settings.get(SETTING_KEY.WORKDAY_START_HOUR) ?? DEFAULT_WORKDAY_START_HOUR);
+    const workdayStartChanged = currentStart !== workdayStart.start;
+    if (workdayStartChanged) {
+      settings.set(SETTING_KEY.WORKDAY_START_HOUR, workdayStart.start);
+    }
+    return { ...plan, workdayStartChanged };
   });
   $("#syncInterval").value = String(next.interval);
   multiplierInput.value = String(next.multiplier);
+  workdayStartInput.value = String(workdayStart.start);
 
-  if (!saved.intervalChanged && !saved.multiplierSyncNeeded) {
+  if (!saved.intervalChanged && !saved.multiplierSyncNeeded && !saved.workdayStartChanged) {
     setStatus("Settings unchanged");
     return;
   }
@@ -273,6 +296,7 @@ async function refresh() {
   renderDiagnostics();
   $("#syncInterval").value = String(await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
   $("#durationMultiplier").value = String(await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
+  $("#workdayStartHour").value = String(await getSetting(SETTING_KEY.WORKDAY_START_HOUR, DEFAULT_WORKDAY_START_HOUR));
   $("#tempoApiToken").value = await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "");
   $("#tempoAuthorAccountId").value = await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, "");
   renderTempoMappings(await getSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, {}));

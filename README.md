@@ -11,7 +11,7 @@ A browser extension for local-first time tracking with Google Sheets sync. It is
 - Weekly calendar view with movable and resizable time logs and direct displayed-week Tempo upload.
 - Reconcile screen comparing this device with the spreadsheet, including duplicate-row detection.
 - Multiple-active-timer warning.
-- Options page for Google auth, sync interval, duration multiplier, and device ID. The spreadsheet is found or created automatically.
+- Options page for Google auth, sync interval, duration multiplier, calendar start hour, and device ID. The spreadsheet is found or created automatically.
 - Background sync that runs while the browser is open, with no page needed.
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
@@ -193,7 +193,7 @@ Set **Duration multiplier** in Options. Entries with **Multiply** checked store 
 
 ## Calendar View
 
-The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid using their actual start/end times. Entries that overlap in time are shown side by side. A multiplier affects effective totals, but is allocated proportionally across the actual interval rather than extending a block into later days.
+The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid using their actual start/end times. Entries that overlap in time are shown side by side. A multiplier affects effective totals, but is allocated proportionally across the actual interval rather than extending a block into later days. Set the calendar start hour in Options; the initial calendar view starts displaying at that hour. The default is 07:00.
 
 Click **Send to Tempo** to send the displayed week's completed entries to Tempo. The first use asks Firefox for access to `api.tempo.io`; Tempo requests then run in the extension background context so they are not subject to page CORS checks. Configure the Tempo API token and author account ID in Options first. Each Task maps to a numeric Jira issue ID; the calendar asks when it encounters an unknown Task and stores the answer in the editable cache in Options. The entry description becomes the Tempo worklog comment, and multiplied time is apportioned proportionally when an entry crosses the week boundary. Running timers are skipped because Tempo requires a fixed duration. Review the confirmation carefully: sending the same week again creates duplicate Tempo worklogs.
 

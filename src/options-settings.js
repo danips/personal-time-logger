@@ -2,6 +2,18 @@ import { MIN_SYNC_INTERVAL_SECONDS } from "./background-schedule.js";
 import { normalizeMultiplierText } from "./entries.js";
 
 export const INVALID_MULTIPLIER_MESSAGE = "Enter a duration multiplier between 1 and 5.001 with at most three decimal places.";
+export const DEFAULT_WORKDAY_START_HOUR = 7;
+export const INVALID_WORKDAY_START_HOUR_MESSAGE = "Enter a calendar start hour from 00:00 to 23:00.";
+
+export function normalizeWorkdayStartHour(value) {
+  const startHour = Number(value);
+  const valid = value !== ""
+    && Number.isInteger(startHour)
+    && startHour >= 0
+    && startHour <= 23;
+  if (!valid) return { valid: false, message: INVALID_WORKDAY_START_HOUR_MESSAGE };
+  return { valid: true, start: startHour };
+}
 
 export function normalizeOptionsSettings({ interval, multiplier }) {
   const normalizedMultiplier = normalizeMultiplierText(multiplier);

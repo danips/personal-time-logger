@@ -13,6 +13,7 @@ import {
   isoWeekValue,
   layoutSegments,
   minutesSinceStartOfDay,
+  scrollTopForStartHour,
   snapDateToGrid,
   weekStartFromInput
 } from "../src/calendar-layout.js";
@@ -221,5 +222,16 @@ describe("clamp", () => {
     assert.equal(clamp(5, 0, 10), 5);
     assert.equal(clamp(-5, 0, 10), 0);
     assert.equal(clamp(50, 0, 10), 10);
+  });
+});
+
+describe("scrollTopForStartHour", () => {
+  it("starts the calendar at the configured hour", () => {
+    assert.equal(scrollTopForStartHour(9, 480, 1152), 432);
+  });
+
+  it("clamps the result to the calendar content", () => {
+    assert.equal(scrollTopForStartHour(0, 480, 1152), 0);
+    assert.equal(scrollTopForStartHour(22, 480, 1152), 672);
   });
 });
