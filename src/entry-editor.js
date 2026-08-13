@@ -27,7 +27,7 @@ export function mountEntryEditor(container, {
       <label>Project<input id="${projectId}"></label>
       <label>Task<input id="${taskId}"></label>
       <label>Description<textarea id="${descriptionId}" rows="2"></textarea></label>
-      <div class="entry-editor-options">
+      <div class="entry-editor-options${duplicateButtonId ? " has-duplicate" : ""}">
         <label><input id="${multiplyId}" type="checkbox">Multiply</label>
         <label class="entry-editor-status">Status
           <select id="${statusId}">
@@ -35,15 +35,17 @@ export function mountEntryEditor(container, {
             <option value="needs_review">needs_review</option>
           </select>
         </label>
+        ${duplicateButtonId ? `<button id="${duplicateButtonId}" type="button">Duplicate</button>` : ""}
       </div>
-      <label>Start<input id="${startId}" type="datetime-local" step="1" required></label>
-      <label>End<input id="${endId}" type="datetime-local" step="1"></label>
+      <div class="entry-editor-datetime">
+        <label>Start<input id="${startId}" type="datetime-local" step="1" required></label>
+        <label>End<input id="${endId}" type="datetime-local" step="1"></label>
+      </div>
       <div class="entry-editor-merge">
         <div id="${mergeControlId}" class="entry-editor-merge-control" hidden>
           <label>Merge with matching entry<select id="${mergeTargetId}"></select></label>
           <button id="${mergeButtonId}" type="button">Merge</button>
         </div>
-        ${duplicateButtonId ? `<button id="${duplicateButtonId}" type="button">Duplicate</button>` : ""}
       </div>
       <div class="entry-editor-actions">
         <button id="${saveButtonId}" type="${saveType}">Save</button>

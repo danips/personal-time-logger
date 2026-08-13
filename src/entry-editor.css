@@ -27,6 +27,10 @@
   user-select: text;
 }
 
+.entry-editor-datetime input {
+  padding: 0px;
+}
+
 .entry-editor-form textarea {
   min-height: 46px;
 }
@@ -42,6 +46,27 @@
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.entry-editor-options.has-duplicate {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.entry-editor-options.has-duplicate > label,
+.entry-editor-options.has-duplicate > button {
+  min-width: 0;
+}
+
+.entry-editor-options.has-duplicate > button {
+  width: 100%;
+}
+
+.entry-editor-datetime {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .entry-editor-options > label {
@@ -62,7 +87,7 @@
 }
 
 .entry-editor-status select {
-  width: 120px;
+  width: 100%;
 }
 
 .entry-editor-merge,
