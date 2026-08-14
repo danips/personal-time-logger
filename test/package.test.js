@@ -58,6 +58,8 @@ const expectedFiles = [
   "src/sync-request.js",
   "src/sync.js",
   "src/tempo.js",
+  "src/themes.css",
+  "src/themes.js",
   "src/time-allocation.js",
   "src/time.js",
   "src/ui-helpers.js",
