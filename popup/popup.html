@@ -11,16 +11,21 @@
     <main class="popup">
       <header class="topbar">
         <div>
-          <h1>Time Logger</h1>
+          <div class="brand-row">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="8"></circle></svg>
+            </span>
+            <h1>Time Logger</h1>
+          </div>
           <div class="status-row">
             <p id="syncStatus" class="status" data-status="pending">pending</p>
             <span id="dirtyBadge" class="dirty-badge hidden" title="Unsynced local changes">0 pending</span>
           </div>
         </div>
         <div class="header-actions">
-          <button id="openCalendar" class="icon-button" title="Calendar" aria-label="Calendar" type="button">▦</button>
-          <button id="headerSyncButton" class="icon-button" title="Sync now" aria-label="Sync now" type="button">↻</button>
-          <button id="openOptions" class="icon-button" title="Time Logger Options" aria-label="Time Logger Options" type="button">⚙</button>
+          <button id="openCalendar" class="icon-button" title="Calendar" aria-label="Calendar" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"></path></svg></button>
+          <button id="headerSyncButton" class="icon-button" title="Sync now" aria-label="Sync now" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"></path></svg></button>
+          <button id="openOptions" class="icon-button" title="Time Logger Options" aria-label="Time Logger Options" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg></button>
         </div>
       </header>
 

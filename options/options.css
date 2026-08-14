@@ -2,6 +2,22 @@
   color-scheme: light dark;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 15px;
+  --text: #182033;
+  --muted: #657087;
+  --page: #f3f6fb;
+  --surface: #ffffff;
+  --surface-subtle: #f6f8fc;
+  --surface-hover: #edf2fa;
+  --border: #d9e0ec;
+  --border-strong: #bdc8d8;
+  --accent: #3567d6;
+  --accent-strong: #2855bc;
+  --accent-soft: #eaf0ff;
+  --danger: #c43d4b;
+  --warning: #a86608;
+  --warning-soft: #fff6df;
+  --shadow-sm: 0 1px 2px rgba(24, 32, 51, 0.05), 0 4px 14px rgba(24, 32, 51, 0.05);
+  --shadow-md: 0 14px 36px rgba(24, 32, 51, 0.09);
 }
 
 body {
@@ -345,5 +361,420 @@ code {
   .section-nav a.active {
     background: #1f3b63;
     color: #8ab4f8;
+  }
+}
+
+/* Settings visual system. This file loads last on the options page, so these
+   semantic styles also unify the embedded usage and reconciliation sections. */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% -8%, rgba(81, 117, 219, 0.13), transparent 30%),
+    var(--page);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.page {
+  width: min(1220px, calc(100% - 48px));
+  padding: 34px 0 64px;
+}
+
+.options-header {
+  margin-bottom: 24px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  display: inline-grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 14px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #4778e7, #7157d9);
+  box-shadow: 0 8px 20px rgba(53, 103, 214, 0.28);
+}
+
+.brand-mark svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.eyebrow {
+  margin-bottom: 2px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+h1 {
+  color: var(--text);
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+h2,
+h3 {
+  color: var(--text);
+  letter-spacing: -0.015em;
+}
+
+.options-header > .status {
+  margin: 8px 0 0 58px;
+}
+
+.status,
+.note,
+.container-note,
+.empty,
+.row-meta,
+dt,
+label {
+  color: var(--muted);
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--accent-strong);
+}
+
+.options-layout {
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 28px;
+}
+
+.section-nav {
+  top: 24px;
+  gap: 4px;
+  padding: 10px;
+  border-color: var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+.section-nav-label {
+  color: var(--muted);
+}
+
+.section-nav a {
+  position: relative;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-weight: 600;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.section-nav a:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.section-nav a.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.section-nav a.active::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: var(--accent);
+}
+
+.options-content > .options-section {
+  margin-bottom: 22px;
+}
+
+.panel {
+  padding: 22px;
+  border-color: var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.panel > h2:first-child,
+.section-heading h2 {
+  font-size: 19px;
+}
+
+.options-subsection + .options-subsection {
+  border-top-color: var(--border);
+}
+
+input {
+  border-color: var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+input:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+}
+
+input:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+button {
+  border-color: var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+#saveGoogleCredentials,
+#saveSettings,
+#saveTempoSettings,
+#syncButton,
+#grantAccess,
+#addAccount {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+#saveGoogleCredentials:hover:not(:disabled),
+#saveSettings:hover:not(:disabled),
+#saveTempoSettings:hover:not(:disabled),
+#syncButton:hover:not(:disabled),
+#grantAccess:hover:not(:disabled),
+#addAccount:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+button.danger,
+.danger {
+  border-color: color-mix(in srgb, var(--danger) 54%, var(--border));
+  color: var(--danger);
+}
+
+dl > div {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+dl > div:last-child {
+  border-bottom: 0;
+}
+
+code {
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.device-auth,
+.notice {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border));
+  border-radius: 10px;
+  background: var(--warning-soft);
+}
+
+.account-card,
+.row {
+  padding: 14px;
+  border-color: var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.account-card[data-stale="true"] {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+
+.account-card[data-expired="true"],
+.account-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.account-badge,
+.badge {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.account-badge,
+.account-notice {
+  color: var(--warning);
+}
+
+.diff-table th,
+.diff-table td {
+  border-bottom-color: var(--border);
+}
+
+.diff-table th,
+.diff-table .field-name {
+  color: var(--muted);
+}
+
+.tempo-mappings th {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tempo-mappings tbody tr + tr {
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .page {
+    width: min(100% - 24px, 620px);
+    padding-top: 22px;
+  }
+
+  .options-header > .status {
+    margin-left: 0;
+  }
+
+  .options-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .section-nav {
+    top: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    backdrop-filter: blur(16px);
+  }
+
+  .panel {
+    padding: 17px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #eef2fb;
+    --muted: #aeb8ca;
+    --page: #111620;
+    --surface: #1b2230;
+    --surface-subtle: #202938;
+    --surface-hover: #263143;
+    --border: #303b4d;
+    --border-strong: #435067;
+    --accent: #8eafff;
+    --accent-strong: #aec4ff;
+    --accent-soft: #25355d;
+    --danger: #ff929c;
+    --warning: #f2c46d;
+    --warning-soft: #3b301b;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.26), 0 5px 16px rgba(0, 0, 0, 0.16);
+    --shadow-md: 0 16px 42px rgba(0, 0, 0, 0.38);
+  }
+
+  body {
+    color: var(--text);
+    background:
+      radial-gradient(circle at 12% -8%, rgba(86, 119, 210, 0.17), transparent 32%),
+      var(--page);
+  }
+
+  .panel,
+  button,
+  input,
+  .section-nav {
+    color: var(--text);
+    background-color: var(--surface);
+    border-color: var(--border);
+  }
+
+  .section-nav a {
+    color: var(--muted);
+  }
+
+  .section-nav a:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .section-nav a.active {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
+
+  #saveGoogleCredentials,
+  #saveSettings,
+  #saveTempoSettings,
+  #syncButton,
+  #grantAccess,
+  #addAccount {
+    border-color: var(--accent);
+    background: #668df0;
+    color: #101522;
+  }
+
+  .device-auth,
+  .notice {
+    border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+    background: var(--warning-soft);
+  }
+
+  .account-card,
+  .row,
+  code {
+    border-color: var(--border);
+    background: var(--surface-subtle);
   }
 }

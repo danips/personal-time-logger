@@ -21,6 +21,14 @@
   --review: #fff2cc;
   --review-border: #c89522;
   --review-extra: rgba(200, 149, 34, 0.2);
+  --surface-subtle: #f6f8fc;
+  --surface-hover: #edf2fa;
+  --border-strong: #bdc8d8;
+  --accent-strong: #2855bc;
+  --accent-soft: #eaf0ff;
+  --button-primary: #3567d6;
+  --shadow-sm: 0 1px 2px rgba(24, 32, 51, 0.05), 0 4px 14px rgba(24, 32, 51, 0.05);
+  --shadow-md: 0 14px 36px rgba(24, 32, 51, 0.12);
 }
 
 * {
@@ -603,20 +611,20 @@ textarea {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --border: #5f6368;
-    --text: #e8eaed;
-    --muted: #bdc1c6;
-    --surface: #303134;
-    --page: #202124;
-    --accent: #8ab4f8;
-    --event: #1f3a55;
-    --event-border: #5f8bbb;
+    --border: #303b4d;
+    --text: #eef2fb;
+    --muted: #aeb8ca;
+    --surface: #1b2230;
+    --page: #111620;
+    --accent: #8eafff;
+    --event: #233c5a;
+    --event-border: #608bc2;
     --event-extra: rgba(138, 180, 248, 0.24);
-    --active: #21482e;
-    --active-border: #75b987;
+    --active: #193c2b;
+    --active-border: #69bd89;
     --active-extra: rgba(129, 201, 149, 0.24);
-    --review: #4b3b15;
-    --review-border: #d4a72c;
+    --review: #463719;
+    --review-border: #d7a94a;
     --review-extra: rgba(253, 214, 99, 0.22);
   }
 
@@ -652,4 +660,239 @@ textarea {
       );
   }
 
+}
+
+/* Refined calendar chrome and controls. Event geometry stays untouched. */
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.brand-mark {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 13px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #4778e7, #7157d9);
+  box-shadow: 0 7px 18px rgba(53, 103, 214, 0.28);
+}
+
+.brand-mark svg,
+.icon-button svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.eyebrow {
+  margin-bottom: 2px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% -15%, rgba(81, 117, 219, 0.13), transparent 31%),
+    var(--page);
+}
+
+.page {
+  padding: 22px;
+}
+
+.topbar {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: 25px;
+  letter-spacing: -0.025em;
+}
+
+button {
+  border-color: var(--border-strong);
+  border-radius: 9px;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.entry-block:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.toolbar {
+  align-items: end;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 36px;
+  place-items: center;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-button:hover {
+  color: var(--accent);
+}
+
+#syncButton {
+  border-color: var(--button-primary);
+  background: var(--button-primary);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+#syncButton:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+#sendTempoButton {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 650;
+}
+
+input,
+select,
+textarea {
+  border-color: var(--border-strong);
+  border-radius: 8px;
+}
+
+.calendar-shell {
+  border-color: var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+}
+
+.day-header {
+  background: var(--surface-subtle);
+}
+
+.corner-header,
+.day-heading {
+  min-height: 50px;
+  padding: 9px 10px;
+}
+
+.day-heading {
+  text-align: center;
+}
+
+.day-heading strong {
+  font-size: 13px;
+}
+
+.day-heading.today {
+  position: relative;
+  background: var(--accent-soft);
+}
+
+.day-heading.today::after {
+  content: "";
+  position: absolute;
+  right: 22%;
+  bottom: 0;
+  left: 22%;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+  background: var(--accent);
+}
+
+.time-axis {
+  background-color: var(--surface-subtle);
+}
+
+.day-column.today {
+  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.entry-block,
+.drag-preview {
+  border-radius: 7px;
+  box-shadow: 0 2px 5px rgba(35, 53, 78, 0.14);
+  transition: box-shadow 120ms ease, filter 120ms ease;
+}
+
+.entry-block:hover {
+  box-shadow: 0 5px 14px rgba(35, 53, 78, 0.2);
+  filter: saturate(1.04);
+}
+
+.edit-popup {
+  padding: 14px;
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+}
+
+.undo-resize-button {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-subtle: #202938;
+    --surface-hover: #263143;
+    --border-strong: #435067;
+    --accent-strong: #aec4ff;
+    --accent-soft: #25355d;
+    --button-primary: #668df0;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.26), 0 5px 16px rgba(0, 0, 0, 0.16);
+    --shadow-md: 0 16px 42px rgba(0, 0, 0, 0.38);
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 8% -15%, rgba(86, 119, 210, 0.17), transparent 33%),
+      var(--page);
+  }
+
+  .toolbar {
+    background: color-mix(in srgb, var(--surface) 90%, transparent);
+  }
+
+  #syncButton {
+    color: #101522;
+  }
+
+  .entry-block:hover {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.34);
+  }
 }
