@@ -89,7 +89,7 @@ async function exerciseThemeSelection(baseUrl, sessionId, origin) {
       document.querySelector("#openThemePicker").click();
       const select = document.querySelector("#popupThemeSelect");
       const contrast = document.querySelector("#popupHighContrast");
-      select.value = "github";
+      select.value = "blue-archive";
       select.dispatchEvent(new Event("change", { bubbles: true }));
       contrast.checked = true;
       contrast.dispatchEvent(new Event("change", { bubbles: true }));
@@ -101,7 +101,7 @@ async function exerciseThemeSelection(baseUrl, sessionId, origin) {
     `,
     args: []
   });
-  if (popupTheme.theme !== "github" || popupTheme.contrast !== "high" || !popupTheme.pickerOpen) {
+  if (popupTheme.theme !== "blue-archive" || popupTheme.contrast !== "high" || !popupTheme.pickerOpen) {
     throw new Error(`Popup theme controls did not apply the selection: ${JSON.stringify(popupTheme)}`);
   }
 
@@ -111,7 +111,7 @@ async function exerciseThemeSelection(baseUrl, sessionId, origin) {
     script: "return { theme: document.documentElement.dataset.theme, contrast: document.documentElement.dataset.contrast };",
     args: []
   });
-  if (calendarTheme.theme !== "github" || calendarTheme.contrast !== "high") {
+  if (calendarTheme.theme !== "blue-archive" || calendarTheme.contrast !== "high") {
     throw new Error(`Theme selection did not persist across extension pages: ${JSON.stringify(calendarTheme)}`);
   }
 }

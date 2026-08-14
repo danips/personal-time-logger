@@ -10,25 +10,35 @@ import {
 } from "../src/themes.js";
 
 const root = process.cwd();
-const EXPECTED_THEMES = ["darcula", "codex", "github", "linear", "material", "notion", "vscode"];
+const EXPECTED_THEMES = ["cinder-glow", "moss-circuit", "blue-archive", "violet-orbit", "amethyst-stack", "sienna-paper", "harbor-terminal"];
 
 describe("selectable dark themes", () => {
   it("provides the requested named palettes", () => {
     assert.deepEqual(THEME_OPTIONS.map(({ id }) => id), EXPECTED_THEMES);
-    assert.equal(DEFAULT_THEME, "codex");
+    assert.deepEqual(THEME_OPTIONS.map(({ label }) => label), [
+      "Cinder Glow",
+      "Moss Circuit",
+      "Blue Archive",
+      "Violet Orbit",
+      "Amethyst Stack",
+      "Sienna Paper",
+      "Harbor Terminal"
+    ]);
+    assert.equal(DEFAULT_THEME, "moss-circuit");
   });
 
   it("normalizes unknown or mixed-case values safely", () => {
-    assert.equal(normalizeTheme("GitHub"), "github");
-    assert.equal(normalizeTheme(" vscode "), "vscode");
+    assert.equal(normalizeTheme("Blue-Archive"), "blue-archive");
+    assert.equal(normalizeTheme(" github "), "blue-archive");
+    assert.equal(normalizeTheme(" vscode "), "harbor-terminal");
     assert.equal(normalizeTheme("unknown"), DEFAULT_THEME);
   });
 
   it("applies theme and contrast preferences as root attributes", () => {
     const rootElement = { dataset: {} };
-    const result = applyThemePreferences({ theme: "linear", highContrast: true }, rootElement);
-    assert.deepEqual(result, { theme: "linear", highContrast: true });
-    assert.deepEqual(rootElement.dataset, { theme: "linear", contrast: "high" });
+    const result = applyThemePreferences({ theme: "violet-orbit", highContrast: true }, rootElement);
+    assert.deepEqual(result, { theme: "violet-orbit", highContrast: true });
+    assert.deepEqual(rootElement.dataset, { theme: "violet-orbit", contrast: "high" });
   });
 
   it("defines every palette and a shared high-contrast variant", () => {
@@ -50,7 +60,7 @@ describe("selectable dark themes", () => {
   ]) {
     it(`loads the shared theme on ${page}`, () => {
       const html = readFileSync(join(root, page), "utf8");
-      assert.match(html, /data-theme="codex"/);
+      assert.match(html, /data-theme="moss-circuit"/);
       assert.match(html, /src\/themes\.css/);
       assert.match(html, /src\/themes\.js/);
     });

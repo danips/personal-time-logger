@@ -15,7 +15,7 @@
   --review-extra: color-mix(in srgb, var(--warning) 22%, transparent);
 }
 
-:root[data-theme="darcula"] {
+:root[data-theme="cinder-glow"] {
   --text: #f2f2f2;
   --muted: #b9b9b9;
   --page: #202122;
@@ -37,7 +37,7 @@
   --theme-glow: rgba(230, 161, 92, 0.13);
 }
 
-:root[data-theme="codex"] {
+:root[data-theme="moss-circuit"] {
   --text: #f2f3f3;
   --muted: #a7aeac;
   --page: #0d0f0e;
@@ -59,7 +59,7 @@
   --theme-glow: rgba(50, 201, 151, 0.14);
 }
 
-:root[data-theme="github"] {
+:root[data-theme="blue-archive"] {
   --text: #f0f6fc;
   --muted: #9da7b3;
   --page: #0d1117;
@@ -81,7 +81,7 @@
   --theme-glow: rgba(31, 111, 235, 0.18);
 }
 
-:root[data-theme="linear"] {
+:root[data-theme="violet-orbit"] {
   --text: #f1f0f7;
   --muted: #aaa7ba;
   --page: #0f1015;
@@ -103,7 +103,7 @@
   --theme-glow: rgba(139, 92, 246, 0.17);
 }
 
-:root[data-theme="material"] {
+:root[data-theme="amethyst-stack"] {
   --text: #f5f1f8;
   --muted: #b8b1bd;
   --page: #121212;
@@ -125,7 +125,7 @@
   --theme-glow: rgba(187, 134, 252, 0.15);
 }
 
-:root[data-theme="notion"] {
+:root[data-theme="sienna-paper"] {
   --text: #f3f1ed;
   --muted: #aaa6a0;
   --page: #161513;
@@ -147,7 +147,7 @@
   --theme-glow: rgba(229, 139, 107, 0.13);
 }
 
-:root[data-theme="vscode"] {
+:root[data-theme="harbor-terminal"] {
   --text: #f3f3f3;
   --muted: #b5b5b5;
   --page: #181818;

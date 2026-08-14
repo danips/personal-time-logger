@@ -1,16 +1,25 @@
-export const DEFAULT_THEME = "codex";
+export const DEFAULT_THEME = "moss-circuit";
 
 export const THEME_OPTIONS = Object.freeze([
-  { id: "darcula", label: "Darcula", description: "Warm charcoal with amber highlights" },
-  { id: "codex", label: "Codex", description: "Deep graphite with emerald highlights" },
-  { id: "github", label: "GitHub", description: "Ink blue with crisp blue highlights" },
-  { id: "linear", label: "Linear", description: "Midnight violet with soft purple highlights" },
-  { id: "material", label: "Material", description: "Layered black with lavender highlights" },
-  { id: "notion", label: "Notion", description: "Warm monochrome with coral highlights" },
-  { id: "vscode", label: "VS Code", description: "Editor gray with electric blue highlights" }
+  { id: "cinder-glow", label: "Cinder Glow", description: "Warm charcoal with amber highlights" },
+  { id: "moss-circuit", label: "Moss Circuit", description: "Deep graphite with emerald highlights" },
+  { id: "blue-archive", label: "Blue Archive", description: "Ink blue with crisp blue highlights" },
+  { id: "violet-orbit", label: "Violet Orbit", description: "Midnight violet with soft purple highlights" },
+  { id: "amethyst-stack", label: "Amethyst Stack", description: "Layered black with lavender highlights" },
+  { id: "sienna-paper", label: "Sienna Paper", description: "Warm monochrome with coral highlights" },
+  { id: "harbor-terminal", label: "Harbor Terminal", description: "Editor gray with electric blue highlights" }
 ]);
 
 const THEME_IDS = new Set(THEME_OPTIONS.map(({ id }) => id));
+const LEGACY_THEME_IDS = Object.freeze({
+  darcula: "cinder-glow",
+  codex: "moss-circuit",
+  github: "blue-archive",
+  linear: "violet-orbit",
+  material: "amethyst-stack",
+  notion: "sienna-paper",
+  vscode: "harbor-terminal"
+});
 const THEME_STORAGE_KEY = "worklog.theme";
 const CONTRAST_STORAGE_KEY = "worklog.highContrast";
 
@@ -24,7 +33,7 @@ function storage() {
 
 export function normalizeTheme(value) {
   const theme = String(value || "").trim().toLowerCase();
-  return THEME_IDS.has(theme) ? theme : DEFAULT_THEME;
+  return THEME_IDS.has(theme) ? theme : LEGACY_THEME_IDS[theme] || DEFAULT_THEME;
 }
 
 export function readThemePreferences() {
