@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="codex" data-contrast="standard">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="../usage/usage.css">
     <link rel="stylesheet" href="../reconcile/reconcile.css">
     <link rel="stylesheet" href="options.css">
+    <link rel="stylesheet" href="../src/themes.css">
+    <script type="module" src="../src/themes.js"></script>
   </head>
   <body data-page="options">
     <main class="page">
@@ -26,6 +28,7 @@
       <div class="options-layout">
         <nav class="section-nav" aria-label="Options sections">
           <p class="section-nav-label">Sections</p>
+          <a href="#appearance">Appearance</a>
           <a href="#google-account">Google Account</a>
           <a href="#spreadsheet">Spreadsheet</a>
           <a href="#chatgpt-usage">ChatGPT Usage</a>
@@ -35,6 +38,32 @@
         </nav>
 
         <div class="options-content">
+          <section id="appearance" class="panel options-section appearance-panel">
+            <div class="section-heading">
+              <div>
+                <h2>Appearance</h2>
+                <p class="note">Choose a dark palette. Changes apply immediately across Time Logger.</p>
+              </div>
+            </div>
+            <div class="appearance-controls">
+              <label for="themeSelect">Theme
+                <select id="themeSelect">
+                  <option value="darcula">Darcula</option>
+                  <option value="codex">Codex</option>
+                  <option value="github">GitHub</option>
+                  <option value="linear">Linear</option>
+                  <option value="material">Material</option>
+                  <option value="notion">Notion</option>
+                  <option value="vscode">VS Code</option>
+                </select>
+              </label>
+              <label class="contrast-switch"><input id="highContrast" type="checkbox"><span class="switch-track" aria-hidden="true"><span></span></span><span><strong>High contrast</strong><small>Stronger panel edges, text, and focus indicators</small></span></label>
+            </div>
+            <div id="themePreview" class="theme-preview" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </section>
+
           <section id="google-account" class="panel options-section">
             <h2>Google Account</h2>
             <label>

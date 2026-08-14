@@ -1,11 +1,13 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="codex" data-contrast="standard">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Time Logger</title>
     <link rel="stylesheet" href="../src/entry-editor.css">
     <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="../src/themes.css">
+    <script type="module" src="../src/themes.js"></script>
   </head>
   <body>
     <main class="popup">
@@ -23,9 +25,24 @@
           </div>
         </div>
         <div class="header-actions">
+          <button id="openThemePicker" class="icon-button" title="Theme" aria-label="Choose theme" aria-expanded="false" aria-controls="themePopover" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.7a1.5 1.5 0 0 1 0-3h2.1A6.4 6.4 0 0 0 21 8c0-2.8-4-5-9-5Z"></path><circle cx="7.5" cy="9" r=".7"></circle><circle cx="10.5" cy="6.5" r=".7"></circle><circle cx="15" cy="7" r=".7"></circle></svg></button>
           <button id="openCalendar" class="icon-button" title="Calendar" aria-label="Calendar" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"></path></svg></button>
           <button id="headerSyncButton" class="icon-button" title="Sync now" aria-label="Sync now" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"></path></svg></button>
           <button id="openOptions" class="icon-button" title="Time Logger Options" aria-label="Time Logger Options" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg></button>
+        </div>
+        <div id="themePopover" class="theme-popover hidden" role="dialog" aria-label="Theme settings">
+          <label for="popupThemeSelect">Theme</label>
+          <select id="popupThemeSelect">
+            <option value="darcula">Darcula</option>
+            <option value="codex">Codex</option>
+            <option value="github">GitHub</option>
+            <option value="linear">Linear</option>
+            <option value="material">Material</option>
+            <option value="notion">Notion</option>
+            <option value="vscode">VS Code</option>
+          </select>
+          <label class="contrast-toggle"><input id="popupHighContrast" type="checkbox"><span>High contrast</span></label>
+          <a href="../options/options.html#appearance" target="_blank">More appearance settings</a>
         </div>
       </header>
 

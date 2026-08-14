@@ -31,6 +31,7 @@ import { platform } from "../src/platform.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { updateActiveIcon } from "../src/icon.js";
+import { bindThemeControls } from "../src/themes.js";
 import {
   MAX_WINDOW_SIZE,
   normalizeWindowSizePreset,
@@ -109,6 +110,8 @@ const $chatGptUsageValues = $("#chatGptUsageValues");
 const $windowSizePresets = $("#windowSizePresets");
 const $windowSizeEditor = $("#windowSizeEditor");
 const $windowSizeFields = $("#windowSizeFields");
+const $themePopover = $("#themePopover");
+const $openThemePicker = $("#openThemePicker");
 
 let renderedActiveId;
 
@@ -924,6 +927,28 @@ function bindEvents() {
   eventsBound = true;
   bindMinuteRollover($editStart);
   bindMinuteRollover($editEnd);
+  bindThemeControls({
+    themeSelect: $("#popupThemeSelect"),
+    contrastToggle: $("#popupHighContrast")
+  });
+  $openThemePicker.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const willOpen = $themePopover.classList.contains("hidden");
+    $themePopover.classList.toggle("hidden", !willOpen);
+    $openThemePicker.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) $("#popupThemeSelect").focus();
+  });
+  $themePopover.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", () => {
+    $themePopover.classList.add("hidden");
+    $openThemePicker.setAttribute("aria-expanded", "false");
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || $themePopover.classList.contains("hidden")) return;
+    $themePopover.classList.add("hidden");
+    $openThemePicker.setAttribute("aria-expanded", "false");
+    $openThemePicker.focus();
+  });
   $editStart.addEventListener("keydown", saveEditOnEnter);
   $editEnd.addEventListener("keydown", saveEditOnEnter);
   $newTimerToggle.addEventListener("click", toggleNewTimer);

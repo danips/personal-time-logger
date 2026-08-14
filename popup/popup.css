@@ -1198,6 +1198,70 @@ textarea {
   display: none;
 }
 
+.topbar {
+  position: relative;
+}
+
+.theme-popover {
+  position: absolute;
+  z-index: 20;
+  top: 42px;
+  right: 0;
+  display: grid;
+  width: 230px;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-popover.hidden {
+  display: none;
+}
+
+.theme-popover label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.theme-popover select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 9px;
+}
+
+.theme-popover .contrast-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.theme-popover .contrast-toggle input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.theme-popover a {
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
+.window-size-section,
+.chatgpt-usage-summary {
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --muted: #bdc1c6;

@@ -364,6 +364,140 @@ code {
   }
 }
 
+.appearance-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 16px;
+  align-items: end;
+}
+
+.appearance-controls select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  color: var(--text);
+  font: inherit;
+}
+
+.contrast-switch {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 11px;
+  min-height: 42px;
+  margin: 0 0 12px;
+  cursor: pointer;
+}
+
+.contrast-switch > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch-track {
+  display: flex;
+  width: 43px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.switch-track > span {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.contrast-switch input:checked + .switch-track {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.contrast-switch input:checked + .switch-track > span {
+  transform: translateX(18px);
+  background: var(--accent-strong);
+}
+
+.contrast-switch input:focus-visible + .switch-track {
+  outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 2px;
+}
+
+.contrast-switch strong,
+.contrast-switch small {
+  display: block;
+}
+
+.contrast-switch strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.contrast-switch small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.theme-preview {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 0.7fr 0.45fr;
+  height: 70px;
+  margin-top: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  box-shadow: var(--shadow-sm);
+}
+
+.theme-preview::before {
+  content: attr(data-theme-name);
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+  text-shadow: 0 1px 3px var(--page);
+}
+
+.theme-preview::after {
+  content: attr(data-theme-description);
+  position: absolute;
+  z-index: 1;
+  bottom: 9px;
+  left: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.theme-preview span:nth-child(1) { background: var(--page); }
+.theme-preview span:nth-child(2) { background: var(--surface); }
+.theme-preview span:nth-child(3) { background: var(--surface-raised); }
+.theme-preview span:nth-child(4) { background: var(--accent-soft); }
+.theme-preview span:nth-child(5) { background: var(--accent); }
+
+@media (max-width: 760px) {
+  .appearance-controls {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* Settings visual system. This file loads last on the options page, so these
    semantic styles also unify the embedded usage and reconciliation sections. */
 * {

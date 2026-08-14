@@ -16,6 +16,7 @@ import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
+import { bindThemeControls, THEME_OPTIONS } from "../src/themes.js";
 import { initReconcilePage } from "../reconcile/reconcile.js";
 import { initUsagePage } from "../usage/usage.js";
 import {
@@ -27,6 +28,14 @@ import {
 
 let diagnostics = [];
 let eventsBound = false;
+
+function renderThemeSelection({ theme, highContrast }) {
+  const selected = THEME_OPTIONS.find(({ id }) => id === theme);
+  const preview = $("#themePreview");
+  preview.dataset.themeName = selected?.label || "Codex";
+  preview.dataset.themeDescription = selected?.description || "";
+  preview.classList.toggle("is-high-contrast", highContrast);
+}
 
 function bindSectionNavigation() {
   const links = [...document.querySelectorAll(".section-nav a[href^='#']")];
@@ -468,6 +477,18 @@ async function clearDiagnosticsClicked() {
 function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
+  bindThemeControls({
+    themeSelect: $("#themeSelect"),
+    contrastToggle: $("#highContrast"),
+    onChange(preferences) {
+      renderThemeSelection(preferences);
+      setStatus(`${THEME_OPTIONS.find(({ id }) => id === preferences.theme)?.label || "Theme"}${preferences.highContrast ? " · High contrast" : ""} applied`);
+    }
+  });
+  renderThemeSelection({
+    theme: $("#themeSelect").value,
+    highContrast: $("#highContrast").checked
+  });
   $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
   $("#reconnectSpreadsheet").addEventListener("click", (event) => runOptionsAction("reconnect-spreadsheet", reconnectSpreadsheetClicked, event.currentTarget));

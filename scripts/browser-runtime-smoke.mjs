@@ -81,6 +81,41 @@ async function waitForCondition(baseUrl, sessionId, label, script, diagnosticScr
   throw new Error(`${label} did not complete.${diagnostic ? ` Last state: ${diagnostic}` : ""}`);
 }
 
+async function exerciseThemeSelection(baseUrl, sessionId, origin) {
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
+  await waitForPage(baseUrl, sessionId, ["#openThemePicker", "#popupThemeSelect", "#popupHighContrast"]);
+  const popupTheme = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      document.querySelector("#openThemePicker").click();
+      const select = document.querySelector("#popupThemeSelect");
+      const contrast = document.querySelector("#popupHighContrast");
+      select.value = "github";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      contrast.checked = true;
+      contrast.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        theme: document.documentElement.dataset.theme,
+        contrast: document.documentElement.dataset.contrast,
+        pickerOpen: !document.querySelector("#themePopover").classList.contains("hidden")
+      };
+    `,
+    args: []
+  });
+  if (popupTheme.theme !== "github" || popupTheme.contrast !== "high" || !popupTheme.pickerOpen) {
+    throw new Error(`Popup theme controls did not apply the selection: ${JSON.stringify(popupTheme)}`);
+  }
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
+  await waitForPage(baseUrl, sessionId, ["#calendarGrid"]);
+  const calendarTheme = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "return { theme: document.documentElement.dataset.theme, contrast: document.documentElement.dataset.contrast };",
+    args: []
+  });
+  if (calendarTheme.theme !== "github" || calendarTheme.contrast !== "high") {
+    throw new Error(`Theme selection did not persist across extension pages: ${JSON.stringify(calendarTheme)}`);
+  }
+}
+
 async function exercisePopupTimer(baseUrl, sessionId) {
   const openedNewTimer = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: "document.querySelector('.active-panel')?.click(); return !document.querySelector('#newTimerSection')?.classList.contains('hidden');",
@@ -419,6 +454,8 @@ try {
     await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/${page}` });
     await waitForPage(baseUrl, sessionId, selectors);
   }
+
+  await exerciseThemeSelection(baseUrl, sessionId, origin);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);

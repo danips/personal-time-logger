@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Personal Time Logger",
   "description": "Local-first time tracking with Google Sheets sync and Tempo upload.",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "permissions": [
     "alarms",
     "storage",

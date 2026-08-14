@@ -1,0 +1,351 @@
+/* Shared dark palettes. Page-specific styles consume these semantic tokens. */
+:root {
+  color-scheme: dark;
+  --theme-glow: rgba(16, 163, 127, 0.13);
+  --surface-raised: #242424;
+  --button-primary: var(--accent);
+  --event: var(--accent-soft);
+  --event-border: var(--accent);
+  --event-extra: color-mix(in srgb, var(--accent) 22%, transparent);
+  --active: var(--success-soft);
+  --active-border: var(--success);
+  --active-extra: color-mix(in srgb, var(--success) 22%, transparent);
+  --review: var(--warning-soft);
+  --review-border: var(--warning);
+  --review-extra: color-mix(in srgb, var(--warning) 22%, transparent);
+}
+
+:root[data-theme="darcula"] {
+  --text: #f2f2f2;
+  --muted: #b9b9b9;
+  --page: #202122;
+  --surface: #2b2b2b;
+  --surface-subtle: #323334;
+  --surface-raised: #3c3f41;
+  --surface-hover: #45494a;
+  --border: #4a4b4d;
+  --border-strong: #67686a;
+  --accent: #e6a15c;
+  --accent-strong: #ffc17d;
+  --accent-soft: #443425;
+  --success: #87c86a;
+  --success-soft: #263b27;
+  --danger: #ff7373;
+  --danger-strong: #ff9696;
+  --warning: #f2c55c;
+  --warning-soft: #40371f;
+  --theme-glow: rgba(230, 161, 92, 0.13);
+}
+
+:root[data-theme="codex"] {
+  --text: #f2f3f3;
+  --muted: #a7aeac;
+  --page: #0d0f0e;
+  --surface: #171a19;
+  --surface-subtle: #1d2220;
+  --surface-raised: #252b29;
+  --surface-hover: #29312e;
+  --border: #303936;
+  --border-strong: #4a5954;
+  --accent: #32c997;
+  --accent-strong: #66dfb7;
+  --accent-soft: #17382e;
+  --success: #63d79f;
+  --success-soft: #17372a;
+  --danger: #ff7b72;
+  --danger-strong: #ffa198;
+  --warning: #e9b949;
+  --warning-soft: #3a2f18;
+  --theme-glow: rgba(50, 201, 151, 0.14);
+}
+
+:root[data-theme="github"] {
+  --text: #f0f6fc;
+  --muted: #9da7b3;
+  --page: #0d1117;
+  --surface: #161b22;
+  --surface-subtle: #1c2128;
+  --surface-raised: #21262d;
+  --surface-hover: #292f37;
+  --border: #30363d;
+  --border-strong: #57606a;
+  --accent: #58a6ff;
+  --accent-strong: #79c0ff;
+  --accent-soft: #172f4d;
+  --success: #56d364;
+  --success-soft: #163622;
+  --danger: #ff7b72;
+  --danger-strong: #ffa198;
+  --warning: #e3b341;
+  --warning-soft: #392e17;
+  --theme-glow: rgba(31, 111, 235, 0.18);
+}
+
+:root[data-theme="linear"] {
+  --text: #f1f0f7;
+  --muted: #aaa7ba;
+  --page: #0f1015;
+  --surface: #171820;
+  --surface-subtle: #1e1f29;
+  --surface-raised: #262733;
+  --surface-hover: #2d2e3c;
+  --border: #353644;
+  --border-strong: #56576c;
+  --accent: #9b87f5;
+  --accent-strong: #b9aafc;
+  --accent-soft: #2d2851;
+  --success: #68d391;
+  --success-soft: #19372a;
+  --danger: #ff7d90;
+  --danger-strong: #ffa0ad;
+  --warning: #e4b855;
+  --warning-soft: #38301c;
+  --theme-glow: rgba(139, 92, 246, 0.17);
+}
+
+:root[data-theme="material"] {
+  --text: #f5f1f8;
+  --muted: #b8b1bd;
+  --page: #121212;
+  --surface: #1e1e1e;
+  --surface-subtle: #252525;
+  --surface-raised: #2c2c2c;
+  --surface-hover: #353535;
+  --border: #414141;
+  --border-strong: #656565;
+  --accent: #bb86fc;
+  --accent-strong: #d0aaff;
+  --accent-soft: #39294c;
+  --success: #72d6bd;
+  --success-soft: #183a32;
+  --danger: #ff7597;
+  --danger-strong: #ff9ab2;
+  --warning: #ffca68;
+  --warning-soft: #40341e;
+  --theme-glow: rgba(187, 134, 252, 0.15);
+}
+
+:root[data-theme="notion"] {
+  --text: #f3f1ed;
+  --muted: #aaa6a0;
+  --page: #161513;
+  --surface: #1f1e1b;
+  --surface-subtle: #272521;
+  --surface-raised: #302e29;
+  --surface-hover: #39362f;
+  --border: #45413a;
+  --border-strong: #69635a;
+  --accent: #e58b6b;
+  --accent-strong: #f2aa8f;
+  --accent-soft: #452d25;
+  --success: #6fc49a;
+  --success-soft: #20372c;
+  --danger: #ff7770;
+  --danger-strong: #ff9d98;
+  --warning: #dcb45c;
+  --warning-soft: #3b321e;
+  --theme-glow: rgba(229, 139, 107, 0.13);
+}
+
+:root[data-theme="vscode"] {
+  --text: #f3f3f3;
+  --muted: #b5b5b5;
+  --page: #181818;
+  --surface: #1f1f1f;
+  --surface-subtle: #252526;
+  --surface-raised: #2d2d30;
+  --surface-hover: #37373d;
+  --border: #3f3f46;
+  --border-strong: #686868;
+  --accent: #4daafc;
+  --accent-strong: #75beff;
+  --accent-soft: #193a54;
+  --success: #73c991;
+  --success-soft: #1d3828;
+  --danger: #f48771;
+  --danger-strong: #ffad9a;
+  --warning: #cca700;
+  --warning-soft: #3c3518;
+  --theme-glow: rgba(0, 122, 204, 0.18);
+}
+
+html[data-theme] body {
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% -10%, var(--theme-glow), transparent 33%),
+    var(--page);
+}
+
+html[data-theme] button,
+html[data-theme] input,
+html[data-theme] select,
+html[data-theme] textarea,
+html[data-theme] .panel,
+html[data-theme] .section-nav,
+html[data-theme] .active-panel,
+html[data-theme] .entry-row,
+html[data-theme] .edit-panel,
+html[data-theme] .edit-popup,
+html[data-theme] .window-size-editor {
+  color: var(--text);
+  border-color: var(--border);
+  background-color: var(--surface);
+}
+
+html[data-theme] button:hover:not(:disabled),
+html[data-theme] .entry-row:hover,
+html[data-theme] .active-panel:not(.is-running):hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+html[data-theme] label,
+html[data-theme] dt,
+html[data-theme] .status,
+html[data-theme] .note,
+html[data-theme] .container-note,
+html[data-theme] .empty,
+html[data-theme] .row-meta {
+  color: var(--muted);
+}
+
+html[data-theme] code,
+html[data-theme] .row,
+html[data-theme] .account-card,
+html[data-theme] .week-group-header,
+html[data-theme] .entry-chips span,
+html[data-theme] .entry-multiplier {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+}
+
+html[data-theme] .toolbar,
+html[data-theme] .day-header,
+html[data-theme] .time-axis,
+html[data-theme] .window-size-section,
+html[data-theme] .chatgpt-usage-summary {
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}
+
+html[data-theme] .calendar-shell,
+html[data-theme] .theme-picker,
+html[data-theme] .theme-popover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+html[data-theme] #saveGoogleCredentials,
+html[data-theme] #saveSettings,
+html[data-theme] #saveTempoSettings,
+html[data-theme] #syncButton,
+html[data-theme] #grantAccess,
+html[data-theme] #addAccount,
+html[data-theme] #startButton {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--page);
+}
+
+html[data-theme] .active-panel.is-running,
+html[data-theme] .play-button {
+  border-color: var(--active-border);
+  background: var(--active);
+  color: var(--success);
+}
+
+html[data-theme] .active-panel.is-running:hover {
+  background: color-mix(in srgb, var(--success-soft) 78%, var(--success));
+}
+
+html[data-theme] .new-timer-toggle,
+html[data-theme] .window-size-button,
+html[data-theme] .undo-resize-button,
+html[data-theme] #sendTempoButton {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+html[data-theme] .stop-active-button {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 70%, var(--page));
+  color: #ffffff;
+}
+
+html[data-theme] .stop-active-button:hover {
+  border-color: var(--danger-strong);
+  background: color-mix(in srgb, var(--danger-strong) 78%, var(--page));
+}
+
+html[data-theme] button.danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger-strong);
+}
+
+html[data-theme] .status[data-status="synced"],
+html[data-theme] .chatgpt-usage-value {
+  color: var(--success);
+}
+
+html[data-theme] .status[data-status="pending"] {
+  color: var(--warning);
+}
+
+html[data-theme] .status[data-status="error"],
+html[data-theme] .status[data-status="offline"],
+html[data-theme] .status[data-status="not signed in"],
+html[data-theme] .status[data-status="spreadsheet missing"] {
+  color: var(--danger);
+}
+
+html[data-theme] .dirty-badge {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+html[data-theme] .entry-row.needs-review {
+  border-color: color-mix(in srgb, var(--warning) 68%, var(--border));
+}
+
+html[data-theme] .warning,
+html[data-theme] .notice,
+html[data-theme] .device-auth {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+html[data-theme] :is(button, input, select, textarea, a, [role="button"]):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 2px;
+}
+
+:root[data-contrast="high"] {
+  --text: #ffffff;
+  --muted: #dedede;
+  --border: color-mix(in srgb, var(--accent) 34%, #8c8c8c);
+  --border-strong: color-mix(in srgb, var(--accent) 48%, #d0d0d0);
+  --surface-hover: color-mix(in srgb, var(--surface-raised) 76%, var(--accent));
+  --shadow-sm: 0 0 0 1px var(--border), 0 5px 16px rgba(0, 0, 0, 0.36);
+  --shadow-md: 0 0 0 1px var(--border-strong), 0 18px 44px rgba(0, 0, 0, 0.5);
+}
+
+html[data-contrast="high"] .panel,
+html[data-contrast="high"] .entry-row,
+html[data-contrast="high"] .active-panel,
+html[data-contrast="high"] .calendar-shell,
+html[data-contrast="high"] .section-nav {
+  border-width: 2px;
+}
+
+html[data-contrast="high"] :is(button, input, select, textarea, a, [role="button"]):focus-visible {
+  outline: 3px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+
+html[data-contrast="high"] .section-divider {
+  height: 2px;
+  background: var(--border-strong);
+}
