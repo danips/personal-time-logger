@@ -20,7 +20,7 @@ let unsubscribeEntryEvents = null;
 let eventsBound = false;
 
 function setStatus(message) {
-  $("#statusLine").textContent = message;
+  $("#reconcileStatusLine").textContent = message;
 }
 
 function setBusy(next) {
@@ -349,7 +349,7 @@ function bindEvents() {
   }))));
 }
 
-async function init() {
+export async function initReconcilePage() {
   bindEvents();
   if (!unsubscribeEntryEvents) {
     unsubscribeEntryEvents = onEntriesChanged((detail) => {
@@ -372,4 +372,6 @@ window.addEventListener("pagehide", () => {
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
 });
 
-startPage({ page: "reconcile", title: "Reconcile", init });
+if (document.body?.dataset.page === "reconcile") {
+  startPage({ page: "reconcile", title: "Reconcile", init: initReconcilePage });
+}

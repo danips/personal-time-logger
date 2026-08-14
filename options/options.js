@@ -16,6 +16,8 @@ import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
+import { initReconcilePage } from "../reconcile/reconcile.js";
+import { initUsagePage } from "../usage/usage.js";
 import {
   DEFAULT_WORKDAY_START_HOUR,
   normalizeOptionsSettings,
@@ -25,6 +27,19 @@ import {
 
 let diagnostics = [];
 let eventsBound = false;
+
+function bindSectionNavigation() {
+  const links = [...document.querySelectorAll(".section-nav a[href^='#']")];
+  const setActive = (id) => {
+    for (const link of links) link.classList.toggle("active", link.hash === `#${id}`);
+  };
+  for (const link of links) {
+    link.addEventListener("click", () => setActive(link.hash.slice(1)));
+  }
+  const initialId = window.location.hash.slice(1) || links[0]?.hash.slice(1);
+  if (initialId) setActive(initialId);
+  window.addEventListener("hashchange", () => setActive(window.location.hash.slice(1)));
+}
 
 function createTempoMappingRow(task = "", issueId = "") {
   const row = document.createElement("tr");
@@ -477,7 +492,9 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  bindSectionNavigation();
   await refresh();
+  await Promise.all([initUsagePage(), initReconcilePage()]);
   setStatus("Ready");
 }
 

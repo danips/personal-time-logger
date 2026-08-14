@@ -399,9 +399,11 @@ function bindEvents() {
   }, $sessionTokenConsent));
 }
 
-async function init() {
+export async function initUsagePage() {
   bindEvents();
   await render();
 }
 
-startPage({ page: "usage", title: "ChatGPT usage limits", init });
+if (document.body?.dataset.page === "usage") {
+  startPage({ page: "usage", title: "ChatGPT usage limits", init: initUsagePage });
+}

@@ -4,169 +4,130 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Time Logger Options</title>
+    <link rel="stylesheet" href="../usage/usage.css">
+    <link rel="stylesheet" href="../reconcile/reconcile.css">
     <link rel="stylesheet" href="options.css">
   </head>
-  <body>
+  <body data-page="options">
     <main class="page">
-      <header>
+      <header class="options-header">
         <h1>Time Logger Options</h1>
-        <p id="statusLine" class="status">Loading...</p>
+        <p id="statusLine" class="status" role="status" aria-live="polite">Loading...</p>
       </header>
 
-      <section class="panel">
-        <h2>Google Account</h2>
-        <label>
-          OAuth client ID
-          <input id="googleClientId" type="text" autocomplete="off" spellcheck="false">
-        </label>
-        <label>
-          OAuth client secret
-          <input id="googleClientSecret" type="password" autocomplete="off" spellcheck="false">
-        </label>
-        <p class="note">
-          The client ID and client secret are saved with Firefox Sync and can be
-          restored on desktop devices signed into the same Mozilla account with
-          Add-ons sync enabled. Each device still needs its own Google sign-in.
-        </p>
-        <p class="note">
-          Credentials and tokens are unencrypted in each Firefox profile. OAuth
-          access and refresh tokens stay on this device and are never put in Firefox
-          Sync. Use Sign Out to remove tokens, and revoke access in your Google
-          Account to invalidate them. See PRIVACY.md for details.
-        </p>
-        <dl>
-          <div>
-            <dt>OAuth status</dt>
-            <dd id="authStatus">Loading...</dd>
-          </div>
-          <div>
-            <dt>Device ID</dt>
-            <dd><code id="deviceId"></code></dd>
-          </div>
-        </dl>
-        <div id="deviceAuthPanel" class="device-auth" hidden>
-          <p>Google device sign-in code</p>
-          <strong id="deviceUserCode"></strong>
-          <p>
-            Open <a id="deviceVerificationUrl" href="#" target="_blank" rel="noreferrer"></a>
-            and enter the code above.
-          </p>
-          <p id="deviceAuthExpires" class="note"></p>
-        </div>
-        <div class="actions">
-          <button id="saveGoogleCredentials" type="button">Save Credentials</button>
-          <button id="signInButton" type="button">Sign In</button>
-          <button id="signOutButton" type="button">Sign Out</button>
-        </div>
-      </section>
+      <div class="options-layout">
+        <nav class="section-nav" aria-label="Options sections">
+          <p class="section-nav-label">Sections</p>
+          <a href="#google-account">Google Account</a>
+          <a href="#spreadsheet">Spreadsheet</a>
+          <a href="#chatgpt-usage">ChatGPT Usage</a>
+          <a href="#reconciliation">Reconciliation</a>
+          <a href="#tempo">Tempo</a>
+          <a href="#diagnostics">Diagnostics</a>
+        </nav>
 
-      <section class="panel">
-        <h2>Spreadsheet</h2>
-        <dl>
-          <div>
-            <dt>Spreadsheet</dt>
-            <dd>
-              <a id="spreadsheetLink" href="#" target="_blank" rel="noreferrer">Not set up yet</a>
-            </dd>
-          </div>
-          <div>
-            <dt>Spreadsheet ID</dt>
-            <dd><code id="spreadsheetId">not set</code></dd>
-          </div>
-        </dl>
-        <p class="note">
-          The spreadsheet is found or created automatically after you sign in. If it is
-          permanently deleted or you lose access, use the recovery controls below; the
-          extension will never replace an inaccessible spreadsheet automatically.
-        </p>
-        <p id="spreadsheetBackupInfo" class="note">Checking local backup...</p>
-        <div class="actions">
-          <button id="copySpreadsheetId" type="button">Copy ID</button>
-          <button id="reconnectSpreadsheet" type="button">Reconnect</button>
-          <button id="createReplacementSpreadsheet" type="button">Create replacement</button>
-        </div>
-        <label>
-          Connect an existing compatible spreadsheet ID
-          <input id="replacementSpreadsheetId" type="text" autocomplete="off" spellcheck="false">
-        </label>
-        <div class="actions">
-          <button id="connectSpreadsheet" type="button">Connect spreadsheet</button>
-        </div>
-        <p class="note">
-          Reconnect keeps the current ID. Connecting or creating a replacement preserves
-          every local entry and syncs that backup to the selected destination.
-        </p>
-        <label>
-          Sync interval seconds
-          <input id="syncInterval" type="number" min="30" step="1">
-        </label>
-        <label>
-          Duration multiplier
-          <input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001">
-        </label>
-        <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
-        <label>
-          Calendar starts at hour
-          <input id="workdayStartHour" type="number" min="0" max="23" step="1">
-        </label>
-        <p class="note">The Calendar initially starts displaying at this hour.</p>
-        <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
-        <div class="actions">
-          <button id="saveSettings" type="button">Save Settings</button>
-        </div>
-      </section>
+        <div class="options-content">
+          <section id="google-account" class="panel options-section">
+            <h2>Google Account</h2>
+            <label>
+              OAuth client ID
+              <input id="googleClientId" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label>
+              OAuth client secret
+              <input id="googleClientSecret" type="password" autocomplete="off" spellcheck="false">
+            </label>
+            <p class="note">The client ID and client secret are saved with Firefox Sync and can be restored on desktop devices signed into the same Mozilla account with Add-ons sync enabled. Each device still needs its own Google sign-in.</p>
+            <p class="note">Credentials and tokens are unencrypted in each Firefox profile. OAuth access and refresh tokens stay on this device and are never put in Firefox Sync. Use Sign Out to remove tokens, and revoke access in your Google Account to invalidate them. See PRIVACY.md for details.</p>
+            <dl>
+              <div><dt>OAuth status</dt><dd id="authStatus">Loading...</dd></div>
+              <div><dt>Device ID</dt><dd><code id="deviceId"></code></dd></div>
+            </dl>
+            <div id="deviceAuthPanel" class="device-auth" hidden>
+              <p>Google device sign-in code</p>
+              <strong id="deviceUserCode"></strong>
+              <p>Open <a id="deviceVerificationUrl" href="#" target="_blank" rel="noreferrer"></a> and enter the code above.</p>
+              <p id="deviceAuthExpires" class="note"></p>
+            </div>
+            <div class="actions"><button id="saveGoogleCredentials" type="button">Save Credentials</button><button id="signInButton" type="button">Sign In</button><button id="signOutButton" type="button">Sign Out</button></div>
+          </section>
 
-      <section class="panel">
-        <h2>Tempo</h2>
-        <label>
-          API token
-          <input id="tempoApiToken" type="password" autocomplete="off" spellcheck="false">
-        </label>
-        <label>
-          Author account ID
-          <input id="tempoAuthorAccountId" type="text" autocomplete="off" spellcheck="false">
-        </label>
-        <p class="note">
-          These credentials stay in this browser profile. Calendar sends the displayed
-          week's completed logs directly to Tempo and uses each description as its comment.
-        </p>
-        <h3>Cached Task issue IDs</h3>
-        <p class="note">
-          When Calendar encounters a Task it does not know, it asks for the numeric Jira
-          issue ID and remembers it here. You can edit or remove mappings before sending.
-        </p>
-        <div class="table-scroll">
-          <table class="tempo-mappings">
-            <thead>
-              <tr>
-                <th scope="col">Task</th>
-                <th scope="col">Issue ID</th>
-                <th scope="col"><span class="visually-hidden">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody id="tempoMappings"></tbody>
-          </table>
-        </div>
-        <p id="tempoMappingsEmpty" class="note">No Task issue IDs cached yet.</p>
-        <div class="actions">
-          <button id="addTempoMapping" type="button">Add mapping</button>
-          <button id="saveTempoSettings" type="button">Save Tempo Settings</button>
-        </div>
-      </section>
+          <section id="spreadsheet" class="panel options-section">
+            <h2>Spreadsheet</h2>
+            <dl>
+              <div><dt>Spreadsheet</dt><dd><a id="spreadsheetLink" href="#" target="_blank" rel="noreferrer">Not set up yet</a></dd></div>
+              <div><dt>Spreadsheet ID</dt><dd><code id="spreadsheetId">not set</code></dd></div>
+            </dl>
+            <p class="note">The spreadsheet is found or created automatically after you sign in. If it is permanently deleted or you lose access, use the recovery controls below; the extension will never replace an inaccessible spreadsheet automatically.</p>
+            <p id="spreadsheetBackupInfo" class="note">Checking local backup...</p>
+            <div class="actions"><button id="copySpreadsheetId" type="button">Copy ID</button><button id="reconnectSpreadsheet" type="button">Reconnect</button><button id="createReplacementSpreadsheet" type="button">Create replacement</button></div>
+            <label>Connect an existing compatible spreadsheet ID<input id="replacementSpreadsheetId" type="text" autocomplete="off" spellcheck="false"></label>
+            <div class="actions"><button id="connectSpreadsheet" type="button">Connect spreadsheet</button></div>
+            <p class="note">Reconnect keeps the current ID. Connecting or creating a replacement preserves every local entry and syncs that backup to the selected destination.</p>
+            <label>Sync interval seconds<input id="syncInterval" type="number" min="30" step="1"></label>
+            <label>Duration multiplier<input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001"></label>
+            <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
+            <label>Calendar starts at hour<input id="workdayStartHour" type="number" min="0" max="23" step="1"></label>
+            <p class="note">The Calendar initially starts displaying at this hour.</p>
+            <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
+            <div class="actions"><button id="saveSettings" type="button">Save Settings</button></div>
+          </section>
 
-      <section class="panel">
-        <h2>Diagnostics</h2>
-        <p id="diagnosticsSummary" class="note">Loading diagnostics...</p>
-        <p class="note">
-          Recovery records contain time, component, error code, entry count, and suggested action.
-          They do not contain time-entry content, OAuth tokens, spreadsheet IDs, URLs, or raw API responses.
-        </p>
-        <div class="actions">
-          <button id="copyDiagnostics" type="button">Copy diagnostics</button>
-          <button id="exportDiagnostics" type="button">Download diagnostics</button>
-          <button id="clearDiagnostics" type="button">Clear diagnostics</button>
+          <section id="chatgpt-usage" class="panel options-section" aria-labelledby="usageHeading">
+            <div class="section-heading"><div><h2 id="usageHeading">ChatGPT usage limits</h2><p id="pageStatus" class="status" role="status" aria-live="polite">Checking ChatGPT access…</p></div></div>
+            <div class="options-subsection" aria-labelledby="aboutHeading">
+              <h2 id="aboutHeading">Experimental account usage</h2>
+              <p>This feature keeps each signed-in ChatGPT account in its own Firefox container and reads the current plan allowance from ChatGPT.</p>
+              <p class="notice"><strong>Private endpoint:</strong> ChatGPT does not document this endpoint, so it may stop working after a ChatGPT update. When Firefox's isolated request cannot use the container session, a fixed request runs in the ChatGPT page context and reads the current session's access token in memory only to authenticate that request. The token is never returned to the extension, stored, logged, synchronized, or shown. ChatGPT can observe or modify that page-context data flow.</p>
+              <p><a href="https://chatgpt.com/codex/cloud/settings/analytics#usage" target="_blank" rel="noreferrer">Open the official ChatGPT Usage page</a></p>
+              <label class="consent-row"><input id="sessionTokenConsent" type="checkbox"> I understand and enable this in-memory session-token use for ChatGPT usage checks.</label>
+              <p class="container-note"><strong>Optional:</strong> Firefox’s built-in containers are sufficient. If you do not already use Mozilla’s <a href="https://addons.mozilla.org/en-US/firefox/addon/multi-account-containers/" target="_blank" rel="noreferrer">Multi-Account Containers extension</a>, you may install it to make container management easier.</p>
+              <div class="actions"><button id="grantAccess" type="button">Grant ChatGPT access</button></div>
+            </div>
+            <div id="setupPanel" class="options-subsection" aria-labelledby="setupHeading" hidden>
+              <h2 id="setupHeading">Connect an account</h2>
+              <p>Each account needs its own extension-created Firefox container. After you add one, sign in in the tab Firefox opens, then return here.</p>
+              <label for="accountLabel">Local account label</label><input id="accountLabel" maxlength="80" autocomplete="off">
+              <div class="actions"><button id="addAccount" type="button">Add account</button></div>
+            </div>
+            <div class="options-subsection" aria-labelledby="accountsHeading">
+              <div class="panel-heading"><h2 id="accountsHeading">Configured accounts</h2><div class="actions panel-actions"><button id="refreshAll" type="button" hidden>Refresh all</button><button id="clearData" class="danger" type="button">Clear ChatGPT usage data</button></div></div>
+              <div id="accounts" class="account-list" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <section id="reconciliation" class="panel options-section" aria-labelledby="reconcileHeading">
+            <div class="section-heading"><div><h2 id="reconcileHeading">Reconcile Local And Remote</h2><p id="reconcileStatusLine" class="status" role="status" aria-live="polite">Loading...</p></div><div class="actions section-actions"><button id="rescanButton" type="button">Rescan</button><button id="syncButton" type="button">Sync Now</button></div></div>
+            <div class="options-subsection" aria-labelledby="summaryHeading">
+              <h2 id="summaryHeading">Summary</h2>
+              <dl id="summary"><div><dt>Entries on this device</dt><dd id="localCount">-</dd></div><div><dt>Rows in the spreadsheet</dt><dd id="remoteRowCount">-</dd></div><div><dt>Distinct entries in the spreadsheet</dt><dd id="remoteCount">-</dd></div><div><dt>Duplicate spreadsheet rows</dt><dd id="duplicateRowCount">-</dd></div><div><dt>Identical on both sides</dt><dd id="inSyncCount">-</dd></div><div><dt>Divergences</dt><dd id="divergenceCount">-</dd></div></dl>
+            </div>
+            <div id="differentSection" class="options-subsection" aria-labelledby="differentHeading"><div class="panel-heading"><h2 id="differentHeading">Different on each side</h2><div class="actions"><button id="keepAllLocal" type="button">Keep all local</button><button id="keepAllRemote" type="button">Keep all remote</button><button id="keepAllNewest" type="button">Keep newest of each</button></div></div><div id="differentList" class="group-list"></div></div>
+            <div id="duplicateSection" class="options-subsection" aria-labelledby="duplicateHeading"><div class="panel-heading"><h2 id="duplicateHeading">Duplicate rows in the spreadsheet</h2><div class="actions"><button id="deleteAllDuplicates" type="button">Delete all extra rows</button></div></div><p class="note">The same entry appears in more than one row. Sync uses the most recently updated of them; the others are stale copies that only take up space.</p><div id="duplicateList" class="group-list"></div></div>
+            <div id="localOnlySection" class="options-subsection" aria-labelledby="localOnlyHeading"><div class="panel-heading"><h2 id="localOnlyHeading">Only on this device</h2><div class="actions"><button id="pushAllLocal" type="button">Upload all</button></div></div><div id="localOnlyList" class="group-list"></div></div>
+            <div id="remoteOnlySection" class="options-subsection" aria-labelledby="remoteOnlyHeading"><div class="panel-heading"><h2 id="remoteOnlyHeading">Only in the spreadsheet</h2><div class="actions"><button id="importAllRemote" type="button">Import all</button></div></div><div id="remoteOnlyList" class="group-list"></div></div>
+          </section>
+
+          <section id="tempo" class="panel options-section">
+            <h2>Tempo</h2>
+            <label>API token<input id="tempoApiToken" type="password" autocomplete="off" spellcheck="false"></label>
+            <label>Author account ID<input id="tempoAuthorAccountId" type="text" autocomplete="off" spellcheck="false"></label>
+            <p class="note">These credentials stay in this browser profile. Calendar sends the displayed week's completed logs directly to Tempo and uses each description as its comment.</p>
+            <h3>Cached Task issue IDs</h3>
+            <p class="note">When Calendar encounters a Task it does not know, it asks for the numeric Jira issue ID and remembers it here. You can edit or remove mappings before sending.</p>
+            <div class="table-scroll"><table class="tempo-mappings"><thead><tr><th scope="col">Task</th><th scope="col">Issue ID</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="tempoMappings"></tbody></table></div>
+            <p id="tempoMappingsEmpty" class="note">No Task issue IDs cached yet.</p>
+            <div class="actions"><button id="addTempoMapping" type="button">Add mapping</button><button id="saveTempoSettings" type="button">Save Tempo Settings</button></div>
+          </section>
+
+          <section id="diagnostics" class="panel options-section">
+            <h2>Diagnostics</h2>
+            <p id="diagnosticsSummary" class="note">Loading diagnostics...</p>
+            <p class="note">Recovery records contain time, component, error code, entry count, and suggested action. They do not contain time-entry content, OAuth tokens, spreadsheet IDs, URLs, or raw API responses.</p>
+            <div class="actions"><button id="copyDiagnostics" type="button">Copy diagnostics</button><button id="exportDiagnostics" type="button">Download diagnostics</button><button id="clearDiagnostics" type="button">Clear diagnostics</button></div>
+          </section>
         </div>
-      </section>
+      </div>
     </main>
     <script type="module" src="options.js"></script>
   </body>

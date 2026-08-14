@@ -942,8 +942,6 @@ function bindEvents() {
     });
   });
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
-  $("#openReconcile").addEventListener("click", () => platform.openExtensionPage("reconcile/reconcile.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
-  $("#openCodexUsage").addEventListener("click", () => platform.openExtensionPage("usage/usage.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
   $windowSizePresets.addEventListener("click", (event) => {
     const button = event.target.closest("[data-window-width]");
     if (!button) return;
@@ -972,7 +970,7 @@ function bindEvents() {
   $("#cancelWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(false));
   $chatGptUsageValues.addEventListener("click", (event) => {
     if (event.target.closest(".chatgpt-usage-value")) {
-      platform.openExtensionPage("usage/usage.html").catch((error) => setStatus($syncStatus, "error", formatError(error)));
+      platform.openExtensionPage("options/options.html#chatgpt-usage").catch((error) => setStatus($syncStatus, "error", formatError(error)));
     }
   });
   $("#openOptions").addEventListener("click", () => platform.openExtensionPage("options/options.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
