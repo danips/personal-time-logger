@@ -7,6 +7,7 @@ import {
   createAccountContainer,
   disconnectAccount,
   refreshAccount,
+  refreshAllAccounts,
   verifyAccount
 } from "../src/chatgpt-containers.js";
 
@@ -138,8 +139,9 @@ describe("ChatGPT container orchestration", () => {
     const account = await verifyAccount("firefox-container-1", overrides);
     values.set("chatgpt_usage_accounts", [{ ...account, last_refresh_at: 0 }]);
 
-    const refreshed = await refreshAccount({ ...account, last_refresh_at: 0 }, { ...overrides, ignoreCooldown: true });
-    assert.equal(refreshed.snapshot.primary_window.used_percent, 4);
+    const refreshed = await refreshAccount(account.id, { ...overrides, ignoreCooldown: true });
+    assert.equal(refreshed.kind, "refreshed");
+    assert.equal(refreshed.account.snapshot.primary_window.used_percent, 4);
     assert.equal(calls.createdTabs.at(-1).active, false);
     assert.deepEqual(calls.removedTabs, [calls.createdTabs.at(-1).id]);
   });
@@ -153,17 +155,57 @@ describe("ChatGPT container orchestration", () => {
       throw new Error("tab already closed");
     };
 
-    const refreshed = await refreshAccount(account, { ...overrides, ignoreCooldown: true });
-    assert.equal(refreshed.snapshot.primary_window.used_percent, 4);
+    const refreshed = await refreshAccount(account.id, { ...overrides, ignoreCooldown: true });
+    assert.equal(refreshed.account.snapshot.primary_window.used_percent, 4);
   });
 
   it("enforces the per-account refresh cooldown", async () => {
     const { overrides } = harness();
     await createAccountContainer("Account 1", overrides);
     const account = await verifyAccount("firefox-container-1", overrides);
-    const result = await refreshAccount(account, overrides);
-    assert.equal(result.skipped, true);
-    assert.equal(result.skip_reason, "cooldown");
+    const result = await refreshAccount(account.id, overrides);
+    assert.equal(result.kind, "skipped");
+    assert.equal(result.reason, "cooldown");
+  });
+
+  it("uses the current stored record rather than a stale rendered snapshot", async () => {
+    const { values, overrides } = harness();
+    await createAccountContainer("Account 1", overrides);
+    const account = await verifyAccount("firefox-container-1", overrides);
+    values.set("chatgpt_usage_accounts", [{
+      ...account,
+      label: "Current label",
+      last_refresh_at: 1_799_999_999_500
+    }]);
+
+    const outcome = await refreshAccount(account.id, overrides);
+    assert.equal(outcome.kind, "skipped");
+    assert.equal(outcome.account.label, "Current label");
+  });
+
+  it("rejects pending setup accounts and reports bulk outcomes explicitly", async () => {
+    const { values, overrides } = harness();
+    await createAccountContainer("Pending", overrides);
+    const stored = values.get("chatgpt_usage_accounts")[0];
+    const cooldown = {
+      ...stored,
+      id: "cooldown-account",
+      label: "Cooldown",
+      pending_setup: false,
+      last_refresh_at: 1_800_000_000_000
+    };
+    values.set("chatgpt_usage_accounts", [{ ...stored, id: "pending-account" }, cooldown]);
+
+    await assert.rejects(
+      () => refreshAccount("pending-account", overrides),
+      { code: "sign_in_required" }
+    );
+    const results = await refreshAllAccounts(overrides);
+    assert.deepEqual(results.map((result) => [result.accountId, result.ok]), [
+      ["pending-account", false],
+      ["cooldown-account", true]
+    ]);
+    assert.equal(results[1].outcome.kind, "skipped");
   });
 
   it("joins duplicate refresh requests for the same account", async () => {
@@ -178,10 +220,10 @@ describe("ChatGPT container orchestration", () => {
     };
 
     const [first, second] = await Promise.all([
-      refreshAccount(account, { ...overrides, ignoreCooldown: true }),
-      refreshAccount(account, { ...overrides, ignoreCooldown: true })
+      refreshAccount(account.id, { ...overrides, ignoreCooldown: true }),
+      refreshAccount(account.id, { ...overrides, ignoreCooldown: true })
     ]);
-    assert.equal(first.id, second.id);
+    assert.equal(first.account.id, second.account.id);
     // One verification plus one joined refresh.
     assert.equal(reads, 1);
     assert.equal(calls.createdTabs.filter((tab) => tab.active === false).length, 1);
@@ -195,7 +237,7 @@ describe("ChatGPT container orchestration", () => {
     overrides.platform.getContextualIdentity = async () => null;
 
     await assert.rejects(
-      () => refreshAccount(account, { ...overrides, ignoreCooldown: true }),
+      () => refreshAccount(account.id, { ...overrides, ignoreCooldown: true }),
       { code: "container_deleted" }
     );
     assert.equal(values.get("chatgpt_usage_accounts")[0].last_error.code, "container_deleted");

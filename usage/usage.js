@@ -129,31 +129,33 @@ function runUsageAction(key, action, button = null) {
   });
 }
 
-async function retryTransient(account) {
-  if (retryTimers.has(account.id)) return;
-  retryTimers.set(account.id, true);
+async function retryTransient(accountId) {
+  if (retryTimers.has(accountId)) return;
+  retryTimers.set(accountId, true);
   await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
   try {
-    await refreshAccount(account, { ignoreCooldown: true });
+    await refreshAccount(accountId, { ignoreCooldown: true });
   } finally {
-    retryTimers.delete(account.id);
+    retryTimers.delete(accountId);
   }
 }
 
-async function refreshOne(account, { automatic = false } = {}) {
+async function refreshOne(accountId, label, { automatic = false } = {}) {
   try {
-    await refreshAccount(account, { ignoreCooldown: automatic });
-    $status.textContent = `${account.label} refreshed.`;
+    const outcome = await refreshAccount(accountId, { ignoreCooldown: automatic });
+    $status.textContent = outcome.kind === "skipped"
+      ? `${label} refresh skipped: ${outcome.reason}.`
+      : `${label} refreshed.`;
   } catch (error) {
     if (error?.code === "network_error") {
       try {
-        await retryTransient(account);
-        $status.textContent = `${account.label} refreshed after a network retry.`;
+        await retryTransient(accountId);
+        $status.textContent = `${label} refreshed after a network retry.`;
       } catch (retryError) {
-        $status.textContent = `${account.label}: ${messageFor(retryError)}`;
+        $status.textContent = `${label}: ${messageFor(retryError)}`;
       }
     } else {
-      $status.textContent = `${account.label}: ${messageFor(error)}`;
+      $status.textContent = `${label}: ${messageFor(error)}`;
     }
   }
 }
@@ -276,7 +278,7 @@ function accountCard(account, enabled) {
   refresh.textContent = "Refresh";
   refresh.disabled = !enabled;
   refresh.title = enabled ? "Refresh this account" : "Grant ChatGPT access and confirm the session-token notice to refresh";
-  refresh.addEventListener("click", () => runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account), refresh));
+  refresh.addEventListener("click", () => runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account.id, account.label), refresh));
   actions.append(refresh);
 
   const openUsage = document.createElement("button");
@@ -355,7 +357,7 @@ async function render({ autoRefresh = true } = {}) {
   }
   if (autoRefresh && enabled) {
     const due = accounts.filter((account) => account.snapshot && (snapshotAge(account.snapshot) > AUTO_REFRESH_AFTER_MS || isExpired(account.snapshot)));
-    for (const account of due) runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account, { automatic: true }));
+    for (const account of due) runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account.id, account.label, { automatic: true }));
   }
 }
 
@@ -380,7 +382,7 @@ function bindEvents() {
   $refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-accounts", async () => {
   if (!sessionTokenConsent) return consentRequired();
   try {
-    const results = await refreshAllAccounts(await getChatGptAccounts());
+    const results = await refreshAllAccounts();
     const succeeded = results.filter((result) => result.ok).length;
     $status.textContent = `${succeeded} of ${results.length} account refreshes succeeded.`;
   } catch (error) {

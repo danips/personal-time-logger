@@ -76,8 +76,8 @@ describe("atomic ChatGPT account mutations", () => {
       }
     };
 
-    const refreshingFirst = refreshAccount(first, { ...overrides, ignoreCooldown: true });
-    const refreshingSecond = refreshAccount(second, { ...overrides, ignoreCooldown: true });
+    const refreshingFirst = refreshAccount(first.id, { ...overrides, ignoreCooldown: true });
+    const refreshingSecond = refreshAccount(second.id, { ...overrides, ignoreCooldown: true });
     await arrived.promise;
 
     secondResponse.resolve({ status: 200, body: usage("second@example.invalid") });
@@ -113,7 +113,7 @@ describe("atomic ChatGPT account mutations", () => {
       }
     };
 
-    const refresh = refreshAccount(saved, { ...overrides, ignoreCooldown: true });
+    const refresh = refreshAccount(saved.id, { ...overrides, ignoreCooldown: true });
     await requestStarted.promise;
     await disconnectAccount(saved.id, overrides);
     responseBarrier.resolve({ status: 200, body: usage("disconnecting@example.invalid") });
@@ -145,7 +145,7 @@ describe("atomic ChatGPT account mutations", () => {
       }
     };
 
-    const refresh = refreshAccount(saved, { ...overrides, ignoreCooldown: true });
+    const refresh = refreshAccount(saved.id, { ...overrides, ignoreCooldown: true });
     await requestStarted.promise;
     await clearChatGptUsageData(overrides);
     responseBarrier.resolve({

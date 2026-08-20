@@ -336,31 +336,38 @@ async function refreshAccountInternal(account, generation, deps) {
   }
 }
 
-export async function refreshAccount(account, overrides = {}) {
+export async function refreshAccount(accountIdToRefresh, overrides = {}) {
   const deps = dependencies(overrides);
-  if (!account || !account.id) throw usageError("account_not_found", "ChatGPT account is unavailable");
-  const existing = inFlightRefreshes.get(account.id);
+  const id = typeof accountIdToRefresh === "string" ? accountIdToRefresh : accountIdToRefresh?.id;
+  if (!id) throw usageError("account_not_found", "ChatGPT account is unavailable");
+  const existing = inFlightRefreshes.get(id);
   if (existing) return existing;
-  const lastAttemptAt = Number(account.last_attempt_at || account.last_refresh_at || 0);
-  const retryAfterMs = Number(account.last_error?.retry_after_seconds || 0) * 1000;
-  const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, retryAfterMs);
-  if (!overrides.ignoreCooldown && deps.now() - lastAttemptAt < cooldownMs) {
-    return { ...account, skipped: true, skip_reason: "cooldown" };
-  }
   let refreshGeneration;
+  let attemptedAccount;
   const request = (async () => {
     const attemptedAt = deps.now();
     const attempted = await mutateAccounts(deps, (accounts, generation) => {
-      const current = findAccount(accounts, (candidate) => candidate.id === account.id);
+      const current = findAccount(accounts, (candidate) => candidate.id === id);
       if (!current) throw usageError("account_not_found", "ChatGPT account is unavailable");
-      const attempted = { ...current, last_attempt_at: attemptedAt };
+      if (current.pending_setup) {
+        throw usageError("sign_in_required", "Sign in to ChatGPT in this container before refreshing it");
+      }
+      const lastAttemptAt = Number(current.last_attempt_at || current.last_refresh_at || 0);
+      const retryAfterMs = Number(current.last_error?.retry_after_seconds || 0) * 1000;
+      const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, retryAfterMs);
+      if (!overrides.ignoreCooldown && deps.now() - lastAttemptAt < cooldownMs) {
+        return { accounts, result: { kind: "skipped", reason: "cooldown", account: current } };
+      }
+      attemptedAccount = { ...current, last_attempt_at: attemptedAt };
       return {
-        accounts: accounts.map((candidate) => candidate.id === account.id ? attempted : candidate),
-        result: { account: attempted, generation }
+        accounts: accounts.map((candidate) => candidate.id === id ? attemptedAccount : candidate),
+        result: { kind: "prepared", account: attemptedAccount, generation }
       };
     });
+    if (attempted.kind === "skipped") return attempted;
     refreshGeneration = attempted.generation;
-    return refreshAccountInternal(attempted.account, attempted.generation, deps);
+    const refreshed = await refreshAccountInternal(attempted.account, attempted.generation, deps);
+    return { kind: "refreshed", account: refreshed };
   })()
     .catch(async (error) => {
       const safeError = error instanceof UsageError ? error : usageError("service_error", "ChatGPT usage refresh failed");
@@ -375,22 +382,25 @@ export async function refreshAccount(account, overrides = {}) {
         if (state.generation !== refreshGeneration) throw safeError;
       }
       await mutateAccounts(deps, (accounts) => ({
-        accounts: accounts.map((candidate) => candidate.id === account.id
+        accounts: accounts.map((candidate) => candidate.id === id
           ? { ...candidate, last_error: failure }
           : candidate),
         result: null
       }));
       throw safeError;
     })
-    .finally(() => inFlightRefreshes.delete(account.id));
-  inFlightRefreshes.set(account.id, request);
+    .finally(() => inFlightRefreshes.delete(id));
+  inFlightRefreshes.set(id, request);
   return request;
 }
 
-export async function refreshAllAccounts(accounts, overrides = {}) {
-  const results = await Promise.all((accounts || []).map(async (account) => {
+export async function refreshAllAccounts(overrides = {}) {
+  const deps = dependencies(overrides);
+  const accounts = await readAccounts(deps);
+  const results = await Promise.all(accounts.map(async (account) => {
     try {
-      return { accountId: account.id, ok: true, account: await refreshAccount(account, overrides) };
+      const outcome = await refreshAccount(account.id, overrides);
+      return { accountId: account.id, ok: true, outcome };
     } catch (error) {
       return {
         accountId: account.id,
