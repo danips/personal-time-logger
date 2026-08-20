@@ -74,4 +74,13 @@ describe("page action render ownership", () => {
       }
     });
   }
+
+  it("popup Stop uses one captured id and revision target", () => {
+    const code = source("popup/popup.js");
+    const stopBody = functionSource(code, "stopTimer");
+    assert.match(stopBody, /stopEntry\(target\.id,\s*\{\s*expectedRevision:\s*target\.expectedRevision\s*\}\)/);
+    assert.doesNotMatch(stopBody, /getActiveEntries/);
+    assert.match(code, /stop-timer:\$\{target\?\.id \|\| "none"\}/);
+    assert.match(code, /Object\.freeze\(\{ id: latest\.id, expectedRevision: latest\.revision \}\)/);
+  });
 });

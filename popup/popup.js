@@ -797,10 +797,9 @@ async function restartFromEntry(id) {
   queueSync();
 }
 
-async function stopTimer({ expectedRevision } = {}) {
-  const active = await getActiveEntries();
-  if (!active.length) return;
-  await stopEntry(active[0].id, { expectedRevision: expectedRevision ?? active[0].revision });
+async function stopTimer(target) {
+  if (!target?.id) return;
+  await stopEntry(target.id, { expectedRevision: target.expectedRevision });
   queueSync();
 }
 
@@ -927,10 +926,16 @@ function bindEvents() {
   $editEnd.addEventListener("keydown", saveEditOnEnter);
   $newTimerToggle.addEventListener("click", toggleNewTimer);
   $("#startButton").addEventListener("click", (event) => runPopupAction("start-timer", startTimer, { button: event.currentTarget }));
-  $("#stopButton").addEventListener("click", (event) => runPopupAction("stop-timer", stopTimer, {
-    button: event.currentTarget,
-    expectedRevision: activeEntries[0]?.revision
-  }));
+  $("#stopButton").addEventListener("click", (event) => {
+    const latest = activeEntries[0];
+    const target = latest
+      ? Object.freeze({ id: latest.id, expectedRevision: latest.revision })
+      : null;
+    return runPopupAction(`stop-timer:${target?.id || "none"}`, () => stopTimer(target), {
+      button: event.currentTarget,
+      expectedRevision: target?.expectedRevision
+    });
+  });
   $activePanel.addEventListener("click", editActiveTimer);
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
