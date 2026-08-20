@@ -21,6 +21,52 @@ export function entryFingerprint(entry) {
   return entryToRow(entry).join("\u0000");
 }
 
+function presentExpectation(revision) {
+  return revision === undefined
+    ? { kind: "present" }
+    : { kind: "present", revision: Number(revision) };
+}
+
+function remoteExpectation(remoteEntry, fingerprint) {
+  const expected = fingerprint ?? (remoteEntry ? entryFingerprint(remoteEntry) : "");
+  return expected ? { kind: "present", fingerprint: expected } : { kind: "absent" };
+}
+
+/** Converts singular UI arguments and bulk row commands into one explicit model. */
+export function normalizeReconciliationCommand(input, { batch = false } = {}) {
+  const action = String(input?.action || "");
+  const remoteEntry = input?.remoteEntry || null;
+  const id = String(input?.id || remoteEntry?.id || "");
+  if (!["keepLocal", "keepRemote", "deleteEverywhere"].includes(action) || !id) {
+    throw batchResolutionError("Each reconciliation item needs an action and entry id.");
+  }
+  if (remoteEntry && remoteEntry.id !== id) {
+    throw batchResolutionError("A reconciliation item has mismatched local and remote ids.");
+  }
+  if ((action === "keepRemote" || (batch && action === "deleteEverywhere")) && !remoteEntry) {
+    throw batchResolutionError(`${action} requires the remote entry shown in the reconciliation report.`);
+  }
+  if (batch && action === "keepLocal" && input.expectedRevision === undefined) {
+    throw batchResolutionError("Bulk local resolutions require the revision shown in the reconciliation report.");
+  }
+
+  const localRevision = action === "keepLocal" ? input.expectedRevision : input.expectedLocalRevision;
+  const local = action === "keepLocal"
+    ? presentExpectation(localRevision)
+    : localRevision === undefined
+      ? { kind: "absent" }
+      : presentExpectation(localRevision);
+  const expectedFingerprint = input.expectedRemoteFingerprint
+    ?? (remoteEntry ? entryFingerprint(remoteEntry) : "");
+  return {
+    action,
+    id,
+    local,
+    remote: remoteExpectation(remoteEntry, expectedFingerprint),
+    reportedRemote: remoteEntry
+  };
+}
+
 function localResolutionIntent(entry, remoteEntry, now = Date.now()) {
   return {
     entry_id: entry.id,
@@ -190,38 +236,117 @@ export async function deleteDuplicateRows(extraRows, { interactiveAuth = false }
   return extraRows.length;
 }
 
+function assertLocalExpectation(existing, command) {
+  if (command.local.kind === "absent") {
+    if (!existing) return;
+    throw new StorageConflictError("Entry changed since reconciliation", {
+      id: command.id,
+      reason: "revision_mismatch",
+      expectedRevision: undefined,
+      actualRevision: Number(existing.revision || 0)
+    });
+  }
+  if (!existing) {
+    throw new StorageConflictError("Entry no longer exists", { id: command.id, reason: "missing" });
+  }
+  if (command.local.revision !== undefined
+    && Number(existing.revision || 0) !== command.local.revision) {
+    throw new StorageConflictError("Entry changed since reconciliation", {
+      id: command.id,
+      reason: "revision_mismatch",
+      expectedRevision: command.local.revision,
+      actualRevision: Number(existing.revision || 0)
+    });
+  }
+}
+
+function assertRemoteExpectation(current, command) {
+  if (command.remote.kind === "present") {
+    if (!current || entryFingerprint(current) !== command.remote.fingerprint) {
+      throw new StorageConflictError("Spreadsheet row changed since reconciliation", {
+        id: command.id,
+        reason: "remote_fingerprint_mismatch"
+      });
+    }
+    return;
+  }
+  if (current) {
+    throw new StorageConflictError("Spreadsheet row appeared since reconciliation", {
+      id: command.id,
+      reason: "remote_unexpected"
+    });
+  }
+}
+
+function replaceReconciliationIntent(settings, id, intent = null) {
+  const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
+    ? settings.get(RECONCILIATION_INTENTS_KEY)
+    : [];
+  const next = intents.filter((candidate) => candidate?.entry_id !== id);
+  if (intent) next.push(intent);
+  settings.set(RECONCILIATION_INTENTS_KEY, next);
+}
+
+/** Single local transition owner for singular and bulk reconciliation commands. */
+function applyReconciliationCommand(command, { entries, settings, remoteEntry = null } = {}) {
+  const existing = entries.get(command.id);
+  assertLocalExpectation(existing, command);
+  let next;
+
+  if (command.action === "keepLocal") {
+    next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
+    entries.set(command.id, next);
+    const intentRemote = remoteEntry || command.reportedRemote;
+    replaceReconciliationIntent(
+      settings,
+      command.id,
+      intentRemote ? localResolutionIntent(existing, intentRemote) : null
+    );
+    return next;
+  }
+
+  if (command.action === "keepRemote") {
+    next = normalizeEntry({ ...remoteEntry, dirty: false, last_sync_at: nowIso(), sync_error: "" });
+    entries.set(command.id, next);
+    replaceReconciliationIntent(settings, command.id);
+    return next;
+  }
+
+  const source = existing || remoteEntry;
+  if (!source) throw new StorageConflictError("Entry no longer exists", { id: command.id, reason: "missing" });
+  const timestamp = nowIso();
+  next = normalizeEntry({
+    ...source,
+    deleted_at: timestamp,
+    updated_at: timestamp,
+    revision: Number(source.revision || 0) + 1,
+    dirty: true,
+    sync_error: ""
+  });
+  entries.set(command.id, next);
+  replaceReconciliationIntent(settings, command.id);
+  return next;
+}
+
 /**
  * Flags the local copy for push without altering its contents. updated_at and
  * revision stay put, so choosing a side never looks like a fresh edit to the
  * other devices.
  */
 export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {}) {
+  const command = normalizeReconciliationCommand({
+    action: "keepLocal",
+    id,
+    remoteEntry,
+    expectedRevision
+  });
   const entry = await mutateEntryState({
-    entryIds: [id],
+    entryIds: [command.id],
     settingKeys: [RECONCILIATION_INTENTS_KEY]
   }, ({ entries, settings }) => {
-    const existing = entries.get(id);
-    if (!existing) throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
-    if (expectedRevision !== undefined && Number(existing.revision || 0) !== Number(expectedRevision)) {
-      throw new StorageConflictError("Entry was changed in another context", {
-        id,
-        reason: "revision_mismatch",
-        expectedRevision: Number(expectedRevision),
-        actualRevision: Number(existing.revision || 0)
-      });
-    }
-
-    const next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
-    entries.set(id, next);
-    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
-      ? settings.get(RECONCILIATION_INTENTS_KEY)
-      : [];
-    const nextIntents = intents.filter((candidate) => candidate && candidate.entry_id !== id);
-    if (remoteEntry) nextIntents.push(localResolutionIntent(existing, remoteEntry));
-    settings.set(RECONCILIATION_INTENTS_KEY, nextIntents);
-    return next;
+    return applyReconciliationCommand(command, { entries, settings });
   });
-  notifyEntriesChanged({ action: "reconcile", ids: [id] });
+  notifyEntriesChanged({ action: "reconcile", ids: [command.id] });
   return entry;
 }
 
@@ -232,30 +357,7 @@ function batchResolutionError(message) {
 }
 
 function normalizeBatchResolution(resolution) {
-  const action = String(resolution?.action || "");
-  const remoteEntry = resolution?.remoteEntry || null;
-  const id = String(resolution?.id || remoteEntry?.id || "");
-  if (!["keepLocal", "keepRemote", "deleteEverywhere"].includes(action) || !id) {
-    throw batchResolutionError("Each bulk reconciliation item needs an action and entry id.");
-  }
-  if (remoteEntry && remoteEntry.id !== id) {
-    throw batchResolutionError("A bulk reconciliation item has mismatched local and remote ids.");
-  }
-  if ((action === "keepRemote" || action === "deleteEverywhere") && !remoteEntry) {
-    throw batchResolutionError(`${action} requires the remote entry shown in the reconciliation report.`);
-  }
-  if (action === "keepLocal" && resolution.expectedRevision === undefined) {
-    throw batchResolutionError("Bulk local resolutions require the revision shown in the reconciliation report.");
-  }
-  return {
-    action,
-    id,
-    remoteEntry,
-    expectedRevision: resolution.expectedRevision,
-    expectedLocalRevision: resolution.expectedLocalRevision,
-    expectedRemoteFingerprint: resolution.expectedRemoteFingerprint
-      || (remoteEntry ? entryFingerprint(remoteEntry) : "")
-  };
+  return normalizeReconciliationCommand(resolution, { batch: true });
 }
 
 async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = false } = {}) {
@@ -263,44 +365,9 @@ async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = fal
   const remoteById = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
   for (const resolution of resolutions) {
     const current = remoteById.get(resolution.id) || null;
-    if (resolution.expectedRemoteFingerprint) {
-      if (!current || entryFingerprint(current) !== resolution.expectedRemoteFingerprint) {
-        throw new StorageConflictError("Spreadsheet row changed since reconciliation", {
-          id: resolution.id,
-          reason: "remote_fingerprint_mismatch"
-        });
-      }
-    } else if (current) {
-      throw new StorageConflictError("Spreadsheet row appeared since reconciliation", {
-        id: resolution.id,
-        reason: "remote_unexpected"
-      });
-    }
+    assertRemoteExpectation(current, resolution);
   }
   return remoteById;
-}
-
-function assertBatchLocalRevision(existing, id, expectedRevision, { absentOnly = false } = {}) {
-  if (absentOnly) {
-    if (!existing) return;
-    throw new StorageConflictError("Entry changed since reconciliation", {
-      id,
-      reason: "revision_mismatch",
-      expectedRevision: undefined,
-      actualRevision: Number(existing.revision || 0)
-    });
-  }
-  if (!existing) {
-    throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
-  }
-  if (Number(existing.revision || 0) !== Number(expectedRevision)) {
-    throw new StorageConflictError("Entry changed since reconciliation", {
-      id,
-      reason: "revision_mismatch",
-      expectedRevision: Number(expectedRevision),
-      actualRevision: Number(existing.revision || 0)
-    });
-  }
 }
 
 /**
@@ -327,63 +394,28 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
     const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
       ? settings.get(RECONCILIATION_INTENTS_KEY)
       : [];
-    const nextIntents = intents.filter((intent) => !ids.has(intent?.entry_id));
+    settings.set(RECONCILIATION_INTENTS_KEY, intents);
     const applied = [];
 
     for (const resolution of resolutions) {
-      const existing = entries.get(resolution.id);
       const verifiedRemote = remoteById.get(resolution.id) || null;
-      let next;
-      if (resolution.action === "keepLocal") {
-        assertBatchLocalRevision(existing, resolution.id, resolution.expectedRevision);
-        next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
-        entries.set(resolution.id, next);
-        if (verifiedRemote) {
-          nextIntents.push(localResolutionIntent(existing, verifiedRemote));
-        }
-      } else if (resolution.action === "keepRemote") {
-        assertBatchLocalRevision(existing, resolution.id, resolution.expectedLocalRevision, {
-          absentOnly: resolution.expectedLocalRevision === undefined
-        });
-        next = normalizeEntry({ ...verifiedRemote, dirty: false, last_sync_at: nowIso(), sync_error: "" });
-        entries.set(resolution.id, next);
-      } else {
-        if (resolution.expectedLocalRevision === undefined) {
-          assertBatchLocalRevision(existing, resolution.id, undefined, { absentOnly: true });
-        } else {
-          assertBatchLocalRevision(existing, resolution.id, resolution.expectedLocalRevision);
-        }
-        const source = existing || verifiedRemote;
-        const timestamp = nowIso();
-        next = normalizeEntry({
-          ...source,
-          deleted_at: timestamp,
-          updated_at: timestamp,
-          revision: Number(source.revision || 0) + 1,
-          dirty: true,
-          sync_error: ""
-        });
-        entries.set(resolution.id, next);
-      }
+      const next = applyReconciliationCommand(resolution, {
+        entries,
+        settings,
+        remoteEntry: verifiedRemote
+      });
       applied.push({ id: resolution.id, action: resolution.action, status: "applied", entry: next });
     }
-    settings.set(RECONCILIATION_INTENTS_KEY, nextIntents);
     return applied;
   });
   notifyEntriesChanged({ action: "reconcile", ids: [...ids] });
   return { results };
 }
 
-async function verifyReconciliationRemote(id, expectedRemoteFingerprint, { interactiveAuth = false } = {}) {
+async function verifyReconciliationRemote(command, { interactiveAuth = false } = {}) {
   const snapshot = await readRemoteSnapshot({ interactiveAuth });
-  const current = snapshot.entries.find((entry) => entry.id === id) || null;
-  if (expectedRemoteFingerprint) {
-    if (!current || entryFingerprint(current) !== expectedRemoteFingerprint) {
-      throw new StorageConflictError("Spreadsheet row changed since reconciliation", { id, reason: "remote_fingerprint_mismatch" });
-    }
-  } else if (current) {
-    throw new StorageConflictError("Spreadsheet row appeared since reconciliation", { id, reason: "remote_unexpected" });
-  }
+  const current = snapshot.entries.find((entry) => entry.id === command.id) || null;
+  assertRemoteExpectation(current, command);
   return current;
 }
 
@@ -392,22 +424,19 @@ async function verifyReconciliationRemote(id, expectedRemoteFingerprint, { inter
  * how a remote-only row is imported.
  */
 export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedRemoteFingerprint = entryFingerprint(remoteEntry) } = {}) {
-  const verifiedRemote = await verifyReconciliationRemote(remoteEntry.id, expectedRemoteFingerprint);
+  const command = normalizeReconciliationCommand({
+    action: "keepRemote",
+    id: remoteEntry.id,
+    remoteEntry,
+    expectedLocalRevision,
+    expectedRemoteFingerprint
+  });
+  const verifiedRemote = await verifyReconciliationRemote(command);
   const entry = await mutateEntryState({
-    entryIds: [remoteEntry.id],
+    entryIds: [command.id],
     settingKeys: [RECONCILIATION_INTENTS_KEY]
   }, ({ entries, settings }) => {
-    const existing = entries.get(remoteEntry.id);
-    if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
-      throw new StorageConflictError("Entry changed since reconciliation", { id: remoteEntry.id, reason: "revision_mismatch" });
-    }
-    const next = normalizeEntry({ ...verifiedRemote, dirty: false, last_sync_at: nowIso(), sync_error: "" });
-    entries.set(next.id, next);
-    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
-      ? settings.get(RECONCILIATION_INTENTS_KEY)
-      : [];
-    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => intent?.entry_id !== remoteEntry.id));
-    return next;
+    return applyReconciliationCommand(command, { entries, settings, remoteEntry: verifiedRemote });
   });
   notifyEntriesChanged({ action: "reconcile", ids: [entry.id] });
   return entry;
@@ -418,26 +447,20 @@ export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedR
  * that sync then pushes. A remote-only row is never persisted as a clean import.
  */
 export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRevision, expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "" } = {}) {
-  const verifiedRemote = await verifyReconciliationRemote(id, expectedRemoteFingerprint);
+  const command = normalizeReconciliationCommand({
+    action: "deleteEverywhere",
+    id,
+    remoteEntry,
+    expectedLocalRevision,
+    expectedRemoteFingerprint
+  });
+  const verifiedRemote = await verifyReconciliationRemote(command);
   const entry = await mutateEntryState({
-    entryIds: [id],
+    entryIds: [command.id],
     settingKeys: [RECONCILIATION_INTENTS_KEY]
   }, ({ entries, settings }) => {
-    const existing = entries.get(id);
-    if (expectedLocalRevision === undefined ? Boolean(existing) : Number(existing?.revision || 0) !== Number(expectedLocalRevision)) {
-      throw new StorageConflictError("Entry changed since reconciliation", { id, reason: "revision_mismatch" });
-    }
-    const source = existing || verifiedRemote;
-    if (!source) throw new StorageConflictError("Entry no longer exists", { id, reason: "missing" });
-    const timestamp = nowIso();
-    const next = normalizeEntry({ ...source, deleted_at: timestamp, updated_at: timestamp, revision: Number(source.revision || 0) + 1, dirty: true, sync_error: "" });
-    entries.set(id, next);
-    const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
-      ? settings.get(RECONCILIATION_INTENTS_KEY)
-      : [];
-    settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => intent?.entry_id !== id));
-    return next;
+    return applyReconciliationCommand(command, { entries, settings, remoteEntry: verifiedRemote });
   });
-  notifyEntriesChanged({ action: "reconcile", ids: [id] });
+  notifyEntriesChanged({ action: "reconcile", ids: [command.id] });
   return entry;
 }
