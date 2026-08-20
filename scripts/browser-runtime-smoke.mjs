@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 const root = process.cwd();
 const driverBin = process.env.GECKODRIVER_BIN || "geckodriver";
 const firefoxBinary = process.env.FIREFOX_BINARY || "";
-const extensionDirectories = ["background", "calendar", "content", "icons", "options", "popup", "reconcile", "src", "usage"];
+const smokeUpdateBaseUrl = "https://example.invalid/personal-time-logger";
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -392,9 +392,13 @@ async function extensionOriginFromFirefox(baseUrl, sessionId) {
 }
 
 async function packageExtension(output) {
-  const { stdout } = await execFileAsync("git", ["ls-files", "--", "manifest.json", ...extensionDirectories], { cwd: root });
-  const files = stdout.split("\n").filter(Boolean);
-  await execFileAsync("zip", ["-q", output, ...files], { cwd: root });
+  const sourceDirectory = path.join(path.dirname(output), "prepared-source");
+  await execFileAsync(process.execPath, [
+    "scripts/prepare-firefox-release.mjs",
+    "--base-url", smokeUpdateBaseUrl,
+    "--output", path.relative(root, sourceDirectory)
+  ], { cwd: root });
+  await execFileAsync("zip", ["-q", "-r", output, "."], { cwd: sourceDirectory });
 }
 
 async function extensionLock(baseUrl, sessionId, holder, release = false) {
@@ -402,13 +406,32 @@ async function extensionLock(baseUrl, sessionId, holder, release = false) {
     const done = arguments[arguments.length - 1];
     import(browser.runtime.getURL("src/db.js")).then(async (db) => {
       const lock = ${release
-        ? `await db.releaseLock("browser-runtime-smoke-lock", ${JSON.stringify(holder)}, window.__browserSmokeGeneration); done(true);`
-        : `await db.claimLock("browser-runtime-smoke-lock", ${JSON.stringify(holder)}, 60_000); window.__browserSmokeGeneration = lock?.generation || 0; done(Boolean(lock));`}
+        ? `await db.releaseLock(window.__browserSmokeLockHandle); window.__browserSmokeLockHandle = null; done(true);`
+        : `window.__browserSmokeLockHandle = await db.claimLock("browser-runtime-smoke-lock", ${JSON.stringify(holder)}, 60_000); done(Boolean(window.__browserSmokeLockHandle));`}
     }).catch((error) => done({ error: error.message || String(error) }));
   `;
   const result = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, { script, args: [] });
   if (result?.error) throw new Error(result.error);
   return result;
+}
+
+async function currentWindow(baseUrl, sessionId) {
+  return webdriver(baseUrl, "GET", `/session/${sessionId}/window`);
+}
+
+async function openWindow(baseUrl, sessionId, url) {
+  const original = await currentWindow(baseUrl, sessionId);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `window.open(${JSON.stringify(url)}, "browser-smoke-calendar"); return true;`,
+    args: []
+  });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const handles = await webdriver(baseUrl, "GET", `/session/${sessionId}/window/handles`);
+    const created = handles.find((handle) => handle !== original);
+    if (created) return { original, created };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Firefox did not create the second extension page window.");
 }
 
 const artifactsDirectory = path.join(root, "web-ext-artifacts");
@@ -464,11 +487,15 @@ try {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   if (!await extensionLock(baseUrl, sessionId, "popup")) throw new Error("Popup context could not claim its runtime lock.");
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
+  const windows = await openWindow(baseUrl, sessionId, `${origin}/calendar/calendar.html`);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/window`, { handle: windows.created });
   await waitForPage(baseUrl, sessionId, ["#calendarGrid"]);
   if (await extensionLock(baseUrl, sessionId, "calendar")) throw new Error("Calendar context acquired a lock already held by the popup context.");
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/window`, { handle: windows.original });
   await extensionLock(baseUrl, sessionId, "popup", true);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/window`, { handle: windows.created });
+  await webdriver(baseUrl, "DELETE", `/session/${sessionId}/window`);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/window`, { handle: windows.original });
 
   console.log("Browser runtime smoke passed: page readiness, popup timer lifecycle/edit, calendar render, options save, and cross-context lock.");
 } finally {
