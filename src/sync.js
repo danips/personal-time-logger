@@ -5,9 +5,10 @@ import {
   ensureAppMarker,
   getRemoteModifiedTime,
   getDriveGateDiagnostics,
-  getSpreadsheetId,
+  getSpreadsheetBinding,
   isSpreadsheetGone,
   provisionSpreadsheet,
+  readySpreadsheetBinding,
   readRemoteSnapshot,
   updateRemoteConfig,
   updateRemoteEntries
@@ -466,10 +467,14 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
  * revision are deliberately untouched, so reconciling against a sheet that
  * already holds rows still resolves by age rather than by which side is newer.
  */
-export async function reseedForNewSpreadsheet(local, { lease } = {}) {
+export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId } = {}) {
   await lease?.assert();
   const candidateIds = new Set(local.all().map((entry) => entry.id));
-  const reseeded = await mutateAllLocalState([RECONCILIATION_INTENTS_KEY, REMOTE_MODIFIED_KEY], ({ entries, settings }) => {
+  const reseeded = await mutateAllLocalState([
+    RECONCILIATION_INTENTS_KEY,
+    REMOTE_MODIFIED_KEY,
+    ...(spreadsheetId ? [SETTING_KEY.SPREADSHEET_ID] : [])
+  ], ({ entries, settings }) => {
     const applied = [];
     for (const id of candidateIds) {
       const current = entries.get(id);
@@ -485,6 +490,13 @@ export async function reseedForNewSpreadsheet(local, { lease } = {}) {
     // anything about a replacement sheet, so discard them with the reseed.
     settings.set(RECONCILIATION_INTENTS_KEY, []);
     settings.set(REMOTE_MODIFIED_KEY, "");
+    if (spreadsheetId) {
+      const binding = settings.get(SETTING_KEY.SPREADSHEET_ID);
+      settings.set(
+        SETTING_KEY.SPREADSHEET_ID,
+        readySpreadsheetBinding(binding, spreadsheetId)
+      );
+    }
     return applied;
   });
   local.apply(reseeded);
@@ -496,14 +508,13 @@ export async function reseedForNewSpreadsheet(local, { lease } = {}) {
  * this extension created or creating one when there are none.
  */
 async function ensureSpreadsheet(local, { interactiveAuth, lease }) {
-  const spreadsheetId = await getSpreadsheetId();
-  const provisioningPending = await getSetting(SETTING_KEY.SPREADSHEET_PROVISION_PENDING, "");
-  if (spreadsheetId && provisioningPending !== spreadsheetId) return null;
+  const binding = await getSpreadsheetBinding();
+  if (binding.state === "ready") return null;
 
   await lease?.assert();
   const provisioned = await provisionSpreadsheet({ interactiveAuth });
   await lease?.assert();
-  await reseedForNewSpreadsheet(local, { lease });
+  await reseedForNewSpreadsheet(local, { lease, spreadsheetId: provisioned.spreadsheetId });
   return provisioned;
 }
 
@@ -521,7 +532,7 @@ async function reprovisionIfSpreadsheetGone(error, local, { interactiveAuth, lea
   await lease?.assert();
   const provisioned = await provisionSpreadsheet({ interactiveAuth });
   await lease?.assert();
-  await reseedForNewSpreadsheet(local, { lease });
+  await reseedForNewSpreadsheet(local, { lease, spreadsheetId: provisioned.spreadsheetId });
   return provisioned;
 }
 

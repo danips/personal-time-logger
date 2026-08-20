@@ -97,4 +97,16 @@ describe("sync maintenance transactions", () => {
     assert.deepEqual(await db.getSetting(RECONCILIATION_INTENTS_KEY), []);
     assert.equal(await db.getSetting("remote_modified_time"), "");
   });
+
+  it("marks the pending spreadsheet ready in the reseed transaction", async () => {
+    const snapshot = entry({ id: "reseed-binding" });
+    await seedEntry(db, snapshot);
+    await db.setSetting("spreadsheet_id", { state: "pending", spreadsheetId: "new-sheet" });
+    const local = localState([snapshot]);
+
+    await reseedForNewSpreadsheet(local, { spreadsheetId: "new-sheet" });
+
+    assert.deepEqual(await db.getSetting("spreadsheet_id"), { state: "ready", spreadsheetId: "new-sheet" });
+    assert.equal((await db.getEntry(snapshot.id)).dirty, true);
+  });
 });

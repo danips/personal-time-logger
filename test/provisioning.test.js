@@ -51,7 +51,7 @@ describe("spreadsheet provisioning", () => {
 
     await assert.rejects(() => sheets.provisionSpreadsheet(), (error) => error.code === "API_ERROR");
     assert.equal(await sheets.getSpreadsheetId(), "created-sheet");
-    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "created-sheet");
+    assert.deepEqual(await sheets.getSpreadsheetBinding(), { state: "pending", spreadsheetId: "created-sheet" });
 
     google.enqueue({ method: "GET", pathname: "/v4/spreadsheets/created-sheet" }, google.json({
       sheets: [
@@ -73,7 +73,7 @@ describe("spreadsheet provisioning", () => {
       adopted: false,
       recovered: true
     });
-    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "");
+    assert.deepEqual(await sheets.getSpreadsheetBinding(), { state: "pending", spreadsheetId: "created-sheet" });
     assert.equal(google.calls.filter((call) => call.method === "POST" && call.pathname === "/v4/spreadsheets").length, 1);
   });
 
@@ -202,12 +202,11 @@ describe("spreadsheet provisioning", () => {
 
     assert.equal(await sheets.adoptSpreadsheet(" recovery-sheet "), "recovery-sheet");
     assert.equal(await sheets.getSpreadsheetId(), "recovery-sheet");
-    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "recovery-sheet");
+    assert.deepEqual(await sheets.getSpreadsheetBinding(), { state: "pending", spreadsheetId: "recovery-sheet" });
   });
 
   it("marks an explicitly created replacement for one-time local re-seeding", async () => {
     await sheets.setSpreadsheetId("former-sheet");
-    await db.setSetting("spreadsheet_provision_pending", "");
     google.calls.length = 0;
     google.enqueue(
       { method: "POST", pathname: "/v4/spreadsheets" },
@@ -220,7 +219,7 @@ describe("spreadsheet provisioning", () => {
 
     assert.equal(await sheets.createReplacementSpreadsheet(), "replacement-sheet");
     assert.equal(await sheets.getSpreadsheetId(), "replacement-sheet");
-    assert.equal(await db.getSetting("spreadsheet_provision_pending"), "replacement-sheet");
+    assert.deepEqual(await sheets.getSpreadsheetBinding(), { state: "pending", spreadsheetId: "replacement-sheet" });
   });
 
   it("does not replace the current binding when a selected spreadsheet is incompatible", async () => {

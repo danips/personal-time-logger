@@ -48,12 +48,41 @@ function headersMatchFor(expected, row) {
 }
 
 const SHEET_ID_SETTING = SETTING_KEY.TIME_ENTRIES_SHEET_ID;
+const BINDING_SETTING = SETTING_KEY.SPREADSHEET_ID;
 const PROVISION_PENDING_SETTING = SETTING_KEY.SPREADSHEET_PROVISION_PENDING;
 
-async function setProvisioningState(spreadsheetId, pendingSpreadsheetId) {
-  return mutateSettings([SETTING_KEY.SPREADSHEET_ID, PROVISION_PENDING_SETTING], (settings) => {
-    settings.set(SETTING_KEY.SPREADSHEET_ID, String(spreadsheetId || "").trim());
-    settings.set(PROVISION_PENDING_SETTING, String(pendingSpreadsheetId || "").trim());
+export function decodeSpreadsheetBinding(value, legacyPendingId = "") {
+  if (value?.state === "unbound") return { state: "unbound" };
+  if ((value?.state === "pending" || value?.state === "ready") && value.spreadsheetId) {
+    return { state: value.state, spreadsheetId: String(value.spreadsheetId) };
+  }
+  const storedId = String(value || "").trim();
+  const pendingId = String(legacyPendingId || "").trim();
+  if (pendingId) return { state: "pending", spreadsheetId: pendingId };
+  if (storedId) return { state: "ready", spreadsheetId: storedId };
+  return { state: "unbound" };
+}
+
+export function readySpreadsheetBinding(binding, spreadsheetId) {
+  const id = String(spreadsheetId || "").trim();
+  if (binding?.state === "pending" && binding.spreadsheetId === id) {
+    return { state: "ready", spreadsheetId: id };
+  }
+  return binding;
+}
+
+async function getBindingState() {
+  return decodeSpreadsheetBinding(
+    await getSetting(BINDING_SETTING, null),
+    await getSetting(PROVISION_PENDING_SETTING, "")
+  );
+}
+
+async function setBindingState(binding) {
+  const next = decodeSpreadsheetBinding(binding);
+  return mutateSettings([BINDING_SETTING, PROVISION_PENDING_SETTING], (settings) => {
+    settings.set(BINDING_SETTING, next);
+    settings.delete(PROVISION_PENDING_SETTING);
   });
 }
 
@@ -208,12 +237,18 @@ async function apiFetchUnsafe(path, options = {}, { interactiveAuth = false, bas
 }
 
 export async function getSpreadsheetId() {
-  return getSetting(SETTING_KEY.SPREADSHEET_ID, "");
+  const binding = await getBindingState();
+  return binding.spreadsheetId || "";
 }
 
 export async function setSpreadsheetId(spreadsheetId) {
   resetSheetCache();
-  return setSetting(SETTING_KEY.SPREADSHEET_ID, String(spreadsheetId || "").trim());
+  const id = String(spreadsheetId || "").trim();
+  return setBindingState(id ? { state: "ready", spreadsheetId: id } : { state: "unbound" });
+}
+
+export async function getSpreadsheetBinding() {
+  return getBindingState();
 }
 
 /**
@@ -234,7 +269,7 @@ export async function adoptSpreadsheet(spreadsheetId, { interactiveAuth = false 
   // Pending makes the next sync repair the full layout if required and re-seed
   // the local backup. Without it, clean entries would be left only on the old
   // destination after an explicit recovery choice.
-  await setProvisioningState(selectedSpreadsheetId, selectedSpreadsheetId);
+  await setBindingState({ state: "pending", spreadsheetId: selectedSpreadsheetId });
   return selectedSpreadsheetId;
 }
 
@@ -297,7 +332,7 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
   // Record the ID before initialization. If the following write is interrupted,
   // the next provisioning attempt repairs this same file instead of making a
   // second, empty spreadsheet.
-  await setProvisioningState(spreadsheetId, spreadsheetId);
+  await setBindingState({ state: "pending", spreadsheetId });
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
@@ -310,7 +345,6 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
     })
   }, { interactiveAuth });
 
-  await setProvisioningState(spreadsheetId, "");
   return spreadsheetId;
 }
 
@@ -321,11 +355,10 @@ async function createOwnedSpreadsheet({ interactiveAuth = false } = {}) {
  */
 export async function createReplacementSpreadsheet({ interactiveAuth = false } = {}) {
   resetSheetCache();
-  await setProvisioningState("", "");
+  await setBindingState({ state: "unbound" });
   const spreadsheetId = await createOwnedSpreadsheet({ interactiveAuth });
   // Creation initialized the remote headers, but a new destination still needs
   // the same one-time local re-seed as an adopted destination.
-  await setProvisioningState(spreadsheetId, spreadsheetId);
   return spreadsheetId;
 }
 
@@ -338,12 +371,11 @@ export async function createReplacementSpreadsheet({ interactiveAuth = false } =
  * recognised as ours.
  */
 export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
-  const storedSpreadsheetId = await getSpreadsheetId();
-  const pendingSpreadsheetId = await getSetting(PROVISION_PENDING_SETTING, "");
-  if (storedSpreadsheetId && pendingSpreadsheetId === storedSpreadsheetId) {
-    await repairSheetLayout(storedSpreadsheetId, { interactiveAuth });
-    await setProvisioningState(storedSpreadsheetId, "");
-    return { spreadsheetId: storedSpreadsheetId, name: SPREADSHEET_TITLE, adopted: false, recovered: true };
+  const binding = await getBindingState();
+  if (binding.state === "pending") {
+    await setBindingState(binding);
+    await repairSheetLayout(binding.spreadsheetId, { interactiveAuth });
+    return { spreadsheetId: binding.spreadsheetId, name: SPREADSHEET_TITLE, adopted: false, recovered: true };
   }
 
   const candidates = await listOwnedSpreadsheets({ interactiveAuth });
@@ -352,7 +384,7 @@ export async function provisionSpreadsheet({ interactiveAuth = false } = {}) {
   for (const candidate of candidates.slice(0, MAX_CANDIDATES)) {
     try {
       if (!await hasTimeEntriesHeader(candidate.id, { interactiveAuth })) continue;
-      await setSpreadsheetId(candidate.id);
+      await setBindingState({ state: "pending", spreadsheetId: candidate.id });
       return { spreadsheetId: candidate.id, name: candidate.name || "", adopted: true };
     } catch (error) {
       // A single stale or inaccessible Drive result must not hide a later

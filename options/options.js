@@ -8,6 +8,7 @@ import { NEXT_DUE_KEY, scheduleSyncHeartbeat } from "../src/background-schedule.
 import {
   adoptSpreadsheet,
   createReplacementSpreadsheet,
+  getSpreadsheetId,
   spreadsheetUrl
 } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
@@ -313,7 +314,7 @@ async function refresh() {
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
-  renderSpreadsheet(await getSetting(SETTING_KEY.SPREADSHEET_ID, ""));
+  renderSpreadsheet(await getSpreadsheetId());
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
   renderDiagnostics();
@@ -348,7 +349,7 @@ async function signInClicked() {
   // spreadsheet and shows its ID without a separate code path.
   setStatus("Signed in. Looking for your spreadsheet...");
   await syncNow({ force: true });
-  if (await getSetting(SETTING_KEY.SPREADSHEET_ID, "")) setStatus("Signed in and spreadsheet ready");
+  if (await getSpreadsheetId()) setStatus("Signed in and spreadsheet ready");
 }
 
 async function signOutClicked() {
@@ -357,7 +358,7 @@ async function signOutClicked() {
 }
 
 async function copySpreadsheetIdClicked() {
-  const spreadsheetId = await getSetting(SETTING_KEY.SPREADSHEET_ID, "");
+  const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) return;
   try {
     await navigator.clipboard.writeText(spreadsheetId);
@@ -392,7 +393,7 @@ async function connectSpreadsheetClicked() {
 }
 
 async function createReplacementSpreadsheetClicked() {
-  const currentId = await getSetting(SETTING_KEY.SPREADSHEET_ID, "");
+  const currentId = await getSpreadsheetId();
   const message = currentId
     ? "Create a new spreadsheet and sync the local backup to it? This changes the selected spreadsheet, but does not delete the current spreadsheet or any local entries."
     : "Create a new spreadsheet and sync the local backup to it?";
