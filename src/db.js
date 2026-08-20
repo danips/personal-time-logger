@@ -46,6 +46,7 @@ function openDb() {
 
   const pending = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let settled = false;
 
     request.onupgradeneeded = (event) => {
       const db = request.result;
@@ -59,12 +60,16 @@ function openDb() {
       }
     };
 
-    request.onblocked = () => {
-      const error = new Error("IndexedDB upgrade is blocked by another extension context");
-      error.code = ERROR_CODE.DB_BLOCKED;
-      reject(error);
-    };
+    // `blocked` only reports that the live request is waiting for another
+    // connection. Keep the shared promise pending until that request either
+    // succeeds or receives a real error.
+    request.onblocked = () => {};
     request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
       const db = request.result;
       db.onversionchange = () => {
         db.close();
@@ -72,7 +77,12 @@ function openDb() {
       };
       resolve(db);
     };
-    request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
+    request.onerror = () => {
+      if (settled) return;
+      settled = true;
+      if (dbPromise === pending) dbPromise = null;
+      reject(request.error || new Error("Could not open IndexedDB"));
+    };
   });
   dbPromise = pending;
   pending.catch(() => {

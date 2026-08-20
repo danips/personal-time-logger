@@ -90,6 +90,8 @@ class FakeDatabase {
     this.state = state;
     this.objectStoreNames = new FakeObjectStoreNames(state.stores);
     this.onversionchange = null;
+    this.closed = false;
+    state.connections.add(this);
   }
 
   createObjectStore(name, options = {}) {
@@ -120,7 +122,12 @@ class FakeDatabase {
     return new FakeObjectStore(this.state.stores.get(name), null, mode);
   }
 
-  close() {}
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.state.connections.delete(this);
+    this.state.tryPendingUpgrades();
+  }
 }
 
 class FakeTransaction {
@@ -367,6 +374,9 @@ function createIndexedDB() {
   const databases = new Map();
   const state = {
     commitGates: [],
+    openCount: 0,
+    pendingUpgrades: [],
+    openFailure: null,
     writeFailure: null,
     consumeWriteFailure() {
       if (!this.writeFailure) return false;
@@ -379,11 +389,33 @@ function createIndexedDB() {
       if (this.activeTransaction && !this.activeTransaction.finished) return;
       this.activeTransaction = this.pendingTransactions.shift() || null;
       this.activeTransaction?.start();
+    },
+    tryPendingUpgrades() {
+      for (const pending of [...this.pendingUpgrades]) {
+        if (pending.database.connections.size) continue;
+        this.pendingUpgrades = this.pendingUpgrades.filter((candidate) => candidate !== pending);
+        completeOpen(pending);
+      }
     }
   };
 
+  function completeOpen({ database, request, requestedVersion }) {
+    const oldVersion = database.version;
+    database.version = requestedVersion;
+    const connection = new FakeDatabase(database);
+    request.result = connection;
+    request.transaction = {
+      objectStore(name) {
+        return connection.transactionStore(name, "versionchange");
+      }
+    };
+    request.onupgradeneeded?.({ target: request, oldVersion, newVersion: requestedVersion });
+    setTimeout(() => request.succeed(connection), 0);
+  }
+
   return {
     open(name, requestedVersion = 1) {
+      state.openCount += 1;
       const request = new FakeRequest();
       setTimeout(() => {
         let database = databases.get(name);
@@ -392,6 +424,7 @@ function createIndexedDB() {
           database = {
             version: 0,
             stores: new Map(),
+            connections: new Set(),
             pendingTransactions: [],
             activeTransaction: null,
             transactionLog: []
@@ -399,6 +432,7 @@ function createIndexedDB() {
           database.runNextTransaction = state.runNextTransaction;
           database.consumeWriteFailure = state.consumeWriteFailure.bind(state);
           database.takeCommitGate = () => state.commitGates.shift();
+          database.tryPendingUpgrades = state.tryPendingUpgrades.bind(state);
           databases.set(name, database);
         }
         if (requestedVersion < database.version) {
@@ -406,23 +440,29 @@ function createIndexedDB() {
           return;
         }
 
-        const connection = new FakeDatabase(database);
-        request.result = connection;
-        if (isNew || requestedVersion > database.version) {
-          const oldVersion = database.version;
-          database.version = requestedVersion;
-          request.transaction = {
-            objectStore(name) {
-              return connection.transactionStore(name, "versionchange");
-            }
-          };
-          request.onupgradeneeded?.({ target: request, oldVersion, newVersion: requestedVersion });
-          // Versionchange requests scheduled by onupgradeneeded must settle
-          // before the connection is exposed, matching IndexedDB upgrade
-          // transaction completion semantics.
-          setTimeout(() => request.succeed(connection), 0);
+        if (state.openFailure) {
+          const error = state.openFailure;
+          state.openFailure = null;
+          request.fail(error);
           return;
         }
+
+        if (isNew || requestedVersion > database.version) {
+          if (!isNew && database.connections.size) {
+            const pending = { database, request, requestedVersion };
+            state.pendingUpgrades.push(pending);
+            for (const connection of [...database.connections]) {
+              connection.onversionchange?.({ oldVersion: database.version, newVersion: requestedVersion });
+            }
+            queueMicrotask(() => request.onblocked?.({ target: request }));
+            state.tryPendingUpgrades();
+          } else {
+            completeOpen({ database, request, requestedVersion });
+          }
+          return;
+        }
+        const connection = new FakeDatabase(database);
+        request.result = connection;
         request.succeed(connection);
       }, 0);
       return request;
@@ -440,6 +480,17 @@ function createIndexedDB() {
     _reset() {
       databases.clear();
       state.commitGates = [];
+      state.pendingUpgrades = [];
+      state.openFailure = null;
+      state.openCount = 0;
+    },
+
+    _failNextOpen(error = new Error("Open failed")) {
+      state.openFailure = error;
+    },
+
+    _getOpenCount() {
+      return state.openCount;
     },
 
     _failOnWrite(writeNumber = 1) {
