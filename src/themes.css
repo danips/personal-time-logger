@@ -229,8 +229,7 @@ html[data-theme] .chatgpt-usage-summary {
 }
 
 html[data-theme] .calendar-shell,
-html[data-theme] .theme-picker,
-html[data-theme] .theme-popover {
+html[data-theme] .theme-picker {
   border-color: var(--border);
   background: var(--surface-raised);
 }

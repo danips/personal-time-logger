@@ -82,27 +82,25 @@ async function waitForCondition(baseUrl, sessionId, label, script, diagnosticScr
 }
 
 async function exerciseThemeSelection(baseUrl, sessionId, origin) {
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
-  await waitForPage(baseUrl, sessionId, ["#openThemePicker", "#popupThemeSelect", "#popupHighContrast"]);
-  const popupTheme = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
+  await waitForPage(baseUrl, sessionId, ["#themeSelect", "#highContrast"]);
+  const settingsTheme = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
-      document.querySelector("#openThemePicker").click();
-      const select = document.querySelector("#popupThemeSelect");
-      const contrast = document.querySelector("#popupHighContrast");
+      const select = document.querySelector("#themeSelect");
+      const contrast = document.querySelector("#highContrast");
       select.value = "blue-archive";
       select.dispatchEvent(new Event("change", { bubbles: true }));
       contrast.checked = true;
       contrast.dispatchEvent(new Event("change", { bubbles: true }));
       return {
         theme: document.documentElement.dataset.theme,
-        contrast: document.documentElement.dataset.contrast,
-        pickerOpen: !document.querySelector("#themePopover").classList.contains("hidden")
+        contrast: document.documentElement.dataset.contrast
       };
     `,
     args: []
   });
-  if (popupTheme.theme !== "blue-archive" || popupTheme.contrast !== "high" || !popupTheme.pickerOpen) {
-    throw new Error(`Popup theme controls did not apply the selection: ${JSON.stringify(popupTheme)}`);
+  if (settingsTheme.theme !== "blue-archive" || settingsTheme.contrast !== "high") {
+    throw new Error(`Settings theme controls did not apply the selection: ${JSON.stringify(settingsTheme)}`);
   }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
