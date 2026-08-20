@@ -316,7 +316,7 @@ async function refreshTokenOnce({ force }) {
         if (isUsable(saved.tokenData)) return saved.tokenData;
         throw codedError("AUTH_STALE", "Token refresh was superseded by a newer authentication action");
       } finally {
-        await releaseLock(TOKEN_REFRESH_LOCK_KEY, holder, lock.generation);
+        await releaseLock(lock);
       }
     }
 

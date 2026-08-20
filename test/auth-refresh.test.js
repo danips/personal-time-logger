@@ -141,7 +141,9 @@ describe("token refresh", () => {
       await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "API_TIMEOUT");
       assert.equal(aborted, true);
       assert.equal(cleared, true);
-      assert.equal(await db.getSetting("token_refresh_lock"), null);
+      const released = await db.getSetting("token_refresh_lock");
+      assert.equal(released.state, "free");
+      assert.ok(released.generation >= 1);
     } finally {
       globalThis.fetch = previousFetch;
       globalThis.setTimeout = originalSetTimeout;
@@ -163,7 +165,9 @@ describe("token refresh", () => {
 
     try {
       await assert.rejects(() => auth.getAccessToken(), (error) => error.code === "API_NETWORK");
-      assert.equal(await db.getSetting("token_refresh_lock"), null);
+      const released = await db.getSetting("token_refresh_lock");
+      assert.equal(released.state, "free");
+      assert.ok(released.generation >= 1);
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -199,7 +203,14 @@ describe("token refresh", () => {
     const firstPending = first.getAccessToken();
     await firstRefresh.waitForRequest();
 
-    await db.setSetting("token_refresh_lock", { holder: "expired-owner", generation: 999, acquired_at: 0 });
+    await db.setSetting("token_refresh_lock", {
+      state: "held",
+      holder: "expired-owner",
+      generation: 999,
+      token: "expired-token",
+      expires_at: 0,
+      ttl_ms: 30_000
+    });
     google.enqueue({ method: "POST", pathname: "/token" }, google.json({ access_token: "newer-token", expires_in: 3600 }));
     const second = await authContext("second-refresh-owner");
     assert.equal(await second.getAccessToken(), "newer-token");

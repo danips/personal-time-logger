@@ -70,7 +70,14 @@ describe("sync lease fencing", () => {
 
     const sync = syncNow({ force: true });
     await append.waitForRequest();
-    const replacementLock = { holder: "new-owner", generation: 999, acquired_at: Date.now() };
+    const replacementLock = {
+      state: "held",
+      holder: "new-owner",
+      generation: 999,
+      token: "replacement-token",
+      expires_at: Date.now() + 120_000,
+      ttl_ms: 120_000
+    };
     await db.setSetting("sync_lock", replacementLock);
     append.release(google.json({ updates: { updatedRange: "time_entries!A2:N2" } }));
 

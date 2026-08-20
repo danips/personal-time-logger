@@ -616,14 +616,14 @@ async function runSyncCycle({ interactiveAuth, force }) {
   let leaseLost = false;
   const lease = {
     async assert() {
-      if (leaseLost || !await isLockCurrent(SYNC_LOCK_KEY, CONTEXT_ID, lock.generation, SYNC_LOCK_TTL_MS)) {
+      if (leaseLost || !await isLockCurrent(lock)) {
         leaseLost = true;
         throw codedError("SYNC_BUSY", "sync lease was lost; retrying from a fresh snapshot is required");
       }
     }
   };
   const leaseTimer = setInterval(() => {
-    renewLock(SYNC_LOCK_KEY, CONTEXT_ID, lock.generation).then((renewed) => {
+    renewLock(lock).then((renewed) => {
       if (!renewed) leaseLost = true;
     }).catch(() => {
       leaseLost = true;
@@ -771,7 +771,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     throw error;
   } finally {
     clearInterval(leaseTimer);
-    await releaseLock(SYNC_LOCK_KEY, CONTEXT_ID, lock.generation);
+    await releaseLock(lock);
   }
 }
 

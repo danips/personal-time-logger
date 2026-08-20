@@ -261,61 +261,133 @@ export async function mutateSetting(key, mutator) {
   });
 }
 
+function leaseToken() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function leaseHandle(key, state) {
+  return Object.freeze({
+    key,
+    holder: state.holder,
+    generation: Number(state.generation),
+    token: state.token
+  });
+}
+
+function validTtl(ttlMs) {
+  const ttl = Number(ttlMs);
+  if (!Number.isFinite(ttl) || ttl < 0) throw new TypeError("Lease TTL must be a non-negative number");
+  return ttl;
+}
+
+function validLeaseHandle(handle) {
+  return Boolean(handle && typeof handle === "object"
+    && typeof handle.key === "string" && handle.key
+    && typeof handle.holder === "string" && handle.holder
+    && typeof handle.token === "string" && handle.token
+    && Number.isInteger(Number(handle.generation)) && Number(handle.generation) > 0);
+}
+
+function matchesLease(state, handle) {
+  return validLeaseHandle(handle)
+    && state?.state === "held"
+    && state.holder === handle.holder
+    && state.token === handle.token
+    && Number(state.generation) === Number(handle.generation);
+}
+
+async function readLease(objectStore, key, ttlMs) {
+  const record = await requestToPromise(objectStore.get(key));
+  const value = record?.value;
+  if (value?.state === "free" || value?.state === "held") return value;
+
+  // Legacy records kept the live lease and generation counter separately. Read
+  // both only while converting that shape; all new writes use one state record.
+  const generationRecord = await requestToPromise(objectStore.get(`${key}${LOCK_GENERATION_SUFFIX}`));
+  const legacyGeneration = Number(generationRecord?.value || 0);
+  if (value?.holder) {
+    const generation = Math.max(Number(value.generation || 0), legacyGeneration, 1);
+    return {
+      state: "held",
+      generation,
+      holder: value.holder,
+      token: `legacy-${generation}`,
+      expires_at: Number(value.acquired_at || 0) + ttlMs,
+      ttl_ms: ttlMs
+    };
+  }
+  return { state: "free", generation: Math.max(legacyGeneration, 0) };
+}
+
 /**
  * Claims a named lock, held in the settings store so it is visible to every
- * extension context. The get and the put share one readwrite transaction, and
- * IndexedDB serializes transactions across contexts, so two callers cannot both
- * observe the lock as free. Each successful new claim receives a monotonically
- * increasing generation, which callers use as a fencing token. Returns false
- * when someone else holds it.
+ * extension context. The returned opaque handle is required for renewal,
+ * release, and liveness checks. New records keep the generation counter in
+ * the same state record as the live lease.
  */
 export async function claimLock(key, holder, ttlMs) {
+  const ttl = validTtl(ttlMs);
+  if (typeof key !== "string" || !key || typeof holder !== "string" || !holder) {
+    throw new TypeError("A lock key and holder are required");
+  }
   return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
-    const record = await requestToPromise(objectStore.get(key));
-    const lock = record ? record.value : null;
-    const heldUntil = lock ? Number(lock.acquired_at || 0) + ttlMs : 0;
-    if (lock && lock.holder !== holder && heldUntil > Date.now()) return false;
-    if (lock && lock.holder === holder && heldUntil > Date.now()) {
-      const generation = Number(lock.generation || 0) || 1;
-      await requestToPromise(objectStore.put({ key, value: { ...lock, generation, acquired_at: Date.now() } }));
-      return { holder, generation };
+    const now = Date.now();
+    const current = await readLease(objectStore, key, ttl);
+    const active = current.state === "held" && Number(current.expires_at || 0) > now;
+    if (active && current.holder !== holder) return false;
+    if (active && current.holder === holder) {
+      const renewed = { ...current, expires_at: now + Number(current.ttl_ms) };
+      await requestToPromise(objectStore.put({ key, value: renewed }));
+      return leaseHandle(key, renewed);
     }
-    const generationKey = `${key}${LOCK_GENERATION_SUFFIX}`;
-    const generationRecord = await requestToPromise(objectStore.get(generationKey));
-    const generation = Number(generationRecord?.value || 0) + 1;
-    await requestToPromise(objectStore.put({ key: generationKey, value: generation }));
-    await requestToPromise(objectStore.put({ key, value: { holder, generation, acquired_at: Date.now() } }));
-    return { holder, generation };
+
+    const next = {
+      state: "held",
+      generation: Math.max(Number(current.generation || 0), 0) + 1,
+      holder,
+      token: leaseToken(),
+      expires_at: now + ttl,
+      ttl_ms: ttl
+    };
+    await requestToPromise(objectStore.put({ key, value: next }));
+    await requestToPromise(objectStore.delete(`${key}${LOCK_GENERATION_SUFFIX}`));
+    return leaseHandle(key, next);
   });
 }
 
-export async function releaseLock(key, holder, generation = undefined) {
-  await store(SETTINGS_STORE, "readwrite", async (objectStore) => {
-    const record = await requestToPromise(objectStore.get(key));
-    const lock = record ? record.value : null;
-    if (!lock || lock.holder !== holder || (generation !== undefined && Number(lock.generation) !== Number(generation))) return;
-    await requestToPromise(objectStore.delete(key));
-  });
-}
-
-export async function renewLock(key, holder, generation = undefined) {
+export async function releaseLock(handle) {
+  if (!validLeaseHandle(handle)) return false;
   return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
-    const record = await requestToPromise(objectStore.get(key));
-    const lock = record ? record.value : null;
-    if (!lock || lock.holder !== holder || (generation !== undefined && Number(lock.generation) !== Number(generation))) return false;
-    await requestToPromise(objectStore.put({ key, value: { ...lock, acquired_at: Date.now() } }));
+    const record = await requestToPromise(objectStore.get(handle.key));
+    const current = record?.value;
+    if (!matchesLease(current, handle)) return false;
+    await requestToPromise(objectStore.put({
+      key: handle.key,
+      value: { state: "free", generation: Number(current.generation) }
+    }));
     return true;
   });
 }
 
-export async function isLockCurrent(key, holder, generation, ttlMs) {
+export async function renewLock(handle) {
+  if (!validLeaseHandle(handle)) return false;
+  return store(SETTINGS_STORE, "readwrite", async (objectStore) => {
+    const record = await requestToPromise(objectStore.get(handle.key));
+    const current = record?.value;
+    if (!matchesLease(current, handle) || Number(current.expires_at || 0) <= Date.now()) return false;
+    const renewed = { ...current, expires_at: Date.now() + Number(current.ttl_ms) };
+    await requestToPromise(objectStore.put({ key: handle.key, value: renewed }));
+    return true;
+  });
+}
+
+export async function isLockCurrent(handle) {
+  if (!validLeaseHandle(handle)) return false;
   return store(SETTINGS_STORE, "readonly", async (objectStore) => {
-    const record = await requestToPromise(objectStore.get(key));
-    const lock = record ? record.value : null;
-    return Boolean(lock
-      && lock.holder === holder
-      && Number(lock.generation) === Number(generation)
-      && Number(lock.acquired_at || 0) + ttlMs > Date.now());
+    const record = await requestToPromise(objectStore.get(handle.key));
+    const current = record?.value;
+    return matchesLease(current, handle) && Number(current.expires_at || 0) > Date.now();
   });
 }
 

@@ -161,13 +161,13 @@ describe("IndexedDB repository", () => {
   });
 
   it("fences a former lock holder after a newer generation is claimed", async () => {
-    const first = await db.claimLock("generation-lock", "first-holder", -1);
-    const second = await db.claimLock("generation-lock", "second-holder", -1);
+    const first = await db.claimLock("generation-lock", "first-holder", 0);
+    const second = await db.claimLock("generation-lock", "second-holder", 120_000);
 
     assert.ok(second.generation > first.generation);
-    assert.equal(await db.renewLock("generation-lock", "first-holder", first.generation), false);
-    await db.releaseLock("generation-lock", "first-holder", first.generation);
-    assert.equal(await db.isLockCurrent("generation-lock", "second-holder", second.generation, 120_000), true);
+    assert.equal(await db.renewLock(first), false);
+    await db.releaseLock(first);
+    assert.equal(await db.isLockCurrent(second), true);
   });
 
   it("indexes dirty counts and entries alongside deleted, status, active, and interval queries", async () => {
