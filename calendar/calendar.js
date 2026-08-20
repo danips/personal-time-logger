@@ -76,8 +76,7 @@ const DRAG_THRESHOLD_PX = 5;
 
 let weekStart = startOfWeek(new Date());
 let renderedEntries = [];
-let dragState = null;
-let preview = null;
+let gesture = null;
 let initialScrollDone = false;
 let refreshTimer = null;
 let selectedEntryId = "";
@@ -353,7 +352,7 @@ function handleViewportResize() {
 }
 
 async function render() {
-  if (dragState) return;
+  if (gesture) return;
   const generation = ++renderGeneration;
   const weekEnd = addDays(weekStart, DAY_COUNT);
   const [nextEntries, configuredStart] = await Promise.all([
@@ -372,7 +371,7 @@ async function render() {
 }
 
 function refreshActiveTimers() {
-  if (dragState || !renderedEntries.some((entry) => !entry.end_at && !entry.deleted_at)) return;
+  if (gesture || !renderedEntries.some((entry) => !entry.end_at && !entry.deleted_at)) return;
   const segmentsByDay = buildSegments(renderedEntries, weekStart);
   renderHeader(dailyTotalsFromSegments(segmentsByDay));
   renderCalendar(segmentsByDay);
@@ -477,12 +476,13 @@ function refreshSelectedEntryEditor() {
   positionPopupForEntry(entry.id);
 }
 
-function ensurePreview() {
-  if (preview) return preview;
-  preview = document.createElement("div");
-  preview.className = "drag-preview";
-  preview.textContent = "Move";
-  return preview;
+function ensurePreview(state) {
+  if (state.preview) return state.preview;
+  const element = document.createElement("div");
+  element.className = "drag-preview";
+  element.textContent = "Move";
+  state.preview = element;
+  return element;
 }
 
 // Nearest day column to a pointer position, so dragging outside the grid still
@@ -502,27 +502,27 @@ function columnFromPointer(clientX) {
   return best;
 }
 
-function dragTargetFromPointer(clientX, clientY) {
+function dragTargetFromPointer(clientX, clientY, state) {
   const best = columnFromPointer(clientX);
   if (!best) return null;
 
-  const rawTop = clientY - best.rect.top - dragState.offsetY;
+  const rawTop = clientY - best.rect.top - state.offsetY;
   const snappedMinutes = Math.round((rawTop / PX_PER_MINUTE) / SNAP_MINUTES) * SNAP_MINUTES;
   const minute = clamp(snappedMinutes, 0, MINUTES_PER_DAY - SNAP_MINUTES);
   const dayIndex = Number(best.column.dataset.dayIndex || 0);
   return { column: best.column, dayIndex, minute };
 }
 
-function updatePreview(target) {
+function updatePreview(target, state) {
   if (!target) return;
-  const element = ensurePreview();
-  const durationMinutes = Math.max(SNAP_MINUTES, Math.round(dragState.durationMs / MINUTE_MS));
+  const element = ensurePreview(state);
+  const durationMinutes = Math.max(SNAP_MINUTES, Math.round(state.durationMs / MINUTE_MS));
   const visibleMinutes = Math.min(durationMinutes, MINUTES_PER_DAY - target.minute);
   element.style.top = `${target.minute * PX_PER_MINUTE + 2}px`;
   element.style.left = "3px";
   element.style.width = "calc(100% - 6px)";
   element.style.height = `${Math.max(22, visibleMinutes * PX_PER_MINUTE - 4)}px`;
-  element.textContent = `${entryTitle(dragState.entry)} · ${minutesToLabel(target.minute)}`;
+  element.textContent = `${entryTitle(state.entry)} · ${minutesToLabel(target.minute)}`;
   target.column.append(element);
 }
 
@@ -535,6 +535,7 @@ function minutesToLabel(minutes) {
 function beginDrag(event) {
   if (event.button !== 0) return;
   if (event.target.closest(".resize-handle")) return;
+  if (gesture) return;
   const block = event.currentTarget;
   const entry = getEntryById(block.dataset.entryId);
   // A running timer has no settled duration and must stay anchored to its
@@ -543,7 +544,9 @@ function beginDrag(event) {
 
   event.preventDefault();
   const rect = block.getBoundingClientRect();
-  dragState = {
+  gesture = {
+    kind: "move",
+    pointerId: event.pointerId,
     entry,
     block,
     startX: event.clientX,
@@ -553,14 +556,17 @@ function beginDrag(event) {
     active: false,
     target: null
   };
-  dragState.finish = () => runCalendarAction(`drag-entry:${entry.id}`, endDrag, {
-    expectedRevision: entry.revision,
-    afterRender: refreshSelectedEntryEditor
-  });
+  gesture.finish = (finishEvent) => {
+    if (finishEvent.pointerId !== gesture?.pointerId || gesture?.kind !== "move") return;
+    return runCalendarAction(`drag-entry:${entry.id}`, endDrag, {
+      expectedRevision: entry.revision,
+      afterRender: refreshSelectedEntryEditor
+    });
+  };
   block.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveDrag);
-  window.addEventListener("pointerup", dragState.finish, { once: true });
-  window.addEventListener("pointercancel", dragState.finish, { once: true });
+  window.addEventListener("pointerup", gesture.finish);
+  window.addEventListener("pointercancel", gesture.finish);
 }
 
 function resizeTargetFromPointer(clientX, clientY) {
@@ -578,18 +584,30 @@ function resizeTargetFromPointer(clientX, clientY) {
   return { column: best.column, dayIndex, minute, date };
 }
 
-function showResizeGuide(target) {
+function showResizeGuide(target, state) {
   if (!target) return;
-  if (!preview) {
-    preview = document.createElement("div");
-    preview.className = "resize-guide";
+  if (!state.preview) {
+    state.preview = document.createElement("div");
+    state.preview.className = "resize-guide";
   }
-  preview.style.top = `${clamp(target.minute * PX_PER_MINUTE - 1, 0, MINUTES_PER_DAY * PX_PER_MINUTE - 3)}px`;
-  target.column.append(preview);
+  state.preview.style.top = `${clamp(target.minute * PX_PER_MINUTE - 1, 0, MINUTES_PER_DAY * PX_PER_MINUTE - 3)}px`;
+  target.column.append(state.preview);
+}
+
+function clearGesture(state, moveHandler, sourceClass) {
+  if (gesture !== state) return false;
+  gesture = null;
+  window.removeEventListener("pointermove", moveHandler);
+  window.removeEventListener("pointerup", state.finish);
+  window.removeEventListener("pointercancel", state.finish);
+  state.block.classList.remove(sourceClass);
+  state.preview?.remove();
+  return true;
 }
 
 function beginResize(event) {
   if (event.button !== 0) return;
+  if (gesture) return;
   const handle = event.currentTarget;
   const block = handle.closest(".entry-block");
   const entry = block && getEntryById(block.dataset.entryId);
@@ -597,8 +615,9 @@ function beginResize(event) {
 
   event.preventDefault();
   event.stopPropagation();
-  dragState = {
-    type: "resize",
+  gesture = {
+    kind: "resize",
+    pointerId: event.pointerId,
     edge: handle.dataset.resizeEdge,
     entry,
     block,
@@ -608,35 +627,38 @@ function beginResize(event) {
     active: false,
     target: null
   };
-  dragState.finish = () => runCalendarAction(`resize-entry:${entry.id}`, endResize, {
-    expectedRevision: entry.revision,
-    afterRender: refreshSelectedEntryEditor
-  });
+  gesture.finish = (finishEvent) => {
+    if (finishEvent.pointerId !== gesture?.pointerId || gesture?.kind !== "resize") return;
+    return runCalendarAction(`resize-entry:${entry.id}`, endResize, {
+      expectedRevision: entry.revision,
+      afterRender: refreshSelectedEntryEditor
+    });
+  };
   handle.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveResize);
-  window.addEventListener("pointerup", dragState.finish, { once: true });
-  window.addEventListener("pointercancel", dragState.finish, { once: true });
+  window.addEventListener("pointerup", gesture.finish);
+  window.addEventListener("pointercancel", gesture.finish);
 }
 
 function moveResize(event) {
-  if (!dragState || dragState.type !== "resize") return;
-  if (!dragState.active) {
-    const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+  if (!gesture || gesture.kind !== "resize" || gesture.pointerId !== event.pointerId) return;
+  if (!gesture.active) {
+    const distance = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
     if (distance < DRAG_THRESHOLD_PX) return;
-    dragState.active = true;
-    dragState.block.classList.add("resize-source");
+    gesture.active = true;
+    gesture.block.classList.add("resize-source");
   }
 
   const target = resizeTargetFromPointer(event.clientX, event.clientY);
   if (!target) return;
-  const start = new Date(dragState.entry.start_at);
-  const end = new Date(dragState.entry.end_at);
+  const start = new Date(gesture.entry.start_at);
+  const end = new Date(gesture.entry.end_at);
   const earliestEnd = addMinutes(start, RESIZE_SNAP_MINUTES);
   const latestStart = addMinutes(end, -RESIZE_SNAP_MINUTES);
-  if (dragState.edge === "top" && target.date > latestStart) {
+  if (gesture.edge === "top" && target.date > latestStart) {
     target.date = snapDateToGrid(latestStart, "down");
   }
-  if (dragState.edge === "bottom" && target.date < earliestEnd) {
+  if (gesture.edge === "bottom" && target.date < earliestEnd) {
     target.date = snapDateToGrid(earliestEnd, "up");
   }
 
@@ -646,26 +668,18 @@ function moveResize(event) {
     target.column = document.querySelector(`.day-column[data-day-index="${targetDay}"]`);
     target.minute = minutesSinceStartOfDay(target.date);
   }
-  dragState.target = target;
-  showResizeGuide(target);
+  gesture.target = target;
+  showResizeGuide(target, gesture);
 
-  const nextStart = dragState.edge === "top" ? target.date : start;
-  const nextEnd = dragState.edge === "bottom" ? target.date : end;
-  setStatus(`${dragState.edge === "top" ? "Start" : "End"}: ${shortDay(target.date)} ${localTime(target.date)} · ${formatElapsed(Math.round(actualDurationSeconds(nextStart, nextEnd)))}`);
+  const nextStart = gesture.edge === "top" ? target.date : start;
+  const nextEnd = gesture.edge === "bottom" ? target.date : end;
+  setStatus(`${gesture.edge === "top" ? "Start" : "End"}: ${shortDay(target.date)} ${localTime(target.date)} · ${formatElapsed(Math.round(actualDurationSeconds(nextStart, nextEnd)))}`);
 }
 
 async function endResize() {
-  if (!dragState || dragState.type !== "resize") return;
-  const state = dragState;
-  dragState = null;
-  window.removeEventListener("pointermove", moveResize);
-  window.removeEventListener("pointerup", state.finish);
-  window.removeEventListener("pointercancel", state.finish);
-  state.block.classList.remove("resize-source");
-  if (preview) {
-    preview.remove();
-    preview = null;
-  }
+  if (!gesture || gesture.kind !== "resize") return;
+  const state = gesture;
+  clearGesture(state, moveResize, "resize-source");
 
   if (!state.active || !state.target) {
     setStatus("Ready");
@@ -695,32 +709,24 @@ async function endResize() {
 }
 
 function moveDrag(event) {
-  if (!dragState) return;
-  if (!dragState.active) {
-    const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+  if (!gesture || gesture.kind !== "move" || gesture.pointerId !== event.pointerId) return;
+  if (!gesture.active) {
+    const distance = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
     if (distance < DRAG_THRESHOLD_PX) return;
-    dragState.active = true;
-    dragState.block.classList.add("drag-source");
+    gesture.active = true;
+    gesture.block.classList.add("drag-source");
   }
 
-  const target = dragTargetFromPointer(event.clientX, event.clientY);
-  dragState.target = target;
-  updatePreview(target);
+  const target = dragTargetFromPointer(event.clientX, event.clientY, gesture);
+  gesture.target = target;
+  updatePreview(target, gesture);
   if (target) setStatus(`Drop at ${shortDay(addDays(weekStart, target.dayIndex))} ${minutesToLabel(target.minute)}`);
 }
 
 async function endDrag() {
-  if (!dragState) return;
-  const state = dragState;
-  dragState = null;
-  window.removeEventListener("pointermove", moveDrag);
-  window.removeEventListener("pointerup", state.finish);
-  window.removeEventListener("pointercancel", state.finish);
-  state.block.classList.remove("drag-source");
-  if (preview) {
-    preview.remove();
-    preview = null;
-  }
+  if (!gesture || gesture.kind !== "move") return;
+  const state = gesture;
+  clearGesture(state, moveDrag, "drag-source");
 
   if (!state.active || !state.target) {
     setStatus("Ready");
