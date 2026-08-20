@@ -112,4 +112,22 @@ describe("rowsToEntries", () => {
     assert.deepEqual(entries.map((entry) => entry.task), ["valid"]);
     assert.deepEqual(quarantined.map((item) => item.id), [valid.id]);
   });
+
+  it("quarantines every canonical entry validation failure without aborting valid rows", () => {
+    const cases = [
+      ["bad-status", "status", "unsupported"],
+      ["bad-multiplier", "multiply", "not-a-number"],
+      ["bad-revision", "revision", "0"],
+      ["bad-duration", "duration_seconds", "-1"]
+    ];
+    const rows = sheet([fixture({ id: "valid" }), ...cases.map(([id]) => fixture({ id }))]);
+    for (const [index, [, field, value]] of cases.entries()) {
+      rows[index + 2][SHEET_HEADERS.indexOf(field)] = value;
+    }
+
+    const { entries, quarantined } = rowsToEntries(rows);
+
+    assert.deepEqual(entries.map((entry) => entry.id), ["valid"]);
+    assert.deepEqual(quarantined.map((item) => item.id), cases.map(([id]) => id));
+  });
 });

@@ -82,17 +82,15 @@ export function rowFingerprint(row) {
 
 function decodeRemoteRow(row, rowIndex) {
   const cells = entryRowCells(row);
-  const values = Object.fromEntries(SHEET_HEADERS.map((header, index) => [header, cells[index]]));
-  const validDate = (value) => Boolean(value) && Number.isFinite(new Date(value).getTime());
-  const validOptionalDate = (value) => !value || Number.isFinite(new Date(value).getTime());
-  const revision = Number(values.revision);
-  const duration = Number(values.duration_seconds);
-  if (!values.id || !validDate(values.start_at) || !validDate(values.created_at) || !validDate(values.updated_at)
-    || !validOptionalDate(values.end_at) || !validOptionalDate(values.deleted_at)
-    || !Number.isInteger(revision) || revision < 1 || !Number.isFinite(duration) || duration < 0) {
-    return { entry: null, quarantine: { rowIndex, id: values.id, reason: "invalid_entry", row } };
+  try {
+    return { entry: rowToEntry(cells), quarantine: null };
+  } catch (error) {
+    if (error?.code !== ERROR_CODE.ENTRY_INVALID) throw error;
+    return {
+      entry: null,
+      quarantine: { rowIndex, id: cells[0], reason: "invalid_entry", row }
+    };
   }
-  return { entry: rowToEntry(cells), quarantine: null };
 }
 
 // The numeric sheet id is needed to delete rows. It is cached in memory and in
