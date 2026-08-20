@@ -145,19 +145,12 @@ async function clearBackoff() {
  * steps write to it, so a sync no longer scans the whole store five times.
  */
 function localState(entries) {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  return {
-    all() {
-      return [...byId.values()];
-    },
-    apply(changed) {
-      for (const entry of changed) byId.set(entry.id, entry);
-      return changed;
-    },
-    forget(id) {
-      byId.delete(id);
-    }
-  };
+  return new Map(entries.map((entry) => [entry.id, entry]));
+}
+
+function applyEntries(local, changed) {
+  for (const entry of changed) local.set(entry.id, entry);
+  return changed;
 }
 
 function remoteFingerprintSets(snapshot) {
@@ -199,7 +192,7 @@ async function confirmAmbiguousAppends(entries, { interactiveAuth, lease }) {
 async function acknowledgePushedEntries(local, entries, pushedIds, { lease } = {}) {
   for (const entry of entries) {
     const acknowledgement = await markSynced(entry, { lease });
-    if (acknowledgement.entry) local.apply([acknowledgement.entry]);
+    if (acknowledgement.entry) local.set(acknowledgement.entry.id, acknowledgement.entry);
     if (acknowledgement.applied) pushedIds.add(entry.id);
   }
 }
@@ -215,7 +208,7 @@ export async function pushDirtyEntries(local, remoteEntries, rowMap, { interacti
   const updates = [];
   const appends = [];
 
-  for (const entry of local.all()) {
+  for (const entry of local.values()) {
     if (!entry.dirty) continue;
     const remote = remoteById.get(entry.id);
     if (remote && !forcedIds.has(entry.id)
@@ -287,7 +280,7 @@ async function verifiedLocalResolutions(local, remoteEntries) {
   const intents = await getSetting(RECONCILIATION_INTENTS_KEY, []);
   if (!Array.isArray(intents) || !intents.length) return new Map();
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
-  const localById = new Map(local.all().map((entry) => [entry.id, entry]));
+  const localById = local;
   const verified = new Map();
   for (const intent of intents) {
     if (!isPendingReconciliationIntent(intent)) continue;
@@ -315,7 +308,7 @@ async function clearCompletedResolutions(resolutionIds, { lease } = {}) {
 }
 
 export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set(), { lease } = {}) {
-  const localById = new Map(local.all().map((entry) => [entry.id, entry]));
+  const localById = local;
   const applied = [];
   const candidates = remoteEntries
     .filter((remote) => !pushedIds.has(remote.id))
@@ -354,12 +347,12 @@ export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Se
     applied.push(...changed);
   }
 
-  local.apply(applied);
+  applyEntries(local, applied);
   return applied.length;
 }
 
 export async function markMultipleActiveTimers(local, { lease } = {}) {
-  const active = local.all()
+  const active = [...local.values()]
     .filter((entry) => !entry.deleted_at && !entry.end_at)
     .sort((a, b) => String(b.start_at).localeCompare(String(a.start_at)));
 
@@ -392,7 +385,7 @@ export async function markMultipleActiveTimers(local, { lease } = {}) {
     }
     return applied;
   });
-  return local.apply(changed);
+  return applyEntries(local, changed);
 }
 
 function isExpiredDeletion(deletedAt) {
@@ -437,7 +430,7 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
     }
   }
 
-  const candidates = local.all().filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
+  const candidates = [...local.values()].filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
   const expectedById = new Map(candidates.map((entry) => [entry.id, entryFingerprint(entry)]));
   await lease?.assert();
   const deletedIds = await mutateEntries(candidates.map((entry) => entry.id), (entries) => {
@@ -454,7 +447,7 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
     }
     return applied;
   });
-  for (const id of deletedIds) local.forget(id);
+  for (const id of deletedIds) local.delete(id);
   return deletedIds.length;
 }
 
@@ -469,7 +462,7 @@ export async function purgeDeletedEntries(local, remoteEntries, rowMap, duplicat
  */
 export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId } = {}) {
   await lease?.assert();
-  const candidateIds = new Set(local.all().map((entry) => entry.id));
+  const candidateIds = new Set(local.keys());
   const reseeded = await mutateAllLocalState([
     RECONCILIATION_INTENTS_KEY,
     REMOTE_MODIFIED_KEY,
@@ -499,7 +492,7 @@ export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId } = 
     }
     return applied;
   });
-  local.apply(reseeded);
+  applyEntries(local, reseeded);
   return reseeded.length;
 }
 
@@ -641,7 +634,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
     phase = "read_local";
     await lease.assert();
     const local = localState(await getAllEntries());
-    entryCount = local.all().length;
+    entryCount = local.size;
     await lease.assert();
     phase = "intent_cleanup";
     await pruneExpiredReconciliationIntents();
@@ -658,7 +651,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
     // Both marking passes set dirty, so either of them producing changes makes
     // hasLocalWork true and forces the read below.
-    const hasLocalWork = local.all().some((entry) => entry.dirty || isExpiredDeletion(entry.deleted_at))
+    const hasLocalWork = [...local.values()].some((entry) => entry.dirty || isExpiredDeletion(entry.deleted_at))
       || await hasPendingConfig();
 
     // Drive reports when the file last changed for a fraction of the cost of

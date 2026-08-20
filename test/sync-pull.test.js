@@ -35,11 +35,7 @@ describe("sync pull CAS", () => {
   it("does not overwrite an edit committed after the sync snapshot", async () => {
     const observed = entry();
     await seedEntry(db, observed);
-    const local = {
-      entries: [observed],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map([[observed.id, observed]]);
     const localEdit = entry({ task: "Local edit", revision: 2, dirty: true, updated_at: "2026-08-08T12:00:00.000Z" });
     const remote = entry({ task: "Remote value", revision: 1, updated_at: "2026-08-08T11:00:00.000Z" });
     await seedEntry(db, localEdit);
@@ -52,11 +48,7 @@ describe("sync pull CAS", () => {
 
   it("does not import over an id created locally after the snapshot", async () => {
     const remote = entry({ id: "appeared-locally", task: "Remote value", updated_at: "2026-08-08T11:00:00.000Z" });
-    const local = {
-      entries: [],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map();
     const created = entry({ id: "appeared-locally", task: "Local create", revision: 1, dirty: true });
     await seedEntry(db, created);
 
@@ -66,11 +58,7 @@ describe("sync pull CAS", () => {
 
   it("imports a genuinely remote-only entry", async () => {
     const remote = entry({ id: "remote-only", task: "Remote value", updated_at: "2026-08-08T11:00:00.000Z" });
-    const local = {
-      entries: [],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map();
 
     assert.equal(await pullRemoteEntries(local, [remote]), 1);
     assert.equal((await db.getEntry(remote.id)).task, "Remote value");
@@ -80,11 +68,7 @@ describe("sync pull CAS", () => {
   it("does not open a write transaction or rewrite unchanged snapshot rows", async () => {
     const unchanged = entry({ id: "unchanged-snapshot" });
     await seedEntry(db, unchanged);
-    const local = {
-      entries: [unchanged],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map([[unchanged.id, unchanged]]);
     indexedDB._resetWriteLog();
     indexedDB._resetTransactionLog();
 
@@ -101,11 +85,7 @@ describe("sync pull CAS", () => {
       entry({ id: "batched-remote-2", task: "Remote 2", updated_at: "2026-08-08T11:00:00.000Z" }),
       entry({ id: "batched-remote-3", task: "Remote 3", updated_at: "2026-08-08T11:00:00.000Z" })
     ];
-    const local = {
-      entries: [],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map();
     indexedDB._resetWriteLog();
     indexedDB._resetTransactionLog();
 
@@ -124,11 +104,7 @@ describe("sync pull CAS", () => {
       id: `batch-cap-${index}`,
       updated_at: "2026-08-08T11:00:00.000Z"
     }));
-    const local = {
-      entries: [],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map();
     indexedDB._resetWriteLog();
     indexedDB._resetTransactionLog();
 
@@ -155,11 +131,7 @@ describe("sync pull CAS", () => {
     });
     const remoteOnly = entry({ id: "concurrent-batch-remote-only", task: "Remote only", updated_at: "2026-08-08T11:00:00.000Z" });
     await seedEntry(db, localEdit);
-    const local = {
-      entries: [observed],
-      all() { return this.entries; },
-      apply(changed) { this.entries.push(...changed); }
-    };
+    const local = new Map([[observed.id, observed]]);
 
     assert.equal(await pullRemoteEntries(local, [remoteChanged, remoteOnly]), 1);
     assert.deepEqual(await db.getEntry(observed.id), localEdit);

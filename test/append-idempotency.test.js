@@ -56,15 +56,7 @@ function enqueueSnapshot(entries) {
 }
 
 function localState(entries) {
-  const values = new Map(entries.map((entry) => [entry.id, entry]));
-  return {
-    all() {
-      return [...values.values()];
-    },
-    apply(changed) {
-      for (const entry of changed) values.set(entry.id, entry);
-    }
-  };
+  return new Map(entries.map((entry) => [entry.id, entry]));
 }
 
 before(async () => {

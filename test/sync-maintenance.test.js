@@ -33,21 +33,7 @@ const entry = (over = {}) => ({
 });
 
 function localState(entries) {
-  return {
-    entries: [...entries],
-    all() { return this.entries; },
-    apply(changed) {
-      for (const entry of changed) {
-        const index = this.entries.findIndex((candidate) => candidate.id === entry.id);
-        if (index >= 0) this.entries[index] = entry;
-        else this.entries.push(entry);
-      }
-      return changed;
-    },
-    forget(id) {
-      this.entries = this.entries.filter((candidate) => candidate.id !== id);
-    }
-  };
+  return new Map(entries.map((entry) => [entry.id, entry]));
 }
 
 describe("sync maintenance transactions", () => {
