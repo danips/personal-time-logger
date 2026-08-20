@@ -99,13 +99,13 @@ describe("local input values", () => {
     const iso = new Date(2026, 6, 27, 9, 5, 30).toISOString();
     const inputValue = toLocalInputValue(iso);
     assert.match(inputValue, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
-    assert.equal(fromLocalInputValue(inputValue), iso);
+    assert.deepEqual(fromLocalInputValue(inputValue), { kind: "instant", iso });
   });
 
-  it("returns empty strings for missing or unparseable values", () => {
+  it("tags empty and unparseable values separately", () => {
     assert.equal(toLocalInputValue(""), "");
     assert.equal(toLocalInputValue("nonsense"), "");
-    assert.equal(fromLocalInputValue(""), "");
-    assert.equal(fromLocalInputValue("nonsense"), "");
+    assert.deepEqual(fromLocalInputValue(""), { kind: "empty" });
+    assert.deepEqual(fromLocalInputValue("nonsense"), { kind: "invalid", reason: "format" });
   });
 });

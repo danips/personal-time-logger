@@ -18,7 +18,6 @@ import {
   bindMinuteRollover,
   durationSeconds,
   formatElapsed,
-  fromLocalInputValue,
   localTime,
   startOfLocalDay as startOfDay,
   startOfLocalWeek as startOfWeek,
@@ -862,17 +861,6 @@ async function deleteCalendarEntry() {
 async function saveCalendarEdit(event) {
   event.preventDefault();
   if (!editingEntryId) return;
-
-  const startAt = fromLocalInputValue($("#calendarEditStart").value);
-  const endAt = fromLocalInputValue($("#calendarEditEnd").value);
-  if (!startAt) {
-    setStatus("A valid start time is required");
-    return;
-  }
-  if (endAt && new Date(endAt) < new Date(startAt)) {
-    setStatus("End time cannot be before the start time");
-    return;
-  }
 
   setResizeUndo(null);
   await updateEntry(

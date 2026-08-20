@@ -87,17 +87,25 @@ export function toLocalInputValue(iso) {
 }
 
 export function fromLocalInputValue(value) {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(String(value || ""))) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const [day, time] = value.split("T");
+  const text = String(value || "");
+  if (!text) return { kind: "empty" };
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(text)) {
+    return { kind: "invalid", reason: "format" };
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return { kind: "invalid", reason: "format" };
+  const [day, time] = text.split("T");
   const [year, month, dateOfMonth] = day.split("-").map(Number);
   const [hours, minutes, seconds = 0] = time.split(":").map(Number);
   if (date.getFullYear() !== year || date.getMonth() + 1 !== month || date.getDate() !== dateOfMonth
-    || date.getHours() !== hours || date.getMinutes() !== minutes || date.getSeconds() !== seconds) return "";
+    || date.getHours() !== hours || date.getMinutes() !== minutes || date.getSeconds() !== seconds) {
+    return { kind: "invalid", reason: "nonexistent" };
+  }
   const localText = (candidate) => toLocalInputValue(candidate.toISOString());
-  if (localText(new Date(date.getTime() - 3600_000)) === value || localText(new Date(date.getTime() + 3600_000)) === value) return "";
-  return date.toISOString();
+  if (localText(new Date(date.getTime() - 3600_000)) === text || localText(new Date(date.getTime() + 3600_000)) === text) {
+    return { kind: "invalid", reason: "ambiguous" };
+  }
+  return { kind: "instant", iso: date.toISOString() };
 }
 
 export function bindMinuteRollover(input) {
