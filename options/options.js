@@ -310,7 +310,7 @@ function renderDiagnostics() {
 
 async function refresh() {
   const config = await getConfig();
-  const auth = await getAuthStatus();
+  const auth = await getAuthStatus({ config });
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";

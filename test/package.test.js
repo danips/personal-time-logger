@@ -31,6 +31,7 @@ const expectedFiles = [
   "reconcile/reconcile.js",
   "src/action-runner.js",
   "src/auth.js",
+  "src/auth-session-store.js",
   "src/background-schedule.js",
   "src/calendar-layout.js",
   "src/chatgpt-account-cache.js",

@@ -1,4 +1,5 @@
-import { getSetting, mutateSettings, removeSetting } from "./db.js";
+import { getSetting, removeSetting } from "./db.js";
+import { AUTH_GENERATION_KEY, invalidateAuthSession, TOKEN_KEY } from "./auth-session-store.js";
 import { platform } from "./platform.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
@@ -6,8 +7,7 @@ import { SETTING_KEY } from "./setting-keys.js";
 const CLIENT_ID_KEY = SETTING_KEY.GOOGLE_OAUTH_CLIENT_ID;
 const CLIENT_SECRET_KEY = SETTING_KEY.GOOGLE_OAUTH_CLIENT_SECRET;
 const CLIENT_CONFIG_KEYS = [CLIENT_ID_KEY, CLIENT_SECRET_KEY];
-export const TOKEN_KEY = SETTING_KEY.GOOGLE_TOKEN_DATA;
-export const AUTH_GENERATION_KEY = SETTING_KEY.AUTH_GENERATION;
+export { AUTH_GENERATION_KEY, TOKEN_KEY };
 
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
@@ -72,10 +72,7 @@ export async function setOAuthClientCredentials(clientId, clientSecret) {
   // at worst require sign-in again; it cannot pair new credentials with an old
   // refresh token.
   if (changed || !complete) {
-    await mutateSettings([TOKEN_KEY, AUTH_GENERATION_KEY], (settings) => {
-      settings.delete(TOKEN_KEY);
-      settings.set(AUTH_GENERATION_KEY, Number(settings.get(AUTH_GENERATION_KEY) || 0) + 1);
-    });
+    await invalidateAuthSession();
   }
   try {
     await platform.setSyncedStorage(normalized);

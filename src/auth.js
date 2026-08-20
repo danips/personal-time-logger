@@ -1,5 +1,11 @@
-import { claimLock, getSetting, mutateSettings, releaseLock } from "./db.js";
-import { AUTH_GENERATION_KEY, getConfig, TOKEN_KEY } from "./config-loader.js";
+import { claimLock, releaseLock } from "./db.js";
+import { getConfig } from "./config-loader.js";
+import {
+  beginAuthSession,
+  clearAuthSession,
+  getAuthSessionSnapshot,
+  replaceAuthToken
+} from "./auth-session-store.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
 
@@ -156,50 +162,12 @@ function isUsable(tokenData) {
 }
 
 async function getTokenData() {
-  return getSetting(TOKEN_KEY);
+  return (await getAuthSessionSnapshot()).tokenData;
 }
 
-function nextGeneration(settings) {
-  const generation = Number(settings.get(AUTH_GENERATION_KEY) || 0) + 1;
-  settings.set(AUTH_GENERATION_KEY, generation);
-  return generation;
-}
-
-async function beginAuthOperation() {
-  return mutateSettings([AUTH_GENERATION_KEY], (settings) => nextGeneration(settings));
-}
-
-async function saveTokenData(tokenData, { expectedGeneration, expectedRefreshToken } = {}) {
-  return mutateSettings([TOKEN_KEY, AUTH_GENERATION_KEY], (settings) => {
-    const current = settings.get(TOKEN_KEY) || null;
-    const generation = Number(settings.get(AUTH_GENERATION_KEY) || 0);
-    if (expectedGeneration !== undefined && generation !== Number(expectedGeneration)) {
-      return { applied: false, tokenData: current };
-    }
-    if (expectedRefreshToken !== undefined && String(current?.refresh_token || "") !== String(expectedRefreshToken || "")) {
-      return { applied: false, tokenData: current };
-    }
-    settings.set(TOKEN_KEY, tokenData);
-    nextGeneration(settings);
-    return { applied: true, tokenData };
-  });
-}
-
-async function clearTokenData({ expectedGeneration, expectedRefreshToken } = {}) {
-  return mutateSettings([TOKEN_KEY, AUTH_GENERATION_KEY], (settings) => {
-    const current = settings.get(TOKEN_KEY) || null;
-    const generation = Number(settings.get(AUTH_GENERATION_KEY) || 0);
-    if (expectedGeneration !== undefined && generation !== Number(expectedGeneration)) return false;
-    if (expectedRefreshToken !== undefined && String(current?.refresh_token || "") !== String(expectedRefreshToken || "")) return false;
-    settings.delete(TOKEN_KEY);
-    nextGeneration(settings);
-    return true;
-  });
-}
-
-export async function getAuthStatus() {
-  const config = await getConfig();
-  const tokenData = await getTokenData();
+export async function getAuthStatus({ config: suppliedConfig } = {}) {
+  const config = suppliedConfig || await getConfig();
+  const { tokenData } = await getAuthSessionSnapshot();
 
   if (!config.configLoaded) {
     return {
@@ -236,7 +204,7 @@ export async function signIn({ onDeviceCode } = {}) {
 }
 
 async function signInDevice(config, { onDeviceCode } = {}) {
-  const generation = await beginAuthOperation();
+  const generation = await beginAuthSession();
   const deviceCodeData = await deviceCodeRequest(config);
   if (!deviceCodeData.device_code || !deviceCodeData.user_code || !deviceCodeData.verification_url) {
     throw codedError("AUTH_FAILED", "Google device code response was missing required fields");
@@ -245,7 +213,7 @@ async function signInDevice(config, { onDeviceCode } = {}) {
   if (onDeviceCode) onDeviceCode(deviceCodeData);
 
   const tokenData = await pollForDeviceToken(config, deviceCodeData);
-  const saved = await saveTokenData(withExpiry({
+  const saved = await replaceAuthToken(withExpiry({
     ...tokenData,
     flow: "device"
   }), { expectedGeneration: generation });
@@ -290,7 +258,8 @@ async function refreshTokenOnce({ force }) {
         if (!tokenData || !tokenData.refresh_token) {
           throw codedError("AUTH_EXPIRED", "Please sign in again");
         }
-        const generation = Number(await getSetting(AUTH_GENERATION_KEY, 0) || 0);
+        const session = await getAuthSessionSnapshot();
+        const generation = session.generation;
 
         const { response, data: refreshed } = await formRequest(
           TOKEN_URL,
@@ -298,7 +267,7 @@ async function refreshTokenOnce({ force }) {
         );
         if (!response.ok) {
           if (refreshed.error === "invalid_grant") {
-            await clearTokenData({ expectedGeneration: generation, expectedRefreshToken: tokenData.refresh_token });
+            await clearAuthSession({ expectedGeneration: generation, expectedRefreshToken: tokenData.refresh_token });
             throw codedError("AUTH_EXPIRED", "Google sign-in expired or was revoked. Please sign in again.");
           }
           throw codedError("AUTH_FAILED", tokenError(refreshed, response.status));
@@ -307,7 +276,7 @@ async function refreshTokenOnce({ force }) {
           throw codedError("AUTH_FAILED", "Google token response was missing an access token");
         }
 
-        const saved = await saveTokenData(withExpiry({
+        const saved = await replaceAuthToken(withExpiry({
           ...tokenData,
           ...refreshed,
           refresh_token: refreshed.refresh_token || tokenData.refresh_token
@@ -355,5 +324,5 @@ export async function getAccessToken({ interactive = false, forceRefresh = false
 }
 
 export async function signOut() {
-  await clearTokenData();
+  await clearAuthSession();
 }
