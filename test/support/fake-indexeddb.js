@@ -111,7 +111,7 @@ class FakeDatabase {
     }
     this.state.transactionLog.push({ storeNames: [...storeNames], mode });
     const transaction = new FakeTransaction(this.state, storeNames, mode);
-    this.state.transactions.push(transaction);
+    this.state.pendingTransactions.push(transaction);
     this.state.runNextTransaction();
     return transaction;
   }
@@ -366,7 +366,6 @@ class FakeIndex {
 function createIndexedDB() {
   const databases = new Map();
   const state = {
-    transactions: [],
     commitGates: [],
     writeFailure: null,
     consumeWriteFailure() {
@@ -377,12 +376,9 @@ function createIndexedDB() {
       return true;
     },
     runNextTransaction() {
-      const next = this.transactions.find((transaction) => !transaction.started);
-      if (!next) return;
-      if (this.transactions.some((transaction) => transaction !== next && transaction.started && !transaction.finished)) {
-        return;
-      }
-      next.start();
+      if (this.activeTransaction && !this.activeTransaction.finished) return;
+      this.activeTransaction = this.pendingTransactions.shift() || null;
+      this.activeTransaction?.start();
     }
   };
 
@@ -393,7 +389,13 @@ function createIndexedDB() {
         let database = databases.get(name);
         const isNew = !database;
         if (!database) {
-          database = { version: 0, stores: new Map(), transactions: [], transactionLog: [] };
+          database = {
+            version: 0,
+            stores: new Map(),
+            pendingTransactions: [],
+            activeTransaction: null,
+            transactionLog: []
+          };
           database.runNextTransaction = state.runNextTransaction;
           database.consumeWriteFailure = state.consumeWriteFailure.bind(state);
           database.takeCommitGate = () => state.commitGates.shift();
