@@ -64,6 +64,7 @@ describe("same-context sync coalescing", () => {
     await assert.rejects(first, (error) => error.code === "API_ERROR");
     await assert.rejects(second, (error) => error.code === "API_ERROR");
     await assert.rejects(third, (error) => error.code === "API_ERROR");
-    assert.equal(await db.getSetting("sync_lock", null), null);
+    const lock = await db.getSetting("sync_lock", null);
+    assert.equal(lock.state, "free");
   });
 });

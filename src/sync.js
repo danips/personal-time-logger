@@ -43,11 +43,7 @@ const PULL_MUTATION_BATCH_SIZE = 250;
 // Identifies this module instance, which is one per extension context (popup,
 // calendar page, background). Used as the sync lock holder.
 const CONTEXT_ID = uuid();
-let inFlightSync = null;
-let inFlightOptions = null;
-let currentSync = null;
-let queuedSync = null;
-let queuedOptions = null;
+let syncDrain = null;
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 
 function deferred() {
@@ -812,18 +808,20 @@ export async function nextSyncDelayMinutes() {
 
 
 
-function startSyncCycle(options) {
-  inFlightOptions = options;
-  currentSync = runSyncCycle(options);
-  return currentSync;
+function startSyncCycle(drain, options) {
+  const promise = runSyncCycle(options);
+  drain.current = { promise, options };
+  return promise;
 }
 
 function startSyncDrain(options) {
-  let cycle = startSyncCycle(options);
+  const drain = { current: null, queued: null, drainPromise: null };
+  syncDrain = drain;
+  let cycle = startSyncCycle(drain, options);
   // Keep this promise registered until every stronger request that arrived
   // during the active cycle has run. The individual cycle promises preserve
   // caller-specific success/failure while this drain remains the context gate.
-  inFlightSync = (async () => {
+  drain.drainPromise = (async () => {
     while (cycle) {
       try {
         await cycle;
@@ -831,18 +829,14 @@ function startSyncDrain(options) {
         // A queued stronger request must still run after a failed cycle.
       }
 
-      if (!queuedSync) return;
-      const next = queuedSync;
-      const nextOptions = queuedOptions;
-      queuedSync = null;
-      queuedOptions = null;
-      cycle = startSyncCycle(nextOptions);
-      cycle.then(next.resolve, next.reject);
+      if (!drain.queued) return;
+      const next = drain.queued;
+      drain.queued = null;
+      cycle = startSyncCycle(drain, next.options);
+      cycle.then(next.deferred.resolve, next.deferred.reject);
     }
   })().finally(() => {
-    inFlightSync = null;
-    inFlightOptions = null;
-    currentSync = null;
+    if (syncDrain === drain) syncDrain = null;
   });
   return cycle;
 }
@@ -850,15 +844,20 @@ function startSyncDrain(options) {
 export function syncNow({ interactiveAuth = false, force = false } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
   // while a user action is still syncing.
-  if (!inFlightSync) return startSyncDrain({ interactiveAuth, force });
+  if (!syncDrain) return startSyncDrain({ interactiveAuth, force });
 
-  const stronger = force && !inFlightOptions.force || interactiveAuth && !inFlightOptions.interactiveAuth;
-  if (!stronger) return queuedSync?.promise || currentSync;
+  const stronger = force && !syncDrain.current.options.force
+    || interactiveAuth && !syncDrain.current.options.interactiveAuth;
+  if (!stronger) return syncDrain.queued?.deferred.promise || syncDrain.current.promise;
 
-  queuedOptions = {
-    force: force || queuedOptions?.force || false,
-    interactiveAuth: interactiveAuth || queuedOptions?.interactiveAuth || false
+  const queued = syncDrain.queued || {
+    deferred: deferred(),
+    options: { force: false, interactiveAuth: false }
   };
-  queuedSync ||= deferred();
-  return queuedSync.promise;
+  queued.options = {
+    force: force || queued.options.force,
+    interactiveAuth: interactiveAuth || queued.options.interactiveAuth
+  };
+  syncDrain.queued = queued;
+  return queued.deferred.promise;
 }
