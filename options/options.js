@@ -269,7 +269,6 @@ async function saveGoogleCredentials() {
   setStatus(saved.changed
     ? "Google credentials saved; this device must sign in again"
     : "Google credentials saved to Firefox Sync");
-  await refresh();
 }
 
 function renderSpreadsheet(spreadsheetId) {
@@ -337,36 +336,24 @@ async function refresh() {
 }
 
 async function signInClicked() {
-  const button = $("#signInButton");
-  try {
-    setStatus("Opening Google sign-in...");
-    button.disabled = true;
-    await signIn({
-      onDeviceCode(details) {
-        setDeviceAuthPanel(details);
-        setStatus("Enter the Google device code, then leave this page open...");
-      }
-    });
-    setDeviceAuthPanel(null);
-    // Provisioning lives in the sync cycle, so this both finds or creates the
-    // spreadsheet and shows its ID without a separate code path.
-    setStatus("Signed in. Looking for your spreadsheet...");
-    await syncNow({ force: true }).catch((error) => {
-      setStatus(formatError(error));
-    });
-    if (await getSetting(SETTING_KEY.SPREADSHEET_ID, "")) setStatus("Signed in and spreadsheet ready");
-  } catch (error) {
-    setStatus(formatError(error));
-  } finally {
-    button.disabled = false;
-  }
-  await refresh();
+  setStatus("Opening Google sign-in...");
+  await signIn({
+    onDeviceCode(details) {
+      setDeviceAuthPanel(details);
+      setStatus("Enter the Google device code, then leave this page open...");
+    }
+  });
+  setDeviceAuthPanel(null);
+  // Provisioning lives in the sync cycle, so this both finds or creates the
+  // spreadsheet and shows its ID without a separate code path.
+  setStatus("Signed in. Looking for your spreadsheet...");
+  await syncNow({ force: true });
+  if (await getSetting(SETTING_KEY.SPREADSHEET_ID, "")) setStatus("Signed in and spreadsheet ready");
 }
 
 async function signOutClicked() {
   await signOut();
   setStatus("Signed out");
-  await refresh();
 }
 
 async function copySpreadsheetIdClicked() {
@@ -381,68 +368,41 @@ async function copySpreadsheetIdClicked() {
 }
 
 async function reconnectSpreadsheetClicked() {
-  const button = $("#reconnectSpreadsheet");
-  button.disabled = true;
-  try {
-    setStatus("Reconnecting to the current spreadsheet...");
-    await syncNow({ force: true, interactiveAuth: true });
-    setStatus("Connected to the current spreadsheet");
-  } catch (error) {
-    setStatus(`Could not reconnect: ${formatError(error)}`);
-  } finally {
-    button.disabled = false;
-    await refresh();
-  }
+  setStatus("Reconnecting to the current spreadsheet...");
+  await syncNow({ force: true, interactiveAuth: true });
+  setStatus("Connected to the current spreadsheet");
 }
 
 async function connectSpreadsheetClicked() {
-  const button = $("#connectSpreadsheet");
   const spreadsheetId = $("#replacementSpreadsheetId").value.trim();
   if (!spreadsheetId) {
     setStatus("Enter the spreadsheet ID to connect it");
-    return;
+    return false;
   }
   if (!window.confirm("Connect this spreadsheet and sync the local backup to it? Its time_entries header must match this extension exactly.")) {
-    return;
+    return false;
   }
 
-  button.disabled = true;
-  try {
-    setStatus("Checking the selected spreadsheet...");
-    await adoptSpreadsheet(spreadsheetId, { interactiveAuth: true });
-    setStatus("Connecting the selected spreadsheet and syncing local entries...");
-    await syncNow({ force: true, interactiveAuth: true });
-    $("#replacementSpreadsheetId").value = "";
-    setStatus("Connected and synchronized the selected spreadsheet");
-  } catch (error) {
-    setStatus(`Could not connect the spreadsheet: ${formatError(error)}`);
-  } finally {
-    button.disabled = false;
-    await refresh();
-  }
+  setStatus("Checking the selected spreadsheet...");
+  await adoptSpreadsheet(spreadsheetId, { interactiveAuth: true });
+  setStatus("Connecting the selected spreadsheet and syncing local entries...");
+  await syncNow({ force: true, interactiveAuth: true });
+  $("#replacementSpreadsheetId").value = "";
+  setStatus("Connected and synchronized the selected spreadsheet");
 }
 
 async function createReplacementSpreadsheetClicked() {
-  const button = $("#createReplacementSpreadsheet");
   const currentId = await getSetting(SETTING_KEY.SPREADSHEET_ID, "");
   const message = currentId
     ? "Create a new spreadsheet and sync the local backup to it? This changes the selected spreadsheet, but does not delete the current spreadsheet or any local entries."
     : "Create a new spreadsheet and sync the local backup to it?";
-  if (!window.confirm(message)) return;
+  if (!window.confirm(message)) return false;
 
-  button.disabled = true;
-  try {
-    setStatus("Creating a replacement spreadsheet...");
-    await createReplacementSpreadsheet({ interactiveAuth: true });
-    setStatus("Syncing the local backup to the replacement spreadsheet...");
-    await syncNow({ force: true, interactiveAuth: true });
-    setStatus("Replacement spreadsheet created and synchronized");
-  } catch (error) {
-    setStatus(`Could not create a replacement: ${formatError(error)}`);
-  } finally {
-    button.disabled = false;
-    await refresh();
-  }
+  setStatus("Creating a replacement spreadsheet...");
+  await createReplacementSpreadsheet({ interactiveAuth: true });
+  setStatus("Syncing the local backup to the replacement spreadsheet...");
+  await syncNow({ force: true, interactiveAuth: true });
+  setStatus("Replacement spreadsheet created and synchronized");
 }
 
 async function copyDiagnosticsClicked() {
