@@ -109,7 +109,6 @@ const $chatGptUsageValues = $("#chatGptUsageValues");
 const $windowSizePresets = $("#windowSizePresets");
 const $windowSizeEditor = $("#windowSizeEditor");
 const $windowSizeFields = $("#windowSizeFields");
-let renderedActiveId;
 
 function formFields() {
   return {
@@ -421,28 +420,31 @@ function renderRecentTimerGroup(group) {
   return section;
 }
 
-function updateElapsed() {
-  const latest = activeEntries[0];
+function tickElapsed(latest) {
+  $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
+}
+
+function renderActiveState(latest) {
   const hasActive = Boolean(latest);
-  const activeId = latest ? latest.id : "";
-  // Compare ids, not just presence: starting a timer while one is already
-  // running swaps the active entry without changing `hasActive`.
-  if (activeId === renderedActiveId) {
-    if (hasActive) $elapsed.textContent = formatElapsed(durationSeconds(latest.start_at));
-    return;
-  }
-  renderedActiveId = activeId;
   $activeTitle.textContent = latest?.task || "No task";
   $activeDescription.textContent = latest?.description || "";
   $activeDescription.title = latest?.description || "";
-  $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
+  tickElapsed(latest);
   $stopButton.classList.toggle("hidden", !latest);
   $activePanel.classList.toggle("is-running", hasActive);
   $activePanel.tabIndex = 0;
   $activePanel.setAttribute("role", "button");
-  $activePanel.setAttribute("aria-label", latest ? `Edit active timer ${entryTitle(latest)}` : "Start a new timer");
+  const newTimerOpen = $newTimerToggle.getAttribute("aria-expanded") === "true";
+  $activePanel.setAttribute(
+    "aria-label",
+    latest ? `Edit active timer ${entryTitle(latest)}` : newTimerOpen ? "Hide new timer" : "Start a new timer"
+  );
   if (hasActive) setNewTimerOpen(false);
   void updateActiveIcon(hasActive);
+}
+
+function updateElapsed() {
+  tickElapsed(activeEntries[0]);
 }
 
 function setNewTimerOpen(open) {
@@ -462,7 +464,7 @@ async function renderActive(isCurrent) {
   const entries = await getActiveEntries();
   if (!isCurrent()) return false;
   activeEntries = entries;
-  updateElapsed();
+  renderActiveState(activeEntries[0]);
 
   if (activeEntries.length > 1) {
     $activeWarning.textContent = `Warning: ${activeEntries.length} active timers exist. Older active entries are marked needs_review on sync.`;
