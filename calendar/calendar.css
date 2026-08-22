@@ -3,6 +3,8 @@
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   --time-col: 64px;
+  --weekday-col: minmax(112px, 1fr);
+  --weekend-col: minmax(76px, 0.35fr);
   --slot-height: 12px;
   --hour-height: calc(var(--slot-height) * 4);
   --day-height: calc(var(--hour-height) * 24);
@@ -194,7 +196,7 @@ textarea {
 
 .day-header {
   display: grid;
-  grid-template-columns: var(--time-col) repeat(7, minmax(112px, 1fr));
+  grid-template-columns: var(--time-col) repeat(5, var(--weekday-col)) repeat(2, var(--weekend-col));
   margin-right: var(--scrollbar-gutter);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -248,7 +250,7 @@ textarea {
 
 .calendar-grid {
   display: grid;
-  grid-template-columns: var(--time-col) repeat(7, minmax(112px, 1fr));
+  grid-template-columns: var(--time-col) repeat(5, var(--weekday-col)) repeat(2, var(--weekend-col));
   min-height: var(--day-height);
 }
 
@@ -367,7 +369,7 @@ textarea {
   display: none;
 }
 
-.entry-block.compact-entry .entry-details:not(:empty)::before {
+.entry-block.compact-entry .entry-details:not(:empty)::after {
   content: " · ";
 }
 

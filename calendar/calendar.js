@@ -225,7 +225,7 @@ function renderEntryBlock(column, segment, existingBlock = null) {
   block.setAttribute("role", "button");
   block.setAttribute("aria-label", `Edit ${entryTitle(entry)}`);
   const projectLabel = entry.project || "Untitled project";
-  const detailsLabel = [entry.task, entry.description].filter(Boolean).join(" - ") || "No task or description";
+  const detailsLabel = [entry.description, entry.task].filter(Boolean).join(" - ") || "No task or description";
   const durationLabel = isCompact
     ? formatCompactElapsed(segment.totalSeconds || 0)
     : formatElapsed(Math.round(segment.totalSeconds || 0));
@@ -255,7 +255,7 @@ function renderEntryBlock(column, segment, existingBlock = null) {
     details.className = "entry-details";
     const duration = document.createElement("div");
     duration.className = "entry-duration";
-    content.append(project, details, duration);
+    content.append(details, project, duration);
     block.append(fill, content);
   }
   fill.setAttribute("aria-hidden", "true");
