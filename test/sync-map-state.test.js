@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-const code = readFileSync(join(process.cwd(), "src/sync.js"), "utf8");
+const code = readFileSync(join(process.cwd(), "extension/src/sync.js"), "utf8");
 
 describe("sync cycle local state", () => {
   it("uses the cycle Map directly instead of an array facade", () => {

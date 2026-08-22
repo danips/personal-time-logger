@@ -6,16 +6,17 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const extensionRoot = join(root, "extension");
 const MODULE_DIRECTORIES = ["src", "popup", "calendar", "options", "reconcile", "background", "usage", "content"];
 
 function jsFiles(directory) {
-  return readdirSync(join(root, directory))
+  return readdirSync(join(extensionRoot, directory))
     .filter((name) => name.endsWith(".js"))
     .map((name) => `${directory}/${name}`);
 }
 
 function parseModule(file) {
-  return parse(readFileSync(join(root, file), "utf8"), {
+  return parse(readFileSync(join(extensionRoot, file), "utf8"), {
     ecmaVersion: "latest",
     sourceType: "module"
   });

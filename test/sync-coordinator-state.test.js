@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-const code = readFileSync(join(process.cwd(), "src/sync.js"), "utf8");
+const code = readFileSync(join(process.cwd(), "extension/src/sync.js"), "utf8");
 
 describe("sync drain coordinator", () => {
   it("keeps active and queued state in one drain record", () => {

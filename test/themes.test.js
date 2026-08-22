@@ -7,9 +7,10 @@ import {
   DEFAULT_THEME,
   normalizeTheme,
   THEME_OPTIONS
-} from "../src/themes.js";
+} from "../extension/src/themes.js";
 
 const root = process.cwd();
+const extensionRoot = join(root, "extension");
 const EXPECTED_THEMES = ["cinder-glow", "moss-circuit", "blue-archive", "violet-orbit", "amethyst-stack", "sienna-paper", "harbor-terminal"];
 
 describe("selectable dark themes", () => {
@@ -42,7 +43,7 @@ describe("selectable dark themes", () => {
   });
 
   it("defines every palette and a shared high-contrast variant", () => {
-    const css = readFileSync(join(root, "src/themes.css"), "utf8");
+    const css = readFileSync(join(extensionRoot, "src/themes.css"), "utf8");
     for (const theme of EXPECTED_THEMES) {
       assert.match(css, new RegExp(`data-theme=["']${theme}["']`));
     }
@@ -59,7 +60,7 @@ describe("selectable dark themes", () => {
     "reconcile/reconcile.html"
   ]) {
     it(`loads the shared theme on ${page}`, () => {
-      const html = readFileSync(join(root, page), "utf8");
+      const html = readFileSync(join(extensionRoot, page), "utf8");
       assert.match(html, /data-theme="moss-circuit"/);
       assert.match(html, /src\/themes\.css/);
       assert.match(html, /src\/themes\.js/);

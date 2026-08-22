@@ -13,7 +13,7 @@ import {
   normalizeEntry,
   normalizeMultiplierText,
   rowToEntry
-} from "../src/entries.js";
+} from "../extension/src/entries.js";
 
 const fixture = (over = {}) => normalizeEntry({
   id: "entry-1",

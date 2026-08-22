@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 
-import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../src/entries.js";
+import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
 import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
@@ -60,9 +60,9 @@ function localState(entries) {
 }
 
 before(async () => {
-  db = await import("../src/db.js");
-  ({ pushDirtyEntries } = await import("../src/sync.js"));
-  sheets = await import("../src/sheets.js");
+  db = await import("../extension/src/db.js");
+  ({ pushDirtyEntries } = await import("../extension/src/sync.js"));
+  sheets = await import("../extension/src/sheets.js");
   google = createGoogleApiMock().install();
   await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
   await sheets.setSpreadsheetId("sheet-1");

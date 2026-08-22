@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { normalizeEntry, SHEET_HEADERS } from "../src/entries.js";
+import { normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
 import { seedEntry } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
@@ -46,9 +46,9 @@ const appendPath = (request) => request.method === "POST"
   && request.pathname.endsWith("/values/time_entries!A%3AN:append");
 
 before(async () => {
-  db = await import("../src/db.js");
-  sheets = await import("../src/sheets.js");
-  ({ syncNow } = await import("../src/sync.js"));
+  db = await import("../extension/src/db.js");
+  sheets = await import("../extension/src/sheets.js");
+  ({ syncNow } = await import("../extension/src/sync.js"));
   google = createGoogleApiMock().install();
   await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
   await sheets.setSpreadsheetId("sheet-1");

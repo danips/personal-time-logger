@@ -39,7 +39,7 @@ describe("dirty-key migration", () => {
     await transactionDone(seed);
     legacy.close();
 
-    const db = await import("../src/db.js");
+    const db = await import("../extension/src/db.js");
     assert.equal(await db.getDirtyEntryCount(), 1);
     assert.deepEqual((await db.getDirtyEntries()).map((entry) => entry.id), ["legacy-dirty"]);
     assert.deepEqual(await db.getEntry("legacy-dirty"), { id: "legacy-dirty", dirty: true, task: "Pending" });

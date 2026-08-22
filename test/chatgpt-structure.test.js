@@ -4,16 +4,16 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 const root = process.cwd();
-const bridge = readFileSync(join(root, "content/chatgpt-usage.js"), "utf8");
-const pageBridge = readFileSync(join(root, "content/chatgpt-usage-page.js"), "utf8");
-const popup = readFileSync(join(root, "popup/popup.js"), "utf8");
+const bridge = readFileSync(join(root, "extension/content/chatgpt-usage.js"), "utf8");
+const pageBridge = readFileSync(join(root, "extension/content/chatgpt-usage-page.js"), "utf8");
+const popup = readFileSync(join(root, "extension/popup/popup.js"), "utf8");
 const source = [
   "src/chatgpt-containers.js",
   "src/codex-usage.js",
   "content/chatgpt-usage-page.js",
   "content/chatgpt-usage.js",
   "usage/usage.js"
-].map((file) => readFileSync(join(root, file), "utf8")).join("\n");
+].map((file) => readFileSync(join(root, "extension", file), "utf8")).join("\n");
 
 describe("ChatGPT usage security boundaries", () => {
   it("keeps the bridge on one fixed endpoint and message shape", () => {
@@ -30,7 +30,7 @@ describe("ChatGPT usage security boundaries", () => {
   });
 
   it("declares the fixed page fallback in MAIN world without broader permissions", () => {
-    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+    const manifest = JSON.parse(readFileSync(join(root, "extension/manifest.json"), "utf8"));
     const mainScript = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     assert.deepEqual(mainScript.js, ["content/chatgpt-usage-page.js"]);
     assert.deepEqual(mainScript.matches, ["https://chatgpt.com/*"]);
@@ -47,14 +47,14 @@ describe("ChatGPT usage security boundaries", () => {
   it("keeps ChatGPT access-token handling inside the page bridge", () => {
     assert.doesNotMatch(source, /cookies\.(get|getAll|remove)/i);
     assert.doesNotMatch(bridge, /accessToken|authorization\s*:/i);
-    assert.doesNotMatch(readFileSync(join(root, "src/chatgpt-containers.js"), "utf8"), /accessToken|authorization\s*:/i);
+    assert.doesNotMatch(readFileSync(join(root, "extension/src/chatgpt-containers.js"), "utf8"), /accessToken|authorization\s*:/i);
     assert.match(pageBridge, /authorization: `Bearer \$\{accessToken\}`/);
     assert.doesNotMatch(pageBridge, /storage\.|browser\.|chrome\.|console\.|localStorage|sessionStorage|document\.cookie/);
   });
 
   it("caps streamed usage payloads before retaining their full body", () => {
-    const isolated = readFileSync(join(root, "content/chatgpt-usage.js"), "utf8");
-    const pageBridge = readFileSync(join(root, "content/chatgpt-usage-page.js"), "utf8");
+    const isolated = readFileSync(join(root, "extension/content/chatgpt-usage.js"), "utf8");
+    const pageBridge = readFileSync(join(root, "extension/content/chatgpt-usage-page.js"), "utf8");
     for (const source of [isolated, pageBridge]) {
       assert.match(source, /response\.body\.getReader\(\)/);
       assert.match(source, /total > MAX_RESPONSE_BYTES/);

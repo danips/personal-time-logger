@@ -3,11 +3,11 @@
 Personal Time Logger is a local-first Manifest V3 browser extension. The entry
 points below share the same IndexedDB database and source modules; they do not
 share JavaScript memory. Every state transition that can be reached from more
-than one context therefore belongs in `src/`, not in a page module.
+than one context therefore belongs in `extension/src/`, not in a page module.
 
 ```text
 Popup / Calendar / Options / Reconcile ─┐
-Usage page ─────────────────────────────┼── src/ domain modules ── IndexedDB
+Usage page ─────────────────────────────┼── extension/src/ domain modules ── IndexedDB
 Background alarm ───────────────────────┤          │                  │
                                          │          ├── browser APIs    └── entries + settings
 ChatGPT content scripts ────────────────┘          └── Google APIs
@@ -17,32 +17,32 @@ ChatGPT content scripts ────────────────┘     
 
 | Context | Entry point | Responsibility | Boundary |
 | --- | --- | --- | --- |
-| Background | `background/background.js` | Alarm heartbeat, installation recovery, and non-interactive sync. | Does not own entries; it calls `src/sync.js`. |
-| Popup | `popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `src/entries.js` and refreshes on entry events. |
-| Calendar | `calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `src/calendar-layout.js`; allocation is in `src/time-allocation.js`; a fixed runtime message delegates Tempo transport to the background context through `src/tempo.js`. |
-| Options | `options/options.js` | Navigated settings page for OAuth client setup, sync settings, spreadsheet adoption/replacement, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; OAuth client settings use synchronized browser storage, while tokens remain local. |
-| Reconcile | `reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
-| Usage | `usage/usage.js` | Firefox-only ChatGPT account setup and usage display. | It can run standalone or mounted in Options, and requests optional ChatGPT permission before contacting that host. |
-| ChatGPT content scripts | `content/chatgpt-usage.js`, `content/chatgpt-usage-page.js` | Fetch the private usage endpoint in the isolated world; use the page world only after a 401. | The bridge correlates bounded messages by request ID. Session tokens stay in page memory and are never persisted by the extension. |
+| Background | `extension/background/background.js` | Alarm heartbeat, installation recovery, and non-interactive sync. | Does not own entries; it calls `extension/src/sync.js`. |
+| Popup | `extension/popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `extension/src/entries.js` and refreshes on entry events. |
+| Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; a fixed runtime message delegates Tempo transport to the background context through `extension/src/tempo.js`. |
+| Options | `extension/options/options.js` | Navigated settings page for OAuth client setup, sync settings, spreadsheet adoption/replacement, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; OAuth client settings use synchronized browser storage, while tokens remain local. |
+| Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
+| Usage | `extension/usage/usage.js` | Firefox-only ChatGPT account setup and usage display. | It can run standalone or mounted in Options, and requests optional ChatGPT permission before contacting that host. |
+| ChatGPT content scripts | `extension/content/chatgpt-usage.js`, `extension/content/chatgpt-usage-page.js` | Fetch the private usage endpoint in the isolated world; use the page world only after a 401. | The bridge correlates bounded messages by request ID. Session tokens stay in page memory and are never persisted by the extension. |
 
-`src/platform.js` is the browser API adapter. It isolates Firefox promise APIs
+`extension/src/platform.js` is the browser API adapter. It isolates Firefox promise APIs
 and Chromium callback APIs so the domain modules do not branch on browser
 flavour.
 
 ## Local data and settings
 
-`src/db.js` opens IndexedDB database `timelogger_db` (version 4) with two
+`extension/src/db.js` opens IndexedDB database `timelogger_db` (version 4) with two
 stores:
 
 | Store | Contents | Important access paths |
 | --- | --- | --- |
 | `time_entries` | Local-first time records, including `dirty`, tombstone, sync-error, and revision bookkeeping. Dirty records persist a derived `dirty_key: 1`; clean records omit it. | Primary ID plus indexes for active timers, dirty-entry counts, deletion, start/end time, and status. |
-| `settings` | Device-local configuration, sync/reconciliation state, locks, diagnostics, tokens, and ChatGPT account data. | Named keys; general extension keys live in `src/setting-keys.js`. |
+| `settings` | Device-local configuration, sync/reconciliation state, locks, diagnostics, tokens, and ChatGPT account data. | Named keys; general extension keys live in `extension/src/setting-keys.js`. |
 
 The OAuth client ID and secret are the deliberate exception: they live in
 `browser.storage.sync` so a Firefox profile can restore the configuration.
 Access/refresh tokens stay in IndexedDB. Entry changes are broadcast through
-`src/events.js`; receiving pages re-read data instead of trusting an event
+`extension/src/events.js`; receiving pages re-read data instead of trusting an event
 payload as state.
 
 Use `mutateEntries`, `mutateEntryState`, `mutateAllLocalState`, or
@@ -54,7 +54,7 @@ write when a conditional mutation is available.
 
 ## Entry, time, and spreadsheet model
 
-`src/entries.js` validates and normalizes the entry model. The remote
+`extension/src/entries.js` validates and normalizes the entry model. The remote
 `time_entries` row order is fixed by `SHEET_HEADERS`:
 
 ```text
@@ -63,12 +63,12 @@ created_at, updated_at, deleted_at, device_id, revision, multiply
 ```
 
 `duration_seconds` is effective duration. Calendar geometry always uses the
-actual interval, while `src/time-allocation.js` apportions effective duration
+actual interval, while `extension/src/time-allocation.js` apportions effective duration
 proportionally across day/week/upload boundaries. `docs/time-model.md` records
 the product decisions for allocation, merging, conflicts, and multiplier
 validation.
 
-`src/sheets.js` owns Google Sheets and Drive I/O. It requires the exact
+`extension/src/sheets.js` owns Google Sheets and Drive I/O. It requires the exact
 `time_entries` and `config` schemas on populated tabs; only empty or missing
 tabs are initialized automatically. Remote updates and deletions carry a full
 row fingerprint, re-read that row before mutation, and verify the intended

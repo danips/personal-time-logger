@@ -16,7 +16,7 @@ const {
   scheduleSyncHeartbeat,
   scheduleWithFallback,
   syncAlarmMinutes
-} = await import("../src/background-schedule.js");
+} = await import("../extension/src/background-schedule.js");
 
 describe("background schedule helpers", () => {
   it("clamps sub-minute intervals to the browser alarm minimum", () => {

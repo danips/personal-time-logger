@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { errorInfo, userErrorMessage } from "../src/error-registry.js";
-import { formatError, statusFromError } from "../src/ui-helpers.js";
+import { errorInfo, userErrorMessage } from "../extension/src/error-registry.js";
+import { formatError, statusFromError } from "../extension/src/ui-helpers.js";
 
 describe("error recovery registry", () => {
   it("maps sync failure modes to stable, actionable guidance", () => {

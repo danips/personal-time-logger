@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { allocateEntry, allocateEntryByLocalDay, entryInterval } from "../src/time-allocation.js";
+import { allocateEntry, allocateEntryByLocalDay, entryInterval } from "../extension/src/time-allocation.js";
 
 // DST assertions below use Lisbon's civil-day transitions regardless of the
 // machine that runs the tests (GitHub-hosted Linux runners default to UTC).

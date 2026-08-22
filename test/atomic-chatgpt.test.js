@@ -6,14 +6,14 @@ import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
 installFakeIndexedDB();
 
-const db = await import("../src/db.js");
+const db = await import("../extension/src/db.js");
 const {
   CHATGPT_ACCOUNTS_KEY,
   CHATGPT_PROFILE_SALT_KEY,
   clearChatGptUsageData,
   disconnectAccount,
   refreshAccount
-} = await import("../src/chatgpt-containers.js");
+} = await import("../extension/src/chatgpt-containers.js");
 
 function deferred() {
   let resolve;

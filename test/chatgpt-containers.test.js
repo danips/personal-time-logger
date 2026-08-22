@@ -9,7 +9,7 @@ import {
   refreshAccount,
   refreshAllAccounts,
   verifyAccount
-} from "../src/chatgpt-containers.js";
+} from "../extension/src/chatgpt-containers.js";
 
 const response = (over = {}) => ({
   user_id: "user-private",

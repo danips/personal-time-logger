@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 const root = process.cwd();
 
 function source(file) {
-  return readFileSync(join(root, file), "utf8");
+  return readFileSync(join(root, "extension", file), "utf8");
 }
 
 function functionSource(code, name) {

@@ -9,7 +9,7 @@ installFakeIndexedDB();
 let db;
 
 before(async () => {
-  db = await import("../src/db.js");
+  db = await import("../extension/src/db.js");
 });
 
 describe("IndexedDB repository", () => {

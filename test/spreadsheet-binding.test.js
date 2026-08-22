@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { decodeSpreadsheetBinding, readySpreadsheetBinding } from "../src/sheets.js";
+import { decodeSpreadsheetBinding, readySpreadsheetBinding } from "../extension/src/sheets.js";
 
 describe("spreadsheet binding state", () => {
   it("decodes legacy values conservatively", () => {

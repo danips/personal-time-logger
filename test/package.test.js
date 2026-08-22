@@ -104,7 +104,7 @@ async function temporaryPackageDirectory() {
 
 describe("Firefox release package", () => {
   it("contains exactly the extension allow-list", async () => {
-    const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(join(root, "extension/manifest.json"), "utf8"));
     const outputDirectory = await temporaryPackageDirectory();
 
     try {
@@ -129,8 +129,8 @@ describe("Firefox release package", () => {
   });
 
   it("excludes untracked files placed beside extension source", async () => {
-    const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
-    const planted = join(root, "src", ".package-test-untracked.js");
+    const manifest = JSON.parse(await readFile(join(root, "extension/manifest.json"), "utf8"));
+    const planted = join(root, "extension/src", ".package-test-untracked.js");
     const outputDirectory = await temporaryPackageDirectory();
     await writeFile(planted, "unexpected local file\n", "utf8");
     try {
@@ -148,7 +148,7 @@ describe("Firefox release package", () => {
   });
 
   it("prepares identical source for identical release inputs", async () => {
-    const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(join(root, "extension/manifest.json"), "utf8"));
     const firstOutput = await temporaryPackageDirectory();
     const secondOutput = await temporaryPackageDirectory();
     const argumentsFor = (outputDirectory) => [

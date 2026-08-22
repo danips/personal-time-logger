@@ -9,7 +9,7 @@ let contextSequence = 0;
 export async function createDbContexts(labels) {
   const batch = ++contextSequence;
   return Promise.all(labels.map((label, index) => {
-    const moduleUrl = new URL("../../src/db.js", import.meta.url);
+    const moduleUrl = new URL("../../extension/src/db.js", import.meta.url);
     moduleUrl.searchParams.set("test_context", `${batch}-${index}-${label}`);
     return import(moduleUrl.href);
   }));

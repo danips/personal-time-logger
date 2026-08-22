@@ -7,9 +7,9 @@ import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
 
-const db = await import("../src/db.js");
-const { markMultipleActiveTimers, purgeDeletedEntries, reseedForNewSpreadsheet } = await import("../src/sync.js");
-const { RECONCILIATION_INTENTS_KEY } = await import("../src/reconcile.js");
+const db = await import("../extension/src/db.js");
+const { markMultipleActiveTimers, purgeDeletedEntries, reseedForNewSpreadsheet } = await import("../extension/src/sync.js");
+const { RECONCILIATION_INTENTS_KEY } = await import("../extension/src/reconcile.js");
 
 const entry = (over = {}) => ({
   id: "maintenance-entry",

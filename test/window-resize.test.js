@@ -7,7 +7,7 @@ import {
   resizeCurrentWindow,
   windowDimensionsForRequest,
   windowResizeRequest
-} from "../src/window-resize.js";
+} from "../extension/src/window-resize.js";
 
 describe("window resize boundary", () => {
   it("rejects non-finite and out-of-range dimensions", () => {

@@ -7,7 +7,7 @@ import {
   extractUsageIdentity,
   normalizeBridgeResult,
   normalizeUsageResponse
-} from "../src/codex-usage.js";
+} from "../extension/src/codex-usage.js";
 
 const fixture = (over = {}) => ({
   user_id: "redacted-user-id",

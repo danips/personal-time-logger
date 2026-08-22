@@ -10,7 +10,7 @@ import {
   startOfLocalDay,
   startOfLocalWeek,
   toLocalInputValue
-} from "../src/time.js";
+} from "../extension/src/time.js";
 
 describe("durationSeconds", () => {
   it("measures the gap between two timestamps", () => {

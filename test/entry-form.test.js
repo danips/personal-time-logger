@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { readEntryForm } from "../src/entry-form.js";
+import { readEntryForm } from "../extension/src/entry-form.js";
 
 function fields(over = {}) {
   return {

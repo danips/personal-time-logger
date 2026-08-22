@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clampPopupPosition } from "../calendar/popup-drag.js";
+import { clampPopupPosition } from "../extension/calendar/popup-drag.js";
 
 test("clampPopupPosition keeps a popup recovery handle in view", () => {
   assert.deepEqual(clampPopupPosition({

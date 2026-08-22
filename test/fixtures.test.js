@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { before, describe, it } from "node:test";
 
-import { SHEET_HEADERS } from "../src/entries.js";
+import { SHEET_HEADERS } from "../extension/src/entries.js";
 import { seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
@@ -17,8 +17,8 @@ let db;
 let rowsToEntries;
 
 before(async () => {
-  db = await import("../src/db.js");
-  ({ rowsToEntries } = await import("../src/sheets.js"));
+  db = await import("../extension/src/db.js");
+  ({ rowsToEntries } = await import("../extension/src/sheets.js"));
 });
 
 describe("migration fixtures", () => {

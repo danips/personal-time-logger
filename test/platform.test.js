@@ -42,7 +42,7 @@ globalThis.browser = {
   }
 };
 
-const { platform } = await import("../src/platform.js?test=platform");
+const { platform } = await import("../extension/src/platform.js?test=platform");
 
 describe("browser platform adapter", () => {
   it("waits when completion happens immediately after listener registration", async () => {

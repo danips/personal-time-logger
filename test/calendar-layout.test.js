@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { normalizeEntry } from "../src/entries.js";
-import { startOfLocalWeek } from "../src/time.js";
+import { normalizeEntry } from "../extension/src/entries.js";
+import { startOfLocalWeek } from "../extension/src/time.js";
 import {
   DAY_COUNT,
   buildSegments,
@@ -16,7 +16,7 @@ import {
   scrollTopForStartHour,
   snapDateToGrid,
   weekStartFromInput
-} from "../src/calendar-layout.js";
+} from "../extension/src/calendar-layout.js";
 
 // 2026-07-27 is a Monday, so this is a clean week boundary to work from.
 const weekStart = startOfLocalWeek(new Date(2026, 6, 27));

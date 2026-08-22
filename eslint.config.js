@@ -10,7 +10,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ["background/**/*.js", "calendar/**/*.js", "content/**/*.js", "options/**/*.js", "popup/**/*.js", "reconcile/**/*.js", "src/**/*.js", "usage/**/*.js"],
+    files: ["extension/background/**/*.js", "extension/calendar/**/*.js", "extension/content/**/*.js", "extension/options/**/*.js", "extension/popup/**/*.js", "extension/reconcile/**/*.js", "extension/src/**/*.js", "extension/usage/**/*.js"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

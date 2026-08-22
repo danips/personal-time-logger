@@ -23,8 +23,8 @@ globalThis.fetch = async () => {
   };
 };
 
-const diagnostics = await import("../src/diagnostics.js");
-const { setActiveIcon, updateActiveIcon } = await import("../src/icon.js");
+const diagnostics = await import("../extension/src/diagnostics.js");
+const { setActiveIcon, updateActiveIcon } = await import("../extension/src/icon.js");
 
 describe("toolbar icon updates", () => {
   it("rejects direct icon updates when the SVG resource or browser action fails", async () => {

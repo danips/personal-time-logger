@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-const code = readFileSync(join(process.cwd(), "options/options.js"), "utf8");
+const code = readFileSync(join(process.cwd(), "extension/options/options.js"), "utf8");
 
 function functionSource(name) {
   const start = Math.max(code.indexOf(`function ${name}(`), code.indexOf(`async function ${name}(`));

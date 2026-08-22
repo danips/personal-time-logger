@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
 installFakeIndexedDB();
-const db = await import("../src/db.js");
-const session = await import("../src/auth-session-store.js");
+const db = await import("../extension/src/db.js");
+const session = await import("../extension/src/auth-session-store.js");
 
 describe("auth session store", () => {
   it("owns fenced begin, replace, clear, and invalidate transitions", async () => {

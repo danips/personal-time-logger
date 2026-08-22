@@ -4,14 +4,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
-import { normalizeEntry } from "../src/entries.js";
+import { normalizeEntry } from "../extension/src/entries.js";
 import {
   normalizeTempoIssueId,
   normalizeTempoTaskIssueIds,
   prepareTempoWeek,
   sendTempoWorklogs,
   tempoXhrRequest
-} from "../src/tempo.js";
+} from "../extension/src/tempo.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -86,9 +86,9 @@ describe("Tempo week preparation", () => {
 
 describe("Tempo bulk upload", () => {
   it("keeps the authenticated request in the privileged background context", () => {
-    const calendar = readFileSync(join(root, "calendar/calendar.js"), "utf8");
-    const background = readFileSync(join(root, "background/background.js"), "utf8");
-    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+    const calendar = readFileSync(join(root, "extension/calendar/calendar.js"), "utf8");
+    const background = readFileSync(join(root, "extension/background/background.js"), "utf8");
+    const manifest = JSON.parse(readFileSync(join(root, "extension/manifest.json"), "utf8"));
 
     assert.doesNotMatch(calendar, /sendTempoWorklogs/);
     assert.match(calendar, /sendRuntimeMessage/);

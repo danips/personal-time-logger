@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-const code = readFileSync(join(process.cwd(), "calendar/calendar.js"), "utf8");
+const code = readFileSync(join(process.cwd(), "extension/calendar/calendar.js"), "utf8");
 
 describe("calendar gesture state", () => {
   it("uses one pointer-owned move/resize state with fenced handlers", () => {

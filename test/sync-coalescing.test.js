@@ -29,9 +29,9 @@ let sheets;
 let syncNow;
 
 before(async () => {
-  db = await import("../src/db.js");
-  sheets = await import("../src/sheets.js");
-  ({ syncNow } = await import("../src/sync.js"));
+  db = await import("../extension/src/db.js");
+  sheets = await import("../extension/src/sheets.js");
+  ({ syncNow } = await import("../extension/src/sync.js"));
   google = createGoogleApiMock().install();
   await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
   await sheets.setSpreadsheetId("sheet-1");

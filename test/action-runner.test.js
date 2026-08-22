@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { isActionRunning, runAction } from "../src/action-runner.js";
+import { isActionRunning, runAction } from "../extension/src/action-runner.js";
 
 describe("runAction", () => {
   it("coalesces duplicate activation, manages busy state, and refreshes once", async () => {

@@ -7,8 +7,8 @@ import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
 
-const db = await import("../src/db.js");
-const entries = await import("../src/entries.js");
+const db = await import("../extension/src/db.js");
+const entries = await import("../extension/src/entries.js");
 
 const fixture = (over = {}) => ({
   id: "entry-1",

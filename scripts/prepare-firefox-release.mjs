@@ -15,6 +15,7 @@ const baseUrl = String(args.get("--base-url") || "").replace(/\/+$/, "");
 const outputArgument = args.get("--output") || "web-ext-artifacts/release-source";
 const expectedVersion = args.get("--expected-version") || "";
 const projectRoot = process.cwd();
+const extensionRoot = path.resolve(projectRoot, "extension");
 const artifactsRoot = path.resolve(projectRoot, "web-ext-artifacts");
 const outputDirectory = path.resolve(projectRoot, outputArgument);
 
@@ -25,7 +26,7 @@ if (outputDirectory !== artifactsRoot && !outputDirectory.startsWith(`${artifact
   throw new Error("--output must be inside web-ext-artifacts/");
 }
 
-const manifest = JSON.parse(await readFile(path.join(projectRoot, "manifest.json"), "utf8"));
+const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
 if (expectedVersion && manifest.version !== expectedVersion) {
   throw new Error(`manifest version ${manifest.version} does not match release version ${expectedVersion}`);
 }
@@ -38,10 +39,12 @@ await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
 const extensionDirectories = ["background", "calendar", "content", "icons", "options", "popup", "reconcile", "src", "usage"];
-const { stdout } = await execFileAsync("git", ["ls-files", "--", "manifest.json", ...extensionDirectories], { cwd: projectRoot });
+const extensionPaths = ["manifest.json", ...extensionDirectories].map((entry) => path.join("extension", entry));
+const { stdout } = await execFileAsync("git", ["ls-files", "--", ...extensionPaths], { cwd: projectRoot });
 const trackedFiles = stdout.split("\n").filter(Boolean);
 for (const file of trackedFiles) {
-  const target = path.join(outputDirectory, file);
+  const packagePath = path.relative(extensionRoot, path.resolve(projectRoot, file));
+  const target = path.join(outputDirectory, packagePath);
   await mkdir(path.dirname(target), { recursive: true });
   await cp(path.join(projectRoot, file), target);
 }

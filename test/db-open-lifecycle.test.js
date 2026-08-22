@@ -16,7 +16,7 @@ describe("database open lifecycle", () => {
   it("shares a blocked request and resolves it after the blocker closes", async () => {
     const indexedDB = installFakeIndexedDB();
     const blocker = await openDatabase("timelogger_db", 1);
-    const db = await import(`../src/db.js?blocked=${Date.now()}`);
+    const db = await import(`../extension/src/db.js?blocked=${Date.now()}`);
 
     const first = db.getSetting("blocked-first");
     const second = db.getSetting("blocked-second");
@@ -31,7 +31,7 @@ describe("database open lifecycle", () => {
   it("clears only a failed attempt so the next caller can retry", async () => {
     const indexedDB = installFakeIndexedDB();
     indexedDB._failNextOpen(new Error("upgrade failed"));
-    const db = await import(`../src/db.js?error=${Date.now()}`);
+    const db = await import(`../extension/src/db.js?error=${Date.now()}`);
 
     await assert.rejects(() => db.getSetting("retry"), /upgrade failed/);
     await db.setSetting("retry", "works");
@@ -40,7 +40,7 @@ describe("database open lifecycle", () => {
 
   it("closes the current connection when a newer version arrives", async () => {
     installFakeIndexedDB();
-    const db = await import(`../src/db.js?versionchange=${Date.now()}`);
+    const db = await import(`../extension/src/db.js?versionchange=${Date.now()}`);
     await db.setSetting("version-change", true);
 
     await openDatabase("timelogger_db", 5);

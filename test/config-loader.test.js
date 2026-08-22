@@ -24,8 +24,8 @@ globalThis.browser = {
   }
 };
 
-const db = await import("../src/db.js");
-const config = await import("../src/config-loader.js");
+const db = await import("../extension/src/db.js");
+const config = await import("../extension/src/config-loader.js");
 
 describe("OAuth credential configuration", () => {
   it("requires a complete client configuration", async () => {

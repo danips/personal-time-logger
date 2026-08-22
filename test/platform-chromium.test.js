@@ -24,7 +24,7 @@ globalThis.chrome = {
   }
 };
 
-const { platform } = await import("../src/platform.js?test=platform-chromium");
+const { platform } = await import("../extension/src/platform.js?test=platform-chromium");
 
 describe("Chromium platform adapter", () => {
   it("supports callback and promise API implementations without duplicate calls", async () => {

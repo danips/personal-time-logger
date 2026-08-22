@@ -5,7 +5,7 @@ import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
 installFakeIndexedDB();
 
-const diagnostics = await import("../src/diagnostics.js");
+const diagnostics = await import("../extension/src/diagnostics.js");
 
 describe("diagnostic ring", () => {
   it("keeps bounded, privacy-safe recovery records", async () => {

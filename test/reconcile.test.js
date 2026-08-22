@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { normalizeEntry } from "../src/entries.js";
-import { compareEntries, fieldDifferences } from "../src/reconcile.js";
+import { normalizeEntry } from "../extension/src/entries.js";
+import { compareEntries, fieldDifferences } from "../extension/src/reconcile.js";
 
 const fixture = (over = {}) => normalizeEntry({
   id: "entry-1",

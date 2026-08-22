@@ -7,7 +7,7 @@ import {
   normalizeOptionsSettings,
   normalizeWorkdayStartHour,
   planOptionsSettingsSave
-} from "../src/options-settings.js";
+} from "../extension/src/options-settings.js";
 
 describe("Options settings save plan", () => {
   it("accepts a calendar start hour", () => {

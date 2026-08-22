@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { SHEET_HEADERS } from "../src/entries.js";
+import { SHEET_HEADERS } from "../extension/src/entries.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
 
@@ -26,8 +26,8 @@ let sheets;
 let google;
 
 before(async () => {
-  db = await import("../src/db.js");
-  sheets = await import("../src/sheets.js");
+  db = await import("../extension/src/db.js");
+  sheets = await import("../extension/src/sheets.js");
   google = createGoogleApiMock().install();
   await sheets.setSpreadsheetId("sheet-1");
 });

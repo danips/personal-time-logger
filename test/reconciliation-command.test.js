@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { entryFingerprint, normalizeReconciliationCommand } from "../src/reconcile.js";
-import { normalizeEntry } from "../src/entries.js";
+import { entryFingerprint, normalizeReconciliationCommand } from "../extension/src/reconcile.js";
+import { normalizeEntry } from "../extension/src/entries.js";
 
-const code = readFileSync(join(process.cwd(), "src/reconcile.js"), "utf8");
+const code = readFileSync(join(process.cwd(), "extension/src/reconcile.js"), "utf8");
 const remote = normalizeEntry({
   id: "remote",
   project: "Project",

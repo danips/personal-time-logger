@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   reconciliationActionDisabled,
   reconciliationActionEligibility
-} from "../src/reconcile-ui-state.js";
+} from "../extension/src/reconcile-ui-state.js";
 
 describe("reconciliation action state", () => {
   it("keeps every bulk action disabled for an empty report", () => {

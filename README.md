@@ -45,14 +45,14 @@ Disconnecting removes the local account binding, fingerprint, and cached snapsho
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Click **Load unpacked**.
-4. Select this project folder.
+4. Select the `extension/` folder.
 5. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
 
 ## Load In Firefox
 
 1. Open `about:debugging#/runtime/this-firefox`.
 2. Click **Load Temporary Add-on**.
-3. Select `manifest.json` in this folder.
+3. Select `extension/manifest.json`.
 4. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
 
 Firefox temporary add-ons are removed when Firefox restarts. The manifest includes a stable Gecko extension ID for installed development builds.
@@ -84,7 +84,7 @@ The GitHub Pages files are publicly fetchable because Firefox's updater cannot a
 
 ### Publish the first version
 
-The Git tag must match `manifest.json` with a leading `v`:
+The Git tag must match `extension/manifest.json` with a leading `v`:
 
 ```bash
 git tag v0.1.1
@@ -97,7 +97,7 @@ On every device, open `https://OWNER.github.io/REPOSITORY/` in Firefox and insta
 
 ### Publish later versions
 
-1. Change `version` in `manifest.json` to a higher numeric version such as `0.1.2`.
+1. Change `version` in `extension/manifest.json` to a higher numeric version such as `0.1.2`.
 2. Commit and push the code.
 3. Tag that commit and push the tag:
 
@@ -262,7 +262,7 @@ Resolutions validate the local revision and the remote fingerprint shown in the 
 - Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live Sheets or Drive.
 - No external runtime dependencies. Contributor tooling is installed from the locked npm development dependencies.
 - Manifest V3 support in Firefox can vary by version; if a browser rejects the manifest, use a current Firefox release.
-- SVG icons are in `icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
+- SVG icons are in `extension/icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
 
 ## Development setup
 
@@ -313,22 +313,25 @@ GitHub Actions runs the Node checks and Firefox behavior smoke on every push and
 ## Files
 
 ```text
-manifest.json
 package.json
 README.md
 PRIVACY.md
-background/
-calendar/
-icons/
-options/
-popup/
-reconcile/
+extension/
+  manifest.json
+  background/
+  calendar/
+  content/
+  icons/
+  options/
+  popup/
+  reconcile/
+  src/
+  usage/
 scripts/
-src/
 test/
 ```
 
-`background/` holds the sync alarm, `reconcile/` the comparison screen, `scripts/` the release packaging, and `test/` the unit tests. Only the extension directories are copied into a release; `test/`, `package.json`, `scripts/`, and documentation are excluded from the package.
+`extension/background/` holds the sync alarm, `extension/reconcile/` the comparison screen, `scripts/` the release packaging, and `test/` the unit tests. Only the contents of `extension/` are copied into a release; `test/`, `package.json`, `scripts/`, and documentation are excluded from the package.
 
 OAuth client credentials are stored in Firefox synchronized extension storage through the Options page; access and refresh tokens remain in local IndexedDB. None are part of the extension package.
 

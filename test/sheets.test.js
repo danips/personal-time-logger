@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { SHEET_HEADERS, entryToRow, normalizeEntry } from "../src/entries.js";
-import { rowFingerprint, rowsToEntries } from "../src/sheets.js";
+import { SHEET_HEADERS, entryToRow, normalizeEntry } from "../extension/src/entries.js";
+import { rowFingerprint, rowsToEntries } from "../extension/src/sheets.js";
 
 const fixture = (over = {}) => normalizeEntry({
   id: "entry-1",

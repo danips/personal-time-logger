@@ -24,13 +24,13 @@ let db;
 let google;
 
 async function authContext(label) {
-  const moduleUrl = new URL("../src/auth.js", import.meta.url);
+  const moduleUrl = new URL("../extension/src/auth.js", import.meta.url);
   moduleUrl.searchParams.set("test_context", label);
   return import(moduleUrl.href);
 }
 
 before(async () => {
-  db = await import("../src/db.js");
+  db = await import("../extension/src/db.js");
   google = createGoogleApiMock().install();
 });
 

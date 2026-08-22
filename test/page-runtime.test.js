@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
 installFakeIndexedDB();
-const diagnostics = await import("../src/diagnostics.js");
-const { runPageTask } = await import("../src/page-runtime.js");
+const diagnostics = await import("../extension/src/diagnostics.js");
+const { runPageTask } = await import("../extension/src/page-runtime.js");
 
 describe("page runtime recovery", () => {
   it("records failed callbacks without preventing later callbacks", async () => {

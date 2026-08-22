@@ -7,8 +7,8 @@ import { seedEntry } from "./support/db-fixtures.js";
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
 
-const db = await import("../src/db.js");
-const reconcile = await import("../src/reconcile.js");
+const db = await import("../extension/src/db.js");
+const reconcile = await import("../extension/src/reconcile.js");
 
 const local = {
   id: "conflict-entry",
