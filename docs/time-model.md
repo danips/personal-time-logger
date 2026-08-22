@@ -69,8 +69,9 @@ synchronized; a same-ID row with different contents is a conflict.
 ### D4 — DST input behavior
 
 The editor rejects nonexistent local times during a spring-forward transition.
-For a repeated fall-back local time, it requires an explicit occurrence/offset
-choice rather than silently choosing one instant.
+It also rejects a repeated fall-back local time as ambiguous rather than
+silently choosing one occurrence. The current editor has no occurrence/offset
+selector, so that local wall time cannot be saved directly.
 
 ### D5 — Multiplier domain
 
@@ -80,6 +81,9 @@ with greater precision are rejected instead of rounded silently.
 
 ### D6 — Spreadsheet schema recovery
 
-Automatic schema repair is limited to an empty tab or an exact, tested legacy
-schema. Any other header mismatch stops before writing and requires guided
-recovery; matching column count alone is never sufficient.
+Automatic schema repair is limited to a missing or entirely empty tab. A
+populated tab must have the exact current header; any mismatch stops before
+writing and requires guided recovery. Matching column count alone is never
+sufficient. A spreadsheet from before the `config` tab and app marker existed
+is supported only when its populated `time_entries` tab already has the current
+header; the missing tab and marker can then be added safely.

@@ -1,6 +1,6 @@
 # Personal Time Logger Extension
 
-A browser extension for local-first time tracking with Google Sheets sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
+A Firefox extension for local-first time tracking with Google Sheets sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
 ## What Is Included
 
@@ -15,7 +15,7 @@ A browser extension for local-first time tracking with Google Sheets sync. It is
 - Background sync that runs while the browser is open, with no page needed.
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
-- Refresh-token-capable Google device OAuth flow for both Chromium and Firefox.
+- Refresh-token-capable Google device OAuth flow for Firefox.
 - Experimental ChatGPT plan-usage controls for separate Firefox container accounts.
 - Unit tests over the pure logic, run with `npm test`.
 
@@ -31,7 +31,7 @@ The primary value is labelled **Weekly usage remaining** / **Plan usage remainin
 
 1. Use Firefox and reload the extension from `about:debugging#/runtime/this-firefox` if it is already installed as a temporary add-on.
 2. Open the popup, click the gear-shaped **Time Logger Options** button, and select **ChatGPT Usage** in the left navigation.
-3. Click **Grant ChatGPT access** and approve the optional `chatgpt.com` host permission. This permission is used only for the fixed usage request; it does not grant access to passwords, chats, prompts, or cookie values.
+3. Click **Grant ChatGPT access** and approve the optional `chatgpt.com` host permission. Granting host access gives the extension the browser capability to interact with `chatgpt.com`; this implementation uses it only for the fixed usage request and does not inspect passwords, chats, prompts, or cookie values.
 4. Enter a local label such as `Account 1` and click **Add account**. Firefox opens the official ChatGPT page in a new extension-created container.
 5. Sign in manually in that ChatGPT tab. Return to Options and click **Check signed-in account**.
 6. Add the second account with another label and repeat in its different container. Do not log the first account out.
@@ -39,14 +39,6 @@ The primary value is labelled **Weekly usage remaining** / **Plan usage remainin
 The page displays each account's percentage remaining, percentage used, reset date and countdown, plan/status flags, collection time, and stale state. **Refresh all** refreshes accounts independently. A failed refresh leaves the last successful snapshot visible and marks it stale when appropriate. A revoked permission disables refresh until it is granted again. A deleted container, expired session, or changed endpoint schema is reported on that account without deleting other account data.
 
 Disconnecting removes the local account binding, fingerprint, and cached snapshot but does not delete the Firefox container or clear its session. **Clear ChatGPT usage data** removes all local ChatGPT records and the duplicate-check salt without touching containers. Passwords, session cookies, access tokens, raw account IDs, raw user IDs, and raw endpoint responses are never stored or synchronized.
-
-## Load In Chromium
-
-1. Open `chrome://extensions`.
-2. Enable Developer mode.
-3. Click **Load unpacked**.
-4. Select the `extension/` folder.
-5. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
 
 ## Load In Firefox
 
@@ -125,7 +117,7 @@ The release package is generated from an explicit allow-list. The local `config.
 
 The extension requests two scopes: `spreadsheets`, and `drive.file` for per-file Drive access. `drive.file` covers only files this extension created, which is what lets it find its own spreadsheet and check whether the file changed before downloading it. Google's device flow accepts a fixed list of scopes; `drive.file` is on it and the broader `drive.metadata.readonly` is not.
 
-When you click **Sign In**, the extension shows a Google device code and opens Google's device authorization page. Leave the options page open while Google authorizes the device. This path is the same in Chromium and Firefox, avoids extension redirect URI mismatch issues, and stores a refresh token locally so the extension can refresh access tokens after the usual one-hour access token expires.
+When you click **Sign In**, the extension shows a Google device code and opens Google's device authorization page. Leave the options page open while Google authorizes the device. Device flow avoids extension redirect URI mismatch issues and stores a refresh token locally so the extension can refresh access tokens after the usual one-hour access token expires.
 
 The device-flow client ID and client secret are stored with Firefox Sync so they can be restored on another desktop Firefox device signed into the same Mozilla account with Add-ons sync enabled. Access and refresh tokens remain in the local Firefox profile and are never synchronized, so each device still requires its own Google sign-in. None of these values are included in published XPI files.
 
@@ -193,7 +185,7 @@ Set **Duration multiplier** in Options. Entries with **Multiply** checked store 
 
 ## Calendar View
 
-The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Time logs are drawn into a seven-day grid using their actual start/end times. Entries that overlap in time are shown side by side. A multiplier affects effective totals, but is allocated proportionally across the actual interval rather than extending a block into later days. Set the calendar start hour in Options; the initial calendar view starts displaying at that hour. The default is 07:00.
+The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Ordinary time logs are drawn from their actual start to end. A multiplied completed entry also has a visually distinct tail extending to its effective duration; that tail can overlap other blocks, but it does not move report, daily-total, sync, or Tempo time into a later period. Effective time is allocated proportionally across the actual interval. Entries whose displayed blocks overlap are shown side by side. Set the calendar start hour in Options; the initial calendar view starts displaying at that hour. The default is 07:00.
 
 Click **Send to Tempo** to send the displayed week's completed entries to Tempo. The first use asks Firefox for access to `api.tempo.io`; Tempo requests then run in the extension background context so they are not subject to page CORS checks. Configure the Tempo API token and author account ID in Options first. Each Task maps to a numeric Jira issue ID; the calendar asks when it encounters an unknown Task and stores the answer in the editable cache in Options. The entry description becomes the Tempo worklog comment, and multiplied time is apportioned proportionally when an entry crosses the week boundary. Running timers are skipped because Tempo requires a fixed duration. Review the confirmation carefully: sending the same week again creates duplicate Tempo worklogs.
 
@@ -256,8 +248,7 @@ Resolutions validate the local revision and the remote fingerprint shown in the 
 - When it does read, the extension reads the whole `time_entries` sheet; the Drive check avoids the read entirely rather than making it smaller.
 - Skipping reads only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
 - A forgotten timer runs indefinitely. Nothing prompts about it.
-- OAuth uses Google device flow so setup is the same in Chromium and Firefox.
-- The cross-browser refresh-token path uses Google device flow and stores personal OAuth credentials in the local extension profile, unencrypted. See `PRIVACY.md`.
+- OAuth uses Google device flow and stores personal OAuth credentials in the local Firefox extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
 - Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live Sheets or Drive.
 - No external runtime dependencies. Contributor tooling is installed from the locked npm development dependencies.
@@ -290,7 +281,9 @@ tag-triggered release workflow.
 `npm run lint` runs ESLint across JavaScript source, scripts, and tests before
 running `web-ext` against the allow-listed extension package. See
 [`docs/architecture.md`](docs/architecture.md) for module boundaries, storage,
-sync fencing, spreadsheet schema, and ChatGPT trust boundaries.
+sync fencing, spreadsheet schema, and ChatGPT trust boundaries. See
+[`docs/scaling.md`](docs/scaling.md) for the current bounded-history queries,
+benchmark plan, and the unimplemented partitioning design.
 
 ## Tests
 

@@ -1,6 +1,6 @@
 # Architecture map
 
-Personal Time Logger is a local-first Manifest V3 browser extension. The entry
+Personal Time Logger is a local-first Manifest V3 Firefox extension. The entry
 points below share the same IndexedDB database and source modules; they do not
 share JavaScript memory. Every state transition that can be reached from more
 than one context therefore belongs in `extension/src/`, not in a page module.
@@ -27,7 +27,8 @@ ChatGPT content scripts ────────────────┘     
 
 `extension/src/platform.js` is the browser API adapter. It isolates Firefox promise APIs
 and Chromium callback APIs so the domain modules do not branch on browser
-flavour.
+flavour. The callback adapter remains unit-tested, but the current manifest,
+runtime smoke test, and release pipeline support Firefox only.
 
 ## Local data and settings
 
@@ -62,11 +63,13 @@ id, project, task, description, start_at, end_at, duration_seconds, status,
 created_at, updated_at, deleted_at, device_id, revision, multiply
 ```
 
-`duration_seconds` is effective duration. Calendar geometry always uses the
-actual interval, while `extension/src/time-allocation.js` apportions effective duration
-proportionally across day/week/upload boundaries. `docs/time-model.md` records
-the product decisions for allocation, merging, conflicts, and multiplier
-validation.
+`duration_seconds` is effective duration. Ordinary calendar geometry uses the
+actual interval; multiplied completed entries add a distinct visual tail through
+their effective end. The tail participates in overlap layout but does not move
+allocated time. `extension/src/time-allocation.js` apportions effective duration
+proportionally across the actual interval at day/week/upload boundaries.
+`docs/time-model.md` records the product decisions for allocation, merging,
+conflicts, and multiplier validation.
 
 `extension/src/sheets.js` owns Google Sheets and Drive I/O. It requires the exact
 `time_entries` and `config` schemas on populated tabs; only empty or missing
