@@ -62,12 +62,14 @@ describe("ChatGPT usage security boundaries", () => {
     }
   });
 
-  it("renders popup usage from local snapshots without another ChatGPT request", () => {
+  it("renders popup usage from local snapshots and refreshes in the background on open", () => {
     assert.match(popup, /getSetting\(CHATGPT_ACCOUNTS_KEY/);
     assert.match(popup, /normalizeChatGptAccounts/);
     assert.match(popup, /Next allowance refresh/);
     assert.match(popup, /Last update/);
-    assert.doesNotMatch(popup, /chatgpt-containers|backend-api\/wham\/usage|api\/auth\/session/);
+    assert.match(popup, /refreshAllAccounts/);
+    assert.match(popup, /chatgpt-usage-refresh/);
+    assert.doesNotMatch(popup, /backend-api\/wham\/usage|api\/auth\/session/);
   });
 
   it("keeps fixtures redacted and avoids raw identity fields in normalized data", () => {

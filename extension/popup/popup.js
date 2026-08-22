@@ -1,6 +1,7 @@
 import { getActiveEntries, getDirtyEntryCount, getEntriesIntersecting, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
 import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-account-cache.js";
+import { CHATGPT_HOST_PERMISSION, CHATGPT_SESSION_TOKEN_CONSENT_KEY, refreshAllAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { mountEntryEditor } from "../src/entry-editor.js";
@@ -740,6 +741,21 @@ async function renderChatGptUsageSummary(isCurrent) {
   return true;
 }
 
+async function refreshChatGptUsageOnOpen() {
+  const [accounts, consent, permitted] = await Promise.all([
+    getSetting(CHATGPT_ACCOUNTS_KEY, []),
+    getSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, false),
+    platform.hasOptionalHostPermission(CHATGPT_HOST_PERMISSION)
+  ]);
+  if (!consent || !permitted || !normalizeChatGptAccounts(accounts).length) return;
+
+  try {
+    await refreshAllAccounts();
+  } catch {
+    // Keep the last successful snapshot visible when a popup-open refresh fails.
+  }
+}
+
 async function render() {
   const generation = ++renderGeneration;
   const isCurrent = () => generation === renderGeneration;
@@ -1050,6 +1066,14 @@ async function init() {
     });
   }
   await render();
+  void runPageTask({
+    page: "popup",
+    phase: "chatgpt-usage-refresh",
+    task: async () => {
+      await refreshChatGptUsageOnOpen();
+      await render();
+    }
+  });
   // Periodic syncing belongs to the background alarm; its notifyEntriesChanged
   // broadcast re-renders this popup, so no local poller is needed.
   await runSync({ force: false });
