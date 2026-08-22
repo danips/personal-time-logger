@@ -13,7 +13,7 @@
     "lint:js": "eslint .",
     "lint:extension": "node scripts/prepare-firefox-release.mjs --base-url https://example.invalid/personal-time-logger --output web-ext-artifacts/lint-source && web-ext lint --source-dir web-ext-artifacts/lint-source --self-hosted",
     "lint": "npm run lint:js && npm run lint:extension",
-    "package:firefox": "./scripts/xpi_gen.sh"
+    "build:xpi": "node scripts/build-xpi.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

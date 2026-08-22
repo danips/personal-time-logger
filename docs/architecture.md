@@ -120,7 +120,7 @@ Run these before review:
 ```bash
 npm test
 npm run lint
-npm run package:firefox
+npm run build:xpi
 ```
 
 `npm run lint` runs ESLint over source, scripts, and tests before `web-ext`

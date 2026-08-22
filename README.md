@@ -72,7 +72,7 @@ The GitHub Pages files are publicly fetchable because Firefox's updater cannot a
 
 ### One-time setup
 
-1. Create a GitHub repository and push this project. Keep `config.js`, `time-logger.xpi`, and `web-ext-artifacts/` ignored.
+1. Create a GitHub repository and push this project. Keep `config.js` and `web-ext-artifacts/` ignored.
 2. Create or sign in to an [addons.mozilla.org developer account](https://addons.mozilla.org/developers/).
 3. Open [AMO API credentials](https://addons.mozilla.org/developers/addon/api/key/) and create credentials.
 4. In the GitHub repository, open **Settings > Secrets and variables > Actions** and add these repository secrets:
@@ -108,7 +108,7 @@ git push origin v0.1.2
 
 Firefox periodically checks the deployed `updates.json` and installs a higher signed version. In `about:addons`, **Check for Updates** can trigger an immediate check.
 
-The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. `./scripts/xpi_gen.sh` can create an unsigned review archive locally, but normal Firefox installations still require the Mozilla-signed XPI.
+The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. Normal Firefox installations require the Mozilla-signed XPI.
 
 ## Google Cloud OAuth Setup
 
@@ -275,18 +275,17 @@ From a clean checkout, install exactly the locked development dependencies:
 npm ci
 ```
 
-Run the checks and build a local unsigned review archive with:
+Run the checks with:
 
 ```bash
 npm test
 npm run lint
-npm run package:firefox
+npm run build:xpi
 ```
 
-`npm run package:firefox` writes `time-logger.xpi`. It contains the same
-allow-listed source membership as the release build, but uses an inert update
-URL and is not signed for installation. Firefox signing and publication remain
-the responsibility of the tag-triggered release workflow.
+`npm run build:xpi` writes an unsigned, versioned review archive to
+`web-ext-artifacts/`. Firefox signing and publication are handled by the
+tag-triggered release workflow.
 
 `npm run lint` runs ESLint across JavaScript source, scripts, and tests before
 running `web-ext` against the allow-listed extension package. See
