@@ -328,6 +328,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   };
 
   await setBackend("mysql");
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
+  await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#google-account` });
   await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav", "#google-account"]);
   await waitForCondition(baseUrl, sessionId, "MySQL active settings reload", `
@@ -409,6 +411,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   `);
 
   await setBackend("google-sheets");
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
+  await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html` });
   await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav"]);
   const googleActiveState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
