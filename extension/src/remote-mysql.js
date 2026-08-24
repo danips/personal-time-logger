@@ -193,6 +193,15 @@ function persistedEntry(entry) {
   return Object.fromEntries(PERSISTED_ENTRY_FIELDS.map((field) => [field, entry[field]]));
 }
 
+function normalizeApiEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+  const normalized = { ...entry };
+  for (const field of ["end_at", "deleted_at", "multiply"]) {
+    if (normalized[field] === null) normalized[field] = "";
+  }
+  return normalized;
+}
+
 function mapSnapshot(data) {
   if (!Array.isArray(data.entries) || !Array.isArray(data.config)) {
     throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The MySQL API snapshot shape is invalid.");
@@ -203,7 +212,7 @@ function mapSnapshot(data) {
   for (const record of data.entries) {
     try {
       if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("record");
-      const entry = decodePersistedEntry(record.entry);
+      const entry = decodePersistedEntry(normalizeApiEntry(record.entry));
       if (entryRefs.has(entry.id)) throw new Error("duplicate");
       entries.push(entry);
       entryRefs.set(entry.id, ref(ENTRY_REF_KIND, record.version));

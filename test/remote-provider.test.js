@@ -142,6 +142,31 @@ describe("MySQL API client", () => {
     assert.equal(requestBody.entries[0].sync_error, undefined);
     assert.equal(Object.keys(requestBody.entries[0]).length, 14);
   });
+
+  it("normalizes nullable optional fields returned by the MySQL API", async () => {
+    const entry = fixture({ end_at: null, deleted_at: null, multiply: null });
+    const snapshot = await mysql.mysqlProvider.readSnapshot({
+      baseUrl: "https://time-api.cordoceo.com",
+      token: "test-secret-token",
+      platformApi,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            changeToken: "1",
+            entries: [{ entry, version: 1 }],
+            config: []
+          });
+        }
+      })
+    });
+    assert.equal(snapshot.quarantined.length, 0);
+    assert.equal(snapshot.entries.length, 1);
+    assert.equal(snapshot.entries[0].end_at, "");
+    assert.equal(snapshot.entries[0].deleted_at, "");
+    assert.equal(snapshot.entries[0].multiply, "");
+  });
 });
 
 describe("Google provider adapter", () => {
