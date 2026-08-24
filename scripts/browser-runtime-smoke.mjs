@@ -347,6 +347,16 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     throw new Error(`MySQL settings did not hide Google controls safely: ${JSON.stringify(hiddenMysqlState)}`);
   }
 
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#spreadsheet` });
+  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#spreadsheetNav", "#spreadsheet"]);
+  const hiddenSpreadsheetHash = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "return window.location.hash;",
+    args: []
+  });
+  if (hiddenSpreadsheetHash !== "#storage") {
+    throw new Error(`Hidden spreadsheet hash did not fall back to Storage: ${hiddenSpreadsheetHash}`);
+  }
+
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
       const target = document.querySelector("#remoteBackendTarget");
@@ -381,6 +391,19 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   await setBackend("google-sheets");
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html` });
   await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav"]);
+  const googleActiveState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `return {
+      active: document.querySelector("#activeRemoteBackend")?.textContent,
+      accountNavHidden: document.querySelector("#googleAccountNav")?.hidden,
+      spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden
+    };`,
+    args: []
+  });
+  if (googleActiveState.active !== "Google Sheets"
+    || googleActiveState.accountNavHidden
+    || googleActiveState.spreadsheetNavHidden) {
+    throw new Error(`Google-active settings did not restore Google controls: ${JSON.stringify(googleActiveState)}`);
+  }
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
       const target = document.querySelector("#remoteBackendTarget");
