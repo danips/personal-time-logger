@@ -9,9 +9,9 @@ A Firefox extension for local-first time tracking with Google Sheets sync. It is
 - Start, active-timer Stop, and header Sync controls in the popup. Starting a timer stops the running one.
 - Recent entries grouped by week and day, with totals, repeated entries collapsed into expandable groups, and **Load more** for earlier weeks.
 - Weekly calendar view with movable and resizable time logs and direct displayed-week Tempo upload.
-- Options page with left-side navigation for Google, spreadsheet, ChatGPT usage, reconciliation, Tempo, and diagnostics settings.
+- Options page with left-side navigation for provider-aware storage, Google, ChatGPT usage, reconciliation, Tempo, and diagnostics settings.
 - Multiple-active-timer warning.
-- The Options page includes Google auth, sync interval, duration multiplier, calendar start hour, device ID, reconciliation, and experimental ChatGPT usage controls. The spreadsheet is found or created automatically.
+- The Options page includes provider-aware storage controls, Google auth, sync interval, duration multiplier, calendar start hour, device ID, reconciliation, and experimental ChatGPT usage controls. Google-specific sections are shown while Google Sheets is active or selected as a migration target.
 - Background sync that runs while the browser is open, with no page needed.
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
@@ -231,11 +231,11 @@ Deleted entries are marked locally with `deleted_at` first so deletion is local-
 
 ## Reconcile Screen
 
-The ⇄ button in the popup header opens a page comparing this device with the spreadsheet. It sorts every entry into identical, differing, device-only, spreadsheet-only, and duplicated rows, and summarises the totals so the two sides visibly account for each other.
+The ⇄ button in the popup header opens a page comparing this device with the active remote backend. It sorts every entry into identical, differing, device-only, remote-only, and (when supported) duplicated records, and summarises the totals so the two sides visibly account for each other. The page identifies the active provider and does not use the backend selected for a future migration.
 
-Differing entries list each field with the device value beside the spreadsheet value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
+Differing entries list each field with the device value beside the active remote value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
 
-Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck the complete row before the request and verify the result afterward. Google Sheets has no atomic compare-and-swap, so a manual edit in the narrow interval between those requests is detected after the fact rather than prevented. Deleting duplicate rows is the one action that writes to the spreadsheet directly, because a duplicate row has no local counterpart; it verifies every target before sending the batch and checks the result afterward.
+Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck the complete record before the request and verify the result afterward. Providers without physical duplicate records do not show duplicate repair controls. Google Sheets has no atomic compare-and-swap, so a manual edit in the narrow interval between those requests is detected after the fact rather than prevented. Deleting duplicate Google Sheet rows is the one action that writes directly to the spreadsheet, because a duplicate row has no local counterpart; it verifies every target before sending the batch and checks the result afterward.
 
 ## Known Limitations
 
