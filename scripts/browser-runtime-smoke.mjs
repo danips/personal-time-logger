@@ -342,7 +342,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
       accountNavHidden: document.querySelector("#googleAccountNav")?.hidden,
       accountHidden: document.querySelector("#google-account")?.hidden,
       spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden,
-      spreadsheetHidden: document.querySelector("#spreadsheet")?.hidden
+      spreadsheetHidden: document.querySelector("#spreadsheet")?.hidden,
+      mysqlFieldsHidden: document.querySelector("#mysqlStorageFields")?.hidden
     };`,
     args: []
   });
@@ -351,7 +352,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     || !hiddenMysqlState.accountNavHidden
     || !hiddenMysqlState.accountHidden
     || !hiddenMysqlState.spreadsheetNavHidden
-    || !hiddenMysqlState.spreadsheetHidden) {
+    || !hiddenMysqlState.spreadsheetHidden
+    || hiddenMysqlState.mysqlFieldsHidden) {
     throw new Error(`MySQL settings did not hide Google controls safely: ${JSON.stringify(hiddenMysqlState)}`);
   }
 
@@ -393,7 +395,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
       && !document.querySelector("#googleAccountNav")?.hidden
       && !document.querySelector("#google-account")?.hidden
       && !document.querySelector("#spreadsheetNav")?.hidden
-      && !document.querySelector("#spreadsheet")?.hidden;
+      && !document.querySelector("#spreadsheet")?.hidden
+      && document.querySelector("#mysqlStorageFields")?.hidden;
   `);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
@@ -407,7 +410,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   });
   await waitForCondition(baseUrl, sessionId, "MySQL migration-target settings", `
     return document.querySelector("#googleAccountNav")?.hidden
-      && document.querySelector("#google-account")?.hidden;
+      && document.querySelector("#google-account")?.hidden
+      && !document.querySelector("#mysqlStorageFields")?.hidden;
   `);
 
   await setBackend("google-sheets");
@@ -419,7 +423,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     script: `return {
       active: document.querySelector("#activeRemoteBackend")?.textContent,
       accountNavHidden: document.querySelector("#googleAccountNav")?.hidden,
-      spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden
+      spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden,
+      mysqlFieldsHidden: document.querySelector("#mysqlStorageFields")?.hidden
     };`,
     args: []
   });
@@ -440,7 +445,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   await waitForCondition(baseUrl, sessionId, "Google-active settings", `
     return document.querySelector("#activeRemoteBackend")?.textContent === "Google Sheets"
       && !document.querySelector("#googleAccountNav")?.hidden
-      && !document.querySelector("#spreadsheetNav")?.hidden;
+      && !document.querySelector("#spreadsheetNav")?.hidden
+      && !document.querySelector("#mysqlStorageFields")?.hidden;
   `);
 
   await setBackend("google-sheets");
