@@ -316,8 +316,11 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
       script: `
         const done = arguments[arguments.length - 1];
         import(browser.runtime.getURL("src/db.js"))
-          .then((db) => db.setSetting("remote_backend", ${JSON.stringify(backend)}))
-          .then(() => done(true), () => done(false));
+          .then(async (db) => {
+            await db.setSetting("remote_backend", ${JSON.stringify(backend)});
+            done(await db.getSetting("remote_backend", "") === ${JSON.stringify(backend)});
+          })
+          .catch(() => done(false));
       `,
       args: []
     });
