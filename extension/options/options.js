@@ -135,7 +135,8 @@ function setStatus(message) {
   $("#statusLine").textContent = message;
 }
 
-function runOptionsAction(key, action, button) {
+function runOptionsAction(key, action, button, actionOptions) {
+  const refreshOnError = (actionOptions || {}).refreshOnError !== false;
   let refreshAfterAction = true;
   return runAction(key, async (options) => {
     const result = await action(options);
@@ -146,6 +147,7 @@ function runOptionsAction(key, action, button) {
       if (button) button.disabled = next;
     },
     onError(error) {
+      if (!refreshOnError) refreshAfterAction = false;
       setStatus(formatError(error));
     },
     onFinally() {
@@ -552,8 +554,8 @@ function bindEvents() {
     await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS),
     await getStorageMigrationState()
   ));
-  $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget));
-  $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget));
+  $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget, { refreshOnError: false }));
+  $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget, { refreshOnError: false }));
   $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget));
 
 }
