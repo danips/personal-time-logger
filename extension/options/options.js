@@ -280,11 +280,24 @@ async function saveGoogleCredentials() {
 
 function renderStorage(activeBackend) {
   const active = decodeRemoteProviderId(activeBackend);
-  const label = active === REMOTE_PROVIDER_ID.MYSQL ? "MySQL 8.4" : "Google Sheets";
-  $("#activeRemoteBackend").textContent = label;
+  renderActiveBackendLabel(active);
   $("#remoteBackendTarget").value = active;
   $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
   $("#spreadsheet").hidden = active !== REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+}
+
+function renderActiveBackendLabel(activeBackend) {
+  const active = decodeRemoteProviderId(activeBackend);
+  $("#activeRemoteBackend").textContent = active === REMOTE_PROVIDER_ID.MYSQL
+    ? "MySQL 8.4"
+    : "Google Sheets";
+}
+
+async function refreshActiveBackendLabel() {
+  renderActiveBackendLabel(await getSetting(
+    SETTING_KEY.REMOTE_BACKEND,
+    REMOTE_PROVIDER_ID.GOOGLE_SHEETS
+  ));
 }
 
 function renderStorageTarget() {
@@ -360,7 +373,12 @@ async function migrateStorageClicked() {
       }
     });
   } catch (error) {
-    $("#migrationStatus").textContent = formatError(error);
+    const state = await getStorageMigrationState().catch(() => null);
+    const diagnostic = error?.message && error.message !== formatError(error)
+      ? ` (${error.code || "MIGRATION_FAILED"}: ${error.message})`
+      : "";
+    $("#migrationStatus").textContent = `${formatError(error)}${diagnostic}`;
+    if (state?.phase === "post_switch") await refreshActiveBackendLabel();
     throw error;
   }
   setStatus("Storage migration completed");
@@ -577,6 +595,10 @@ function bindEvents() {
   $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget, { refreshOnError: false }));
   $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget, { refreshOnError: false }));
   $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget, { refreshOnError: false }));
+
+  window.addEventListener("focus", () => {
+    void refreshActiveBackendLabel().catch(() => {});
+  });
 
 }
 
