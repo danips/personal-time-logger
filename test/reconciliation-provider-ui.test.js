@@ -48,4 +48,24 @@ describe("provider-aware reconciliation UI", () => {
     assert.match(reconcileUi, /Remote backend: /);
     assert.match(reconcileHtml, /id="duplicateSummaryMetric"/);
   });
+
+  it("keeps MySQL-style reports free of duplicate repair and spreadsheet controls", async () => {
+    const report = await loadReconciliation({
+      provider: {
+        id: "mysql",
+        label: "MySQL 8.4",
+        capabilities: { duplicateRemoteRecords: false },
+        async readSnapshot() {
+          return { entries: [], duplicates: [] };
+        }
+      }
+    });
+
+    assert.equal(report.provider.label, "MySQL 8.4");
+    assert.deepEqual(report.duplicates, []);
+    assert.match(reconcileUi, /Keep remote/);
+    assert.match(reconcileUi, /Push to remote/);
+    assert.match(reconcileUi, /Import from remote/);
+    assert.doesNotMatch(reconcileHtml, /spreadsheet/i);
+  });
 });
