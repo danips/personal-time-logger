@@ -25,12 +25,11 @@ description, but their multipliers may differ.
 ## D-03 — Conflicts
 
 Entries use optimistic revisions for local writes. A reconciliation choice is
-validated against the local revision and complete remote-row fingerprint
-observed by the user; divergent edits remain a conflict until explicitly
-resolved. Sync mutations re-read the complete remote row before writing and
-verify the intended result afterward. Google Sheets offers no atomic
-compare-and-swap operation, so an edit in the interval between those requests
-can be detected by post-write verification but cannot be prevented. A successful
+validated against the local revision and the provider's complete remote
+reference observed by the user; divergent edits remain a conflict until
+explicitly resolved. Sync mutations use the provider's concurrency mechanism
+and verify the intended result afterward. Google Sheets offers no atomic
+compare-and-swap operation, while MySQL uses API version fences. A successful
 local resolution is a durable operation rather than a synthetic timestamp bump.
 
 ## D-04 — Displayed-week Tempo allocation
@@ -44,14 +43,15 @@ Tempo requires a fixed positive duration.
 
 ### D1 — Remote optimistic concurrency
 
-Every remote update or deletion is fenced by the complete serialized row
-fingerprint observed in the snapshot. The extension re-reads and compares that
-row immediately before mutation, then verifies the intended result afterward.
-A mismatch is a reconciliation conflict; the extension never intentionally
-overwrites a row that fails preflight. Google Sheets has no conditional
-row-update API, so a manual edit can still land in the narrow gap after
-preflight and before the write; postflight detects observable interleavings,
-but cannot provide a database-style atomic compare-and-swap guarantee.
+Every remote update or deletion is fenced by the provider reference observed in
+the snapshot. Google Sheets uses a complete serialized row fingerprint and
+re-reads the row immediately before mutation; MySQL uses an API remote version.
+The provider verifies the intended result afterward. A mismatch is a
+reconciliation conflict; the extension never intentionally overwrites a remote
+record that fails preflight. Google Sheets has no conditional row-update API,
+so a manual edit can still land in the narrow gap after preflight and before the
+write; postflight detects observable interleavings, but cannot provide a
+database-style atomic compare-and-swap guarantee.
 
 ### D2 — Cross-device conflict ordering
 
@@ -61,10 +61,10 @@ row order, or device clock value.
 
 ### D3 — Append idempotency
 
-After an ambiguous spreadsheet append result—including a missing or incomplete
-response range—the extension re-reads by entry ID and expected fingerprint
-before retrying. Only a confirmed matching row can be acknowledged as
-synchronized; a same-ID row with different contents is a conflict.
+After an ambiguous remote append result, the active provider re-reads by entry
+ID and its expected provider reference before retrying. Only a confirmed
+matching record can be acknowledged as synchronized; a same-ID record with
+different contents is a conflict.
 
 ### D4 — DST input behavior
 

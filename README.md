@@ -1,6 +1,8 @@
 # Personal Time Logger Extension
 
-A Firefox extension for local-first time tracking with Google Sheets sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
+Current release: `0.1.53` (`v0.1.53`).
+
+A Firefox extension for local-first time tracking with Google Sheets or MySQL remote sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
 ## What Is Included
 
@@ -15,6 +17,7 @@ A Firefox extension for local-first time tracking with Google Sheets sync. It is
 - Background sync that runs while the browser is open, with no page needed.
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
+- MySQL 8.4 sync through an authenticated HTTPS API, with resumable verified migration between providers.
 - Refresh-token-capable Google device OAuth flow for Firefox.
 - Experimental ChatGPT plan-usage controls for separate Firefox container accounts.
 - Unit tests over the pure logic, run with `npm test`.
@@ -177,11 +180,30 @@ Sync reads first and only inspects the layout when a read fails. A missing tab, 
 10. Use **Send to Tempo** in the calendar to create the displayed week's completed worklogs directly in Tempo.
 11. Use the merge controls in a recent entry edit panel or selected calendar entry to append another matching completed log's elapsed time to the selected entry.
 
-Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when Google auth is not ready.
+Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when the active provider is not ready.
 
 If the popup and calendar are open at the same time, local changes broadcast between them and both views refresh automatically.
 
-Set **Duration multiplier** in Options. Entries with **Multiply** checked store `duration_seconds` as actual elapsed seconds times that multiplier, and store the multiplier value itself in the spreadsheet's `multiply` column. Entries without **Multiply** keep their actual duration and leave `multiply` empty.
+Set **Duration multiplier** in Options. Entries with **Multiply** checked store `duration_seconds` as actual elapsed seconds times that multiplier, and store the multiplier value itself in the active provider's shared `multiply` field. Entries without **Multiply** keep their actual duration and leave `multiply` empty.
+
+## Remote Storage and Migration
+
+IndexedDB is always the local source of truth. Each device has one **active
+remote backend** used by normal sync and reconciliation, plus an independent
+**backend to prepare** used to configure a possible migration. Selecting a
+preparation target never changes the active backend; only a verified migration
+does that.
+
+Google Sheets is the legacy/default provider. MySQL 8.4 is configured with an
+HTTPS API base URL and a device-local bearer token. Google Account and
+Spreadsheet settings are shown when Google is active or selected as the
+preparation target, and are hidden during ordinary MySQL use without deleting
+Google credentials, tokens, or spreadsheet state.
+
+Storage migration pauses ordinary synchronization, verifies the canonical
+entries and shared configuration, and switches the active backend only after
+verification succeeds. The source provider and its data remain available for
+reverse migration.
 
 ## Calendar View
 
@@ -217,17 +239,17 @@ The popup, calendar, and background each attempt sync independently. A renewable
 On sync, the extension:
 
 1. Flags competing active timers as `needs_review` if more than one is running.
-2. Asks Drive when the spreadsheet last changed, and skips the whole exchange when nothing changed remotely and nothing is pending locally.
-3. Reads entries and config in a single request.
-4. Pushes local changes: all row rewrites in one request, all new rows in another.
-5. Pulls remote rows into IndexedDB, using last `updated_at` wins for normal edits.
-6. Deletes rows for entries deleted more than 14 days ago.
+2. Asks the active provider for its change token when available, and skips the exchange when nothing changed remotely and nothing is pending locally.
+3. Reads the active provider's canonical entries and shared configuration.
+4. Pushes local changes through the provider adapter with provider-specific concurrency references.
+5. Pulls remote entries into IndexedDB, using last `updated_at` wins for normal edits.
+6. Removes entries deleted more than 14 days ago through the active provider's cleanup semantics.
 
 An idle cycle costs a single request. A timer left running overnight keeps running; it is never closed automatically.
 
 Where a valid entry ID appears in several rows, the valid row with the newest `updated_at` is selected regardless of its position, so a stale duplicate cannot overwrite a newer one. Equal timestamps do not provide a reliable ordering and duplicate rows remain visible for review. Malformed rows are quarantined instead of participating in the choice. Surplus rows are deleted only after their full row fingerprints are rechecked.
 
-Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the matching spreadsheet row is updated with the same `deleted_at` tombstone instead of being removed. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote rows. Tombstones older than 14 days are removed from both the sheet and local storage.
+Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the active provider receives the same tombstone instead of an immediate physical removal. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote entries. Tombstones older than 14 days are removed from remote storage and local storage.
 
 ## Reconcile Screen
 
@@ -239,14 +261,14 @@ Resolutions validate the local revision and the remote fingerprint shown in the 
 
 ## Known Limitations
 
-- Google Sheets is not a real database.
+- Google Sheets is not a real database; MySQL uses the HTTPS API's relational uniqueness and version fencing.
 - Sync is polling-based, not real-time.
 - Conflict handling is intentionally simple.
 - Calendar moving snaps to 15-minute intervals and preserves completed-entry duration; resizing a selected entry snaps to one-minute intervals.
 - Merging keeps the selected entry's start, multiplier, and status; it appends the other matching entry's actual elapsed time as one contiguous interval, then marks the other entry deleted locally.
-- Deleted entries remain in the sheet as tombstones for 14 days so multiple devices can converge during sync.
-- When it does read, the extension reads the whole `time_entries` sheet; the Drive check avoids the read entirely rather than making it smaller.
-- Skipping reads only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
+- Deleted entries remain in remote storage as tombstones for 14 days so multiple devices can converge during sync.
+- When it does read, each provider currently returns its complete canonical snapshot; the provider change token avoids that read when possible.
+- Google-specific read gating only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
 - A forgotten timer runs indefinitely. Nothing prompts about it.
 - OAuth uses Google device flow and stores personal OAuth credentials in the local Firefox extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
@@ -281,7 +303,7 @@ tag-triggered release workflow.
 `npm run lint` runs ESLint across JavaScript source, scripts, and tests before
 running `web-ext` against the allow-listed extension package. See
 [`docs/architecture.md`](docs/architecture.md) for module boundaries, storage,
-sync fencing, spreadsheet schema, and ChatGPT trust boundaries. See
+provider adapters, sync fencing, remote schemas, and ChatGPT trust boundaries. See
 [`docs/scaling.md`](docs/scaling.md) for the current bounded-history queries,
 benchmark plan, and the unimplemented partitioning design.
 
@@ -299,7 +321,7 @@ For a Firefox WebDriver behavior smoke test, install Firefox, `geckodriver`, and
 npm run test:browser
 ```
 
-Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies its calendar rendering, saves Options, and checks the cross-context lock. It never contacts Google APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
+Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies its calendar rendering, exercises provider-aware Options visibility, saves Options, and checks the cross-context lock. It never contacts live Google or MySQL APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
 
 GitHub Actions runs the Node checks and Firefox behavior smoke on every push and pull request. The release workflow also requires the Firefox smoke before signing, so either test path can block a release.
 
@@ -308,7 +330,10 @@ GitHub Actions runs the Node checks and Firefox behavior smoke on every push and
 ```text
 package.json
 README.md
+RELEASE_NOTES.md
 PRIVACY.md
+docs/
+server/mysql-api/
 extension/
   manifest.json
   background/

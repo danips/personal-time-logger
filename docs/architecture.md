@@ -10,7 +10,9 @@ Popup / Calendar / Options / Reconcile ─┐
 Usage page ─────────────────────────────┼── extension/src/ domain modules ── IndexedDB
 Background alarm ───────────────────────┤          │                  │
                                          │          ├── browser APIs    └── entries + settings
-ChatGPT content scripts ────────────────┘          └── Google APIs
+ChatGPT content scripts ────────────────┘          └── remote providers
+                                                        ├── Google Sheets / Drive APIs
+                                                        └── MySQL HTTPS API
 ```
 
 ## Context boundaries
@@ -20,7 +22,7 @@ ChatGPT content scripts ────────────────┘     
 | Background | `extension/background/background.js` | Alarm heartbeat, installation recovery, and non-interactive sync. | Does not own entries; it calls `extension/src/sync.js`. |
 | Popup | `extension/popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `extension/src/entries.js` and refreshes on entry events. |
 | Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; a fixed runtime message delegates Tempo transport to the background context through `extension/src/tempo.js`. |
-| Options | `extension/options/options.js` | Navigated settings page for OAuth client setup, sync settings, spreadsheet adoption/replacement, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; OAuth client settings use synchronized browser storage, while tokens remain local. |
+| Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; active backend and preparation target stay separate; OAuth client settings use synchronized browser storage, while tokens remain local. |
 | Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
 | Usage | `extension/usage/usage.js` | Firefox-only ChatGPT account setup and usage display. | It can run standalone or mounted in Options, and requests optional ChatGPT permission before contacting that host. |
 | ChatGPT content scripts | `extension/content/chatgpt-usage.js`, `extension/content/chatgpt-usage-page.js` | Fetch the private usage endpoint in the isolated world; use the page world only after a 401. | The bridge correlates bounded messages by request ID. Session tokens stay in page memory and are never persisted by the extension. |
@@ -53,10 +55,11 @@ revision. `mutateAllLocalState` is reserved for intentional whole-history
 operations. Do not replace an entry from an earlier read with a non-atomic
 write when a conditional mutation is available.
 
-## Entry, time, and spreadsheet model
+## Entry, time, and remote model
 
-`extension/src/entries.js` validates and normalizes the entry model. The remote
-`time_entries` row order is fixed by `SHEET_HEADERS`:
+`extension/src/entries.js` validates and normalizes the canonical remote entry
+model. Google Sheets stores the model in the `time_entries` row order fixed by
+`SHEET_HEADERS`:
 
 ```text
 id, project, task, description, start_at, end_at, duration_seconds, status,
@@ -77,6 +80,13 @@ tabs are initialized automatically. Remote updates and deletions carry a full
 row fingerprint, re-read that row before mutation, and verify the intended
 result afterward.
 
+`extension/src/remote-provider.js` selects the active provider from
+`REMOTE_BACKEND`. `remote-google-sheets.js` adapts Sheets row references and
+fingerprints; `remote-mysql.js` adapts API version references and normalizes the
+API's nullable optional fields. Generic sync and reconciliation code uses only
+the provider contract and serializable provider metadata. Provider capabilities
+currently control whether duplicate physical-record repair is presented.
+
 ## Sync, reconciliation, and fencing
 
 `syncNow()` coalesces same-context calls with one registered drain: a stronger
@@ -91,21 +101,22 @@ acquired.
 The sync sequence is:
 
 1. Load local state and clean expired reconciliation intents.
-2. Flag competing active timers and ensure/recover the spreadsheet binding.
-3. Use Drive modified time only as a read gate; otherwise read the full remote snapshot.
-4. Push dirty updates/appends with remote row preconditions, then acknowledge only unchanged local revisions.
-5. Pull remote changes with revision/fingerprint checks, purge verified old tombstones, and synchronize the duration multiplier/config marker.
+2. Flag competing active timers and ensure the active provider is ready.
+3. Use the active provider's change token as a read gate when supported; otherwise read its full remote snapshot.
+4. Push dirty updates/appends with provider-owned opaque preconditions, then acknowledge only unchanged local revisions.
+5. Pull remote changes with revision/reference checks, purge verified old tombstones, and synchronize the duration multiplier/config marker.
 6. Record backoff/diagnostics and notify pages after a completed cycle.
 
-Reconciliation records the displayed local revision and remote fingerprint for
+Reconciliation records the displayed local revision and provider reference for
 each choice. Equal `updated_at` values with different entry fingerprints remain
-an explicit conflict rather than deriving an order from sheet-row position.
+an explicit conflict rather than deriving an order from provider ordering.
 Google Sheets has no atomic compare-and-swap: preflight and post-write checks
-detect observable races but cannot prevent a manual edit in the request gap.
+detect observable races but cannot prevent a manual edit in the request gap;
+MySQL uses API version fencing.
 
 ## Trust and release boundaries
 
-- Google Sheets/Drive and OAuth are the only required network hosts.
+- Google Sheets/Drive and OAuth are required only for Google operation; the configured MySQL API origin is an optional host permission for MySQL operation.
 - `chatgpt.com` is optional and isolated to the usage feature. Its page-world
   bridge is intentionally narrow because page scripts are untrusted extension
   inputs.
@@ -122,8 +133,10 @@ Run these before review:
 
 ```bash
 npm test
+npm run test:browser
 npm run lint
 npm run build:xpi
+git diff --check
 ```
 
 `npm run lint` runs ESLint over source, scripts, and tests before `web-ext`
