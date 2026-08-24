@@ -175,8 +175,8 @@ function renderDuplicates(items) {
 }
 
 /**
- * Row deletion cannot be undone from here and touches the spreadsheet directly,
- * so it always asks first.
+ * Duplicate-row deletion cannot be undone from here and touches provider storage
+ * directly, so it always asks first.
  */
 async function confirmDeleteRows(rows) {
   if (!duplicateRecordsSupported(report)) return;
@@ -281,8 +281,7 @@ async function scan({ quiet = false, manageBusy = true } = {}) {
 
 /**
  * Resolutions only write locally, marking a side as the one to keep. The sync that
- * follows is what carries the decision to the spreadsheet, so one code path owns
- * all remote writes.
+ * follows carries the decision to remote storage, so one code path owns remote writes.
  */
 function resolve(action, status = "Applying...") {
   if (busy) return;

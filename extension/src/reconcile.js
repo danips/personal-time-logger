@@ -8,8 +8,8 @@ import { ERROR_CODE } from "./error-codes.js";
 import { RECONCILIATION_INTENT_STATE } from "./operation-states.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
-// Only the columns that live in the sheet are compared. dirty, last_sync_at and
-// sync_error are local bookkeeping, so a difference there is not a divergence.
+// Only canonical remote fields are compared. dirty, last_sync_at and sync_error
+// are local bookkeeping, so a difference there is not a divergence.
 const COMPARED_FIELDS = SHEET_HEADERS.filter((field) => field !== "id");
 export const RECONCILIATION_INTENTS_KEY = SETTING_KEY.RECONCILIATION_INTENTS;
 export const STALE_RECONCILIATION_INTENTS_KEY = SETTING_KEY.STALE_RECONCILIATION_INTENTS;
@@ -140,8 +140,8 @@ export async function pruneExpiredReconciliationIntents({ now = Date.now() } = {
 }
 
 /**
- * Fields where a local entry and its remote row disagree, compared through the
- * same row serialization sync uses, so what shows up here is exactly what a push
+ * Fields where a local entry and its remote record disagree, compared through the
+ * same canonical serialization sync uses, so what shows up here is exactly what a push
  * or pull would change.
  */
 export function fieldDifferences(localEntry, remoteEntry) {
@@ -234,11 +234,10 @@ export async function loadReconciliation({ interactiveAuth = false, provider } =
 }
 
 /**
- * Deletes the surplus rows for a duplicated id, keeping the one sync uses.
+ * Deletes surplus physical remote rows for a duplicated id, keeping the one sync uses.
  *
- * This is the one resolution that writes to the sheet directly, because a
- * duplicate row has no local counterpart to mark and therefore nothing for sync
- * to carry.
+ * This provider-specific repair writes directly because a duplicate physical row
+ * has no local counterpart to mark and therefore nothing for normal sync to carry.
  */
 export async function deleteDuplicateRows(extraRows, { interactiveAuth = false, provider } = {}) {
   if (!extraRows.length) return 0;
@@ -386,7 +385,7 @@ async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = fal
 }
 
 /**
- * Applies a set of choices from one reconciliation report. The remote rows are
+ * Applies a set of choices from one reconciliation report. The remote records are
  * all checked from one snapshot before a single local transaction validates the
  * displayed revisions and records every local consequence. Remote state can
  * still change after the snapshot, so the returned result is explicit per id;
