@@ -75,13 +75,13 @@ function rowHeading(entry, badges = []) {
   return heading;
 }
 
-function differenceTable(differences) {
+function differenceTable(differences, remoteLabel) {
   const table = document.createElement("table");
   table.className = "diff-table";
 
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["Field", "This device", "Spreadsheet"]) {
+  for (const label of ["Field", "This device", `Remote — ${remoteLabel}`]) {
     const cell = document.createElement("th");
     cell.scope = "col";
     cell.textContent = label;
@@ -139,7 +139,7 @@ function renderDifferent(items) {
       : item.newer === "conflict" ? ["same timestamp conflict"] : [`${item.newer} is newer`];
     row.append(
       rowHeading(item.local, badges),
-      differenceTable(item.differences),
+      differenceTable(item.differences, report.provider?.label || "Remote storage"),
       actionRow([
         { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision }) },
         { label: "Keep spreadsheet", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) }
@@ -229,6 +229,8 @@ function divergenceCount() {
 
 function render() {
   if (!report) return;
+
+  $("#remoteProviderLabel").textContent = `Remote backend: ${report.provider?.label || "Remote storage"}`;
 
   $("#localCount").textContent = String(report.localCount);
   $("#remoteRowCount").textContent = String(report.remoteRowCount);
