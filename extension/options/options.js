@@ -34,6 +34,7 @@ import { storageUiState } from "../src/options-storage-ui.js";
 
 let diagnostics = [];
 let eventsBound = false;
+let syncSectionNavigation = () => {};
 
 function renderThemeSelection({ theme, highContrast }) {
   const selected = THEME_OPTIONS.find(({ id }) => id === theme);
@@ -48,12 +49,20 @@ function bindSectionNavigation() {
   const setActive = (id) => {
     for (const link of links) link.classList.toggle("active", link.hash === `#${id}`);
   };
+  syncSectionNavigation = () => {
+    const requestedId = window.location.hash.slice(1);
+    const requestedSection = requestedId && document.getElementById(requestedId);
+    const requestedLink = links.find((link) => link.hash === `#${requestedId}`);
+    const visible = requestedSection && !requestedSection.hidden && requestedLink && !requestedLink.hidden;
+    const nextId = visible ? requestedId : "storage";
+    if (nextId !== requestedId) history.replaceState(null, "", `#${nextId}`);
+    setActive(nextId);
+  };
   for (const link of links) {
     link.addEventListener("click", () => setActive(link.hash.slice(1)));
   }
-  const initialId = window.location.hash.slice(1) || links[0]?.hash.slice(1);
-  if (initialId) setActive(initialId);
-  window.addEventListener("hashchange", () => setActive(window.location.hash.slice(1)));
+  syncSectionNavigation();
+  window.addEventListener("hashchange", syncSectionNavigation);
 }
 
 function createTempoMappingRow(task = "", issueId = "") {
@@ -290,6 +299,7 @@ function renderStorageProviderVisibility(activeBackend, targetBackend) {
   for (const selector of ["#spreadsheetNav", "#spreadsheet"]) {
     $(selector).hidden = !state.showSpreadsheet;
   }
+  syncSectionNavigation();
 }
 
 function renderStorage(activeBackend) {
