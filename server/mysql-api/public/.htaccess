@@ -1,6 +1,12 @@
 DirectoryIndex index.php
 
 RewriteEngine On
+
+# Some Apache PHP/FastCGI setups do not populate HTTP_AUTHORIZATION unless it
+# is copied into the CGI environment explicitly.
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%1]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]

@@ -49,6 +49,14 @@ final class Http
     public static function bearerToken(): string
     {
         $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        if ($header === '' && function_exists('getallheaders')) {
+            foreach (getallheaders() as $name => $value) {
+                if (strcasecmp((string) $name, 'Authorization') === 0) {
+                    $header = is_string($value) ? $value : '';
+                    break;
+                }
+            }
+        }
         if (!preg_match('/\ABearer\s+([^\s]+)\z/', $header, $matches)) {
             throw new ApiException(401, 'AUTH_REQUIRED', 'A bearer token is required.');
         }

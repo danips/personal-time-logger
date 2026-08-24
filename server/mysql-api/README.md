@@ -27,6 +27,10 @@ PHP 8.2+ syntax, PDO MySQL, and no framework or Composer runtime dependency.
    origin such as `https://time-api.example.com/`.
 7. Test `/v1/health` with the bearer token before configuring the extension.
 
+On Apache/PHP hosting, deploy the included `public/.htaccess` unchanged. It
+forwards the `Authorization` header to PHP, which some CGI/FastCGI setups omit
+by default. The PHP handler also checks the standard request-header fallback.
+
 The public document root should be this directory’s `public/` directory. The
 database configuration and token hash must remain outside that directory.
 
