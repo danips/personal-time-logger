@@ -130,7 +130,7 @@ function emptyNote(text) {
 }
 
 function renderDifferent(items) {
-  if (!items.length) return [emptyNote("Nothing differs between this device and the spreadsheet.")];
+  if (!items.length) return [emptyNote("Nothing differs between this device and remote storage.")];
 
   return items.map((item) => {
     const row = document.createElement("article");
@@ -150,7 +150,7 @@ function renderDifferent(items) {
 }
 
 function renderDuplicates(items) {
-  if (!items.length) return [emptyNote("No entry appears in more than one spreadsheet row.")];
+  if (!items.length) return [emptyNote("No duplicate remote records were reported.")];
 
   return items.map((item) => {
     const row = document.createElement("article");
@@ -186,7 +186,7 @@ async function confirmDeleteRows(rows) {
 }
 
 function renderLocalOnly(items) {
-  if (!items.length) return [emptyNote("Every local entry exists in the spreadsheet.")];
+  if (!items.length) return [emptyNote("Every local entry exists in remote storage.")];
 
   return items.map((item) => {
     const row = document.createElement("article");
@@ -203,7 +203,7 @@ function renderLocalOnly(items) {
 }
 
 function renderRemoteOnly(items) {
-  if (!items.length) return [emptyNote("Every spreadsheet row exists on this device.")];
+  if (!items.length) return [emptyNote("Every remote entry exists on this device.")];
 
   return items.map((item) => {
     const row = document.createElement("article");
@@ -253,7 +253,7 @@ function render() {
 }
 
 async function scan({ quiet = false, manageBusy = true } = {}) {
-  if (!quiet) setStatus("Comparing this device with the spreadsheet...");
+  if (!quiet) setStatus("Comparing this device with remote storage...");
   if (manageBusy) setBusy(true);
   try {
     report = await loadReconciliation({ interactiveAuth: false });
@@ -261,7 +261,7 @@ async function scan({ quiet = false, manageBusy = true } = {}) {
     const divergences = divergenceCount();
     setStatus(divergences
       ? `${divergences} divergence${divergences === 1 ? "" : "s"} found. Choose a side, then sync.`
-      : "This device and the spreadsheet agree on every entry.");
+      : "This device and remote storage agree on every entry.");
   } catch (error) {
     setStatus(`Could not compare: ${formatError(error)}`);
   } finally {
