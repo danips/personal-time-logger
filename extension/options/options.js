@@ -30,6 +30,7 @@ import {
   normalizeWorkdayStartHour,
   planOptionsSettingsSave
 } from "../src/options-settings.js";
+import { storageUiState } from "../src/options-storage-ui.js";
 
 let diagnostics = [];
 let eventsBound = false;
@@ -278,12 +279,25 @@ async function saveGoogleCredentials() {
     : "Google credentials saved to Firefox Sync");
 }
 
+function renderStorageProviderVisibility(activeBackend, targetBackend) {
+  const state = storageUiState({
+    activeProviderId: decodeRemoteProviderId(activeBackend),
+    targetProviderId: decodeRemoteProviderId(targetBackend)
+  });
+  for (const selector of ["#googleAccountNav", "#google-account"]) {
+    $(selector).hidden = !state.showGoogleAccount;
+  }
+  for (const selector of ["#spreadsheetNav", "#spreadsheet"]) {
+    $(selector).hidden = !state.showSpreadsheet;
+  }
+}
+
 function renderStorage(activeBackend) {
   const active = decodeRemoteProviderId(activeBackend);
   renderActiveBackendLabel(active);
   $("#remoteBackendTarget").value = active;
   $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
-  $("#spreadsheet").hidden = active !== REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+  renderStorageProviderVisibility(active, $("#remoteBackendTarget").value);
 }
 
 function renderActiveBackendLabel(activeBackend) {
@@ -300,8 +314,12 @@ async function refreshActiveBackendLabel() {
   ));
 }
 
-function renderStorageTarget() {
+async function renderStorageTarget() {
   $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
+  renderStorageProviderVisibility(
+    await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS),
+    $("#remoteBackendTarget").value
+  );
 }
 
 function renderMigration(activeBackend, migrationState) {
@@ -587,7 +605,9 @@ function bindEvents() {
   $("#saveGoogleCredentials").addEventListener("click", (event) => runOptionsAction("save-google-credentials", saveGoogleCredentials, event.currentTarget));
   $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));
   $("#signOutButton").addEventListener("click", (event) => runOptionsAction("google-sign-out", signOutClicked, event.currentTarget));
-  $("#remoteBackendTarget").addEventListener("change", renderStorageTarget);
+  $("#remoteBackendTarget").addEventListener("change", () => {
+    void renderStorageTarget();
+  });
   $("#remoteBackendTarget").addEventListener("change", async () => renderMigration(
     await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS),
     await getStorageMigrationState()
