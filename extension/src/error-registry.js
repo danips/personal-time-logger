@@ -78,6 +78,10 @@ export const ERROR_REGISTRY = {
     retryable: true, status: "pending", title: "Spreadsheet append is ambiguous",
     detail: "A row with the same ID has different content.", recovery: "Open Reconcile and verify the conflicting entry."
   },
+  [ERROR_CODE.REMOTE_BACKEND_UNSUPPORTED]: {
+    retryable: false, status: "error", title: "Remote storage backend is unavailable",
+    detail: "The selected remote storage backend is not supported by this extension version.", recovery: "Select Google Sheets or update the extension before trying again."
+  },
   [ERROR_CODE.API_TIMEOUT]: {
     retryable: true, status: "pending", title: "Google request timed out",
     detail: "Google did not finish the request in time.", recovery: "Wait for the retry deadline, then sync again."

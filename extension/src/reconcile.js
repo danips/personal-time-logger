@@ -1,7 +1,7 @@
 import { getAllEntries, mutateEntryState, mutateSettings, StorageConflictError } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
-import { deleteRemoteRows, readRemoteSnapshot } from "./sheets.js";
+import { getActiveRemoteProvider } from "./remote-provider.js";
 import { nowIso, uuid } from "./time.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
@@ -16,6 +16,10 @@ export const STALE_RECONCILIATION_INTENTS_KEY = SETTING_KEY.STALE_RECONCILIATION
 export const RECONCILIATION_INTENT_PENDING = RECONCILIATION_INTENT_STATE.PENDING_REMOTE_PUSH;
 export const RECONCILIATION_INTENT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_STALE_RECONCILIATION_INTENTS = 20;
+
+async function activeProvider(provider) {
+  return provider || getActiveRemoteProvider();
+}
 
 export function entryFingerprint(entry) {
   return entryToRow(entry).join("\u0000");
@@ -211,10 +215,11 @@ export function compareEntries(localEntries, remoteEntries, duplicates = []) {
  * Reads both sides and compares them. Read-only: nothing is pushed, pulled, or
  * resolved until the user picks a side.
  */
-export async function loadReconciliation({ interactiveAuth = false } = {}) {
+export async function loadReconciliation({ interactiveAuth = false, provider } = {}) {
+  const remoteProvider = provider || await getActiveRemoteProvider();
   const [localEntries, snapshot] = await Promise.all([
     getAllEntries(),
-    readRemoteSnapshot({ interactiveAuth })
+    remoteProvider.readSnapshot({ interactiveAuth })
   ]);
 
   return {
@@ -230,9 +235,13 @@ export async function loadReconciliation({ interactiveAuth = false } = {}) {
  * duplicate row has no local counterpart to mark and therefore nothing for sync
  * to carry.
  */
-export async function deleteDuplicateRows(extraRows, { interactiveAuth = false } = {}) {
+export async function deleteDuplicateRows(extraRows, { interactiveAuth = false, provider } = {}) {
   if (!extraRows.length) return 0;
-  await deleteRemoteRows(extraRows, { interactiveAuth });
+  const remoteProvider = await activeProvider(provider);
+  await remoteProvider.deleteEntries(extraRows.map((row) => ({
+    id: row.id,
+    expectedRef: row.ref
+  })), { interactiveAuth });
   return extraRows.length;
 }
 
@@ -360,8 +369,9 @@ function normalizeBatchResolution(resolution) {
   return normalizeReconciliationCommand(resolution, { batch: true });
 }
 
-async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = false } = {}) {
-  const snapshot = await readRemoteSnapshot({ interactiveAuth });
+async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = false, provider } = {}) {
+  const remoteProvider = await activeProvider(provider);
+  const snapshot = await remoteProvider.readSnapshot({ interactiveAuth });
   const remoteById = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
   for (const resolution of resolutions) {
     const current = remoteById.get(resolution.id) || null;
@@ -377,7 +387,7 @@ async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = fal
  * still change after the snapshot, so the returned result is explicit per id;
  * the forced sync that follows remains responsible for the remote commit.
  */
-export async function resolveReconciliationBatch(items, { interactiveAuth = false } = {}) {
+export async function resolveReconciliationBatch(items, { interactiveAuth = false, provider } = {}) {
   const resolutions = items.map(normalizeBatchResolution);
   if (!resolutions.length) return { results: [] };
   const ids = new Set();
@@ -386,7 +396,7 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
     ids.add(resolution.id);
   }
 
-  const remoteById = await verifyBatchRemoteResolutions(resolutions, { interactiveAuth });
+  const remoteById = await verifyBatchRemoteResolutions(resolutions, { interactiveAuth, provider });
   const results = await mutateEntryState({
     entryIds: ids,
     settingKeys: [RECONCILIATION_INTENTS_KEY]
@@ -412,8 +422,9 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
   return { results };
 }
 
-async function verifyReconciliationRemote(command, { interactiveAuth = false } = {}) {
-  const snapshot = await readRemoteSnapshot({ interactiveAuth });
+async function verifyReconciliationRemote(command, { interactiveAuth = false, provider } = {}) {
+  const remoteProvider = await activeProvider(provider);
+  const snapshot = await remoteProvider.readSnapshot({ interactiveAuth });
   const current = snapshot.entries.find((entry) => entry.id === command.id) || null;
   assertRemoteExpectation(current, command);
   return current;
@@ -423,7 +434,11 @@ async function verifyReconciliationRemote(command, { interactiveAuth = false } =
  * Overwrites the local copy with the remote row and marks it clean, which is also
  * how a remote-only row is imported.
  */
-export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedRemoteFingerprint = entryFingerprint(remoteEntry) } = {}) {
+export async function keepRemote(remoteEntry, {
+  expectedLocalRevision,
+  expectedRemoteFingerprint = entryFingerprint(remoteEntry),
+  provider
+} = {}) {
   const command = normalizeReconciliationCommand({
     action: "keepRemote",
     id: remoteEntry.id,
@@ -431,7 +446,7 @@ export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedR
     expectedLocalRevision,
     expectedRemoteFingerprint
   });
-  const verifiedRemote = await verifyReconciliationRemote(command);
+  const verifiedRemote = await verifyReconciliationRemote(command, { provider });
   const entry = await mutateEntryState({
     entryIds: [command.id],
     settingKeys: [RECONCILIATION_INTENTS_KEY]
@@ -446,7 +461,11 @@ export async function keepRemote(remoteEntry, { expectedLocalRevision, expectedR
  * Removes an entry from both sides by transactionally creating a local tombstone
  * that sync then pushes. A remote-only row is never persisted as a clean import.
  */
-export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRevision, expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "" } = {}) {
+export async function deleteEverywhere(id, remoteEntry = null, {
+  expectedLocalRevision,
+  expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "",
+  provider
+} = {}) {
   const command = normalizeReconciliationCommand({
     action: "deleteEverywhere",
     id,
@@ -454,7 +473,7 @@ export async function deleteEverywhere(id, remoteEntry = null, { expectedLocalRe
     expectedLocalRevision,
     expectedRemoteFingerprint
   });
-  const verifiedRemote = await verifyReconciliationRemote(command);
+  const verifiedRemote = await verifyReconciliationRemote(command, { provider });
   const entry = await mutateEntryState({
     entryIds: [command.id],
     settingKeys: [RECONCILIATION_INTENTS_KEY]

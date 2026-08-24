@@ -20,6 +20,8 @@ export const SETTING_KEY = Object.freeze({
   GOOGLE_OAUTH_CLIENT_SECRET: "google_oauth_client_secret",
   GOOGLE_TOKEN_DATA: "token_data",
   RECONCILIATION_INTENTS: "reconciliation_intents",
+  REMOTE_BACKEND: "remote_backend",
+  REMOTE_CHANGE_TOKEN: "remote_change_token",
   REMOTE_MODIFIED_TIME: "remote_modified_time",
   SPREADSHEET_ID: "spreadsheet_id",
   SPREADSHEET_PROVISION_PENDING: "spreadsheet_provision_pending",

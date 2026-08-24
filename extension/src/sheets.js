@@ -710,6 +710,7 @@ export function rowsToEntries(rows) {
     if (records.length > 1) {
       const rows = records.map(({ rowIndex }) => ({
         id: winner.entry.id,
+        entry: records.find((record) => record.rowIndex === rowIndex)?.entry || winner.entry,
         rowIndex,
         expectedFingerprint: rowFingerprint(cells[rowIndex - 1])
       }));
