@@ -4,14 +4,20 @@ import { describe, it } from "node:test";
 import { storageUiState } from "../extension/src/options-storage-ui.js";
 
 describe("storage UI state", () => {
-  it("keeps Google configuration relevant while Google is active", () => {
-    assert.deepEqual(storageUiState({
-      activeProviderId: "google-sheets",
-      targetProviderId: "mysql"
-    }), {
-      showGoogleAccount: true,
-      showSpreadsheet: true
-    });
+  it("matches the active/target provider visibility matrix", () => {
+    const cases = [
+      ["google-sheets", "google-sheets", true],
+      ["google-sheets", "mysql", true],
+      ["mysql", "mysql", false],
+      ["mysql", "google-sheets", true]
+    ];
+
+    for (const [activeProviderId, targetProviderId, visible] of cases) {
+      assert.deepEqual(storageUiState({ activeProviderId, targetProviderId }), {
+        showGoogleAccount: visible,
+        showSpreadsheet: visible
+      });
+    }
   });
 
   it("does not mutate Google settings while deciding visibility", () => {
