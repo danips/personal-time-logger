@@ -352,12 +352,17 @@ async function migrateStorageClicked() {
   if (target === active) throw Object.assign(new Error("Choose a different target backend."), { code: "MIGRATION_SOURCE_UNSAFE" });
   if (globalThis.confirm && !globalThis.confirm("Migration pauses sync and switches this profile only after full verification. Close other devices and stop editing timers now. Continue?")) return false;
   $("#migrationStatus").textContent = "Migration starting...";
-  await migrateStorage(target, {
-    interactiveAuth: true,
-    onProgress(state) {
-      $("#migrationStatus").textContent = `Migration ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
-    }
-  });
+  try {
+    await migrateStorage(target, {
+      interactiveAuth: true,
+      onProgress(state) {
+        $("#migrationStatus").textContent = `Migration ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
+      }
+    });
+  } catch (error) {
+    $("#migrationStatus").textContent = formatError(error);
+    throw error;
+  }
   setStatus("Storage migration completed");
   return true;
 }
@@ -571,7 +576,7 @@ function bindEvents() {
   ));
   $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget, { refreshOnError: false }));
   $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget, { refreshOnError: false }));
-  $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget));
+  $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget, { refreshOnError: false }));
 
 }
 
