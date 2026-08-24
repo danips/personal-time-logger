@@ -10,6 +10,10 @@ const SCHEMA_VERSION = 1;
 const API_TIMEOUT_MS = 30_000;
 const ENTRY_REF_KIND = "mysql-row";
 const CONFIG_REF_KIND = "mysql-config-row";
+const PERSISTED_ENTRY_FIELDS = [
+  "id", "project", "task", "description", "start_at", "end_at", "duration_seconds",
+  "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"
+];
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 
 function codedError(code, message, cause) {
@@ -185,6 +189,10 @@ function ref(kind, version) {
   return { kind, version: parseVersion(version) };
 }
 
+function persistedEntry(entry) {
+  return Object.fromEntries(PERSISTED_ENTRY_FIELDS.map((field) => [field, entry[field]]));
+}
+
 function mapSnapshot(data) {
   if (!Array.isArray(data.entries) || !Array.isArray(data.config)) {
     throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The MySQL API snapshot shape is invalid.");
@@ -251,7 +259,7 @@ export const mysqlProvider = Object.freeze({
 
   async appendEntries(entries, options = {}) {
     if (!entries.length) return [];
-    const data = await (await configuredClient(options)).append(entries);
+    const data = await (await configuredClient(options)).append(entries.map(persistedEntry));
     if (!Array.isArray(data.entries)) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The MySQL API append response is invalid.");
     return data.entries.map((record) => ({ id: String(record.id), ref: ref(ENTRY_REF_KIND, record.version) }));
   },
@@ -259,7 +267,7 @@ export const mysqlProvider = Object.freeze({
   async updateEntries(updates, options = {}) {
     if (!updates.length) return;
     const payload = updates.map(({ entry, expectedRef }) => ({
-      entry,
+      entry: persistedEntry(entry),
       expectedVersion: parseVersion(expectedRef?.version)
     }));
     await (await configuredClient(options)).update(payload);

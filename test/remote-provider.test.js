@@ -124,6 +124,24 @@ describe("MySQL API client", () => {
       return true;
     });
   });
+
+  it("strips local-only entry fields before sending mutations", async () => {
+    const localEntry = fixture({ dirty: true, last_sync_at: "2026-08-08T10:00:00.000Z", sync_error: "old failure" });
+    let requestBody;
+    await mysql.mysqlProvider.appendEntries([localEntry], {
+      baseUrl: "https://time-api.cordoceo.com",
+      token: "test-secret-token",
+      platformApi,
+      fetchImpl: async (_url, options) => {
+        requestBody = JSON.parse(options.body);
+        return { ok: true, status: 200, async text() { return JSON.stringify({ entries: [] }); } };
+      }
+    });
+    assert.equal(requestBody.entries[0].dirty, undefined);
+    assert.equal(requestBody.entries[0].last_sync_at, undefined);
+    assert.equal(requestBody.entries[0].sync_error, undefined);
+    assert.equal(Object.keys(requestBody.entries[0]).length, 14);
+  });
 });
 
 describe("Google provider adapter", () => {
