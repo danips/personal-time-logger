@@ -634,7 +634,7 @@ try {
   await webdriver(baseUrl, "DELETE", `/session/${sessionId}/window`);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/window`, { handle: windows.original });
 
-  console.log("Browser runtime smoke passed: page readiness, popup timer lifecycle/edit, calendar render, options save, and cross-context lock.");
+  console.log("Browser runtime smoke passed: page readiness, popup timer lifecycle/edit, calendar render, provider-aware settings, options save, and cross-context lock.");
 } finally {
   if (sessionId) await webdriver(baseUrl, "DELETE", `/session/${sessionId}`).catch(() => {});
   if (driver && !driver.killed) driver.kill("SIGTERM");
