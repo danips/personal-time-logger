@@ -243,6 +243,9 @@ function mapSnapshot(data) {
 export const mysqlProvider = Object.freeze({
   id: "mysql",
   label: "MySQL 8.4",
+  capabilities: Object.freeze({
+    duplicateRemoteRecords: false
+  }),
 
   async ensureReady(options = {}) {
     requireHealthCompatibility(await (await configuredClient(options)).health());

@@ -44,6 +44,12 @@ export async function getActiveRemoteProvider() {
   return getRemoteProvider(await getSetting(SETTING_KEY.REMOTE_BACKEND, ""));
 }
 
+export function getRemoteProviderCapabilities(provider) {
+  return Object.freeze({
+    duplicateRemoteRecords: provider?.capabilities?.duplicateRemoteRecords === true
+  });
+}
+
 export function registeredRemoteProviderIds() {
   return [...PROVIDERS.keys()];
 }

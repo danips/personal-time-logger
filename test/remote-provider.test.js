@@ -66,6 +66,18 @@ describe("remote provider selection", () => {
     assert.deepEqual(providers.registeredRemoteProviderIds(), ["google-sheets", "mysql"]);
     assert.equal(providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.MYSQL).id, "mysql");
   });
+
+  it("exposes duplicate-record capabilities with a safe default", () => {
+    assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("google-sheets")), {
+      duplicateRemoteRecords: true
+    });
+    assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("mysql")), {
+      duplicateRemoteRecords: false
+    });
+    assert.deepEqual(providers.getRemoteProviderCapabilities({ id: "future-provider" }), {
+      duplicateRemoteRecords: false
+    });
+  });
 });
 
 describe("MySQL API client", () => {

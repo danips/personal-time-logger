@@ -88,6 +88,9 @@ function mapSnapshot(snapshot) {
 export const googleSheetsProvider = Object.freeze({
   id: "google-sheets",
   label: "Google Sheets",
+  capabilities: Object.freeze({
+    duplicateRemoteRecords: true
+  }),
 
   async ensureReady({ interactiveAuth = false, lease, reseed } = {}) {
     const binding = await getSpreadsheetBinding();
