@@ -30,6 +30,22 @@ export const ERROR_REGISTRY = {
     retryable: false, status: "not configured", title: "MySQL API setup is incomplete",
     detail: "A MySQL API URL and token are required before this backend can be tested.", recovery: "Open Storage settings and enter both values."
   },
+  [ERROR_CODE.MIGRATION_IN_PROGRESS]: {
+    retryable: false, status: "migration active", title: "Storage migration is active",
+    detail: "Remote synchronization is paused while the storage migration completes.", recovery: "Wait for the migration to finish, then retry the action."
+  },
+  [ERROR_CODE.MIGRATION_SOURCE_UNSAFE]: {
+    retryable: false, status: "migration blocked", title: "Source storage needs attention",
+    detail: "The source contains quarantined records or unresolved reconciliation choices.", recovery: "Run sync and resolve every reconciliation issue before migrating."
+  },
+  [ERROR_CODE.MIGRATION_SOURCE_CHANGED]: {
+    retryable: true, status: "migration pending", title: "Source data changed during migration",
+    detail: "The migration detected a new local or remote change before switching backends.", recovery: "Close other devices or stop editing briefly, then resume migration."
+  },
+  [ERROR_CODE.MIGRATION_TARGET_CONFLICT]: {
+    retryable: false, status: "migration blocked", title: "Target storage is not empty",
+    detail: "The target contains data that cannot be proven to belong to this migration.", recovery: "Use an empty target or remove the unrelated target data before retrying."
+  },
   [ERROR_CODE.AUTH_REQUIRED]: {
     retryable: false, status: "not signed in", title: "Google sign-in is required",
     detail: "This device has no usable Google token.", recovery: "Open Options and sign in."

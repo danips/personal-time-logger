@@ -81,7 +81,10 @@
                 <option value="mysql">MySQL 8.4</option>
               </select>
             </label>
-            <p class="note">Choosing MySQL here only prepares and tests its connection. Existing data is not switched until the verified migration step is implemented.</p>
+            <p class="note">Choosing a backend here only prepares and tests it. Existing data is not switched until verified migration succeeds.</p>
+            <p class="note">Migration pauses synchronization, verifies every canonical entry and shared setting, and switches only after the target digest matches. Close other devices and do not edit timers until it finishes.</p>
+            <div class="actions"><button id="migrateStorage" type="button">Migrate data and switch backend</button></div>
+            <p id="migrationStatus" class="status" role="status" aria-live="polite"></p>
             <div id="mysqlStorageFields" hidden>
               <label for="mysqlApiBaseUrl">HTTPS API base URL<input id="mysqlApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://time-api.cordoceo.com"></label>
               <label for="mysqlApiToken">API token<input id="mysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>

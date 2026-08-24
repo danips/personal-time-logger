@@ -183,7 +183,7 @@ describe("provider boundary", () => {
     assert.match(options, /id="storage"/);
     assert.match(options, /id="testMysqlConnection"/);
     assert.match(optionsCode, /REMOTE_BACKEND_TARGET|remoteBackendTarget/);
-    assert.match(options, /not switched until the verified migration/i);
+    assert.match(options, /not switched until verified migration succeeds/i);
     assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
   });
 });

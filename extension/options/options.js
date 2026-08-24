@@ -14,6 +14,7 @@ import {
 import { syncNow } from "../src/sync.js";
 import { DEFAULT_MYSQL_API_BASE_URL, mysqlProvider, normalizeMysqlApiBaseUrl } from "../src/remote-mysql.js";
 import { REMOTE_PROVIDER_ID, decodeRemoteProviderId } from "../src/remote-provider.js";
+import { getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -280,12 +281,29 @@ function renderStorage(activeBackend) {
   $("#activeRemoteBackend").textContent = label;
   $("#remoteBackendTarget").value = active;
   $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
-  $("#google-account").hidden = active !== REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
   $("#spreadsheet").hidden = active !== REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
 }
 
 function renderStorageTarget() {
   $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
+}
+
+function renderMigration(activeBackend, migrationState) {
+  const target = $("#remoteBackendTarget").value;
+  const active = decodeRemoteProviderId(activeBackend);
+  const button = $("#migrateStorage");
+  const running = migrationState && !["complete", "failed"].includes(migrationState.phase);
+  button.hidden = !running && target === active;
+  button.textContent = running ? "Resume migration" : `Migrate data and switch to ${target === REMOTE_PROVIDER_ID.MYSQL ? "MySQL 8.4" : "Google Sheets"}`;
+  if (running) {
+    const entries = Number(migrationState.completed_entries || 0);
+    const total = Number(migrationState.total_entries || 0);
+    $("#migrationStatus").textContent = `Migration ${migrationState.phase}: ${entries}/${total} entries verified.`;
+  } else if (migrationState?.phase === "complete") {
+    $("#migrationStatus").textContent = "Migration completed and the new backend is active.";
+  } else {
+    $("#migrationStatus").textContent = "";
+  }
 }
 
 async function saveMysqlSettings() {
@@ -309,6 +327,22 @@ async function testMysqlConnection() {
   $("#mysqlConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, MySQL ${health.mysql}.`;
   setStatus("MySQL API connection verified");
   return false;
+}
+
+async function migrateStorageClicked() {
+  const target = decodeRemoteProviderId($("#remoteBackendTarget").value);
+  const active = decodeRemoteProviderId(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
+  if (target === active) throw Object.assign(new Error("Choose a different target backend."), { code: "MIGRATION_SOURCE_UNSAFE" });
+  if (globalThis.confirm && !globalThis.confirm("Migration pauses sync and switches this profile only after full verification. Close other devices and stop editing timers now. Continue?")) return false;
+  $("#migrationStatus").textContent = "Migration starting...";
+  await migrateStorage(target, {
+    interactiveAuth: true,
+    onProgress(state) {
+      $("#migrationStatus").textContent = `Migration ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
+    }
+  });
+  setStatus("Storage migration completed");
+  return true;
 }
 
 function renderSpreadsheet(spreadsheetId) {
@@ -353,7 +387,9 @@ async function refresh() {
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
-  renderStorage(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
+  const activeBackend = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
+  renderStorage(activeBackend);
+  renderMigration(activeBackend, await getStorageMigrationState());
   $("#mysqlApiBaseUrl").value = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
   $("#mysqlApiToken").value = await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
   renderSpreadsheet(await getSpreadsheetId());
@@ -512,8 +548,13 @@ function bindEvents() {
   $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));
   $("#signOutButton").addEventListener("click", (event) => runOptionsAction("google-sign-out", signOutClicked, event.currentTarget));
   $("#remoteBackendTarget").addEventListener("change", renderStorageTarget);
+  $("#remoteBackendTarget").addEventListener("change", async () => renderMigration(
+    await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS),
+    await getStorageMigrationState()
+  ));
   $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget));
   $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget));
+  $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget));
 
 }
 

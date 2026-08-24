@@ -59,6 +59,7 @@ const expectedFiles = [
   "src/remote-provider.js",
   "src/setting-keys.js",
   "src/sheets.js",
+  "src/storage-migration.js",
   "src/sync-request.js",
   "src/sync.js",
   "src/tempo.js",

@@ -57,11 +57,23 @@ function providerOrDefault(provider) {
   return provider || getRemoteProvider();
 }
 
+async function assertMigrationMaySync(migrationId = "") {
+  const state = await getSetting(SETTING_KEY.STORAGE_MIGRATION_STATE, null);
+  const active = state && typeof state === "object"
+    && state.phase && !["complete", "failed"].includes(state.phase);
+  if (active && state.migration_id !== migrationId) {
+    throw codedError(ERROR_CODE.MIGRATION_IN_PROGRESS, "Storage migration is active.");
+  }
+}
+
 function changeTokenSettingKey(provider) {
   return provider?.id === "mysql" ? MYSQL_REMOTE_CHANGE_TOKEN_KEY : REMOTE_CHANGE_TOKEN_KEY;
 }
 
 function syncRecovery(error) {
+  if (error?.code === ERROR_CODE.MIGRATION_IN_PROGRESS) {
+    return "Wait for the storage migration to finish, then retry sync.";
+  }
   if (["AUTH_REQUIRED", "AUTH_EXPIRED", "SCOPE_MISSING"].includes(error?.code)) {
     return "Open Options and sign in again.";
   }
@@ -595,9 +607,10 @@ async function syncConfig(remoteConfig, configRefs, { interactiveAuth, lease, pr
   return true;
 }
 
-async function runSyncCycle({ interactiveAuth, force }) {
+async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
   let phase = "preflight";
   let entryCount = 0;
+  await assertMigrationMaySync(migrationId);
   if (!platform.isOnline()) {
     const error = codedError("OFFLINE", "offline");
     const retryAt = await recordBackoff(error);
@@ -872,10 +885,10 @@ function startSyncDrain(options) {
   return cycle;
 }
 
-export function syncNow({ interactiveAuth = false, force = false } = {}) {
+export function syncNow({ interactiveAuth = false, force = false, migrationId = "" } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
   // while a user action is still syncing.
-  if (!syncDrain) return startSyncDrain({ interactiveAuth, force });
+  if (!syncDrain) return startSyncDrain({ interactiveAuth, force, migrationId });
 
   const stronger = force && !syncDrain.current.options.force
     || interactiveAuth && !syncDrain.current.options.interactiveAuth;
@@ -883,11 +896,12 @@ export function syncNow({ interactiveAuth = false, force = false } = {}) {
 
   const queued = syncDrain.queued || {
     deferred: deferred(),
-    options: { force: false, interactiveAuth: false }
+    options: { force: false, interactiveAuth: false, migrationId: "" }
   };
   queued.options = {
     force: force || queued.options.force,
-    interactiveAuth: interactiveAuth || queued.options.interactiveAuth
+    interactiveAuth: interactiveAuth || queued.options.interactiveAuth,
+    migrationId: migrationId || queued.options.migrationId
   };
   syncDrain.queued = queued;
   return queued.deferred.promise;
