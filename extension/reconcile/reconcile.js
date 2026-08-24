@@ -224,7 +224,7 @@ function divergenceCount() {
   return report.different.length
     + report.localOnly.length
     + report.remoteOnly.length
-    + report.duplicateRowCount;
+    + (report.provider?.capabilities?.duplicateRemoteRecords === true ? report.duplicateRowCount : 0);
 }
 
 function render() {
@@ -239,7 +239,10 @@ function render() {
   $("#inSyncCount").textContent = String(report.inSync);
   $("#divergenceCount").textContent = String(divergenceCount());
 
-  $("#duplicateHeading").textContent = `Duplicate rows in the spreadsheet (${report.duplicates.length})`;
+  const supportsDuplicateRecords = report.provider?.capabilities?.duplicateRemoteRecords === true;
+  $("#duplicateSummaryMetric").hidden = !supportsDuplicateRecords;
+  $("#duplicateSection").hidden = !supportsDuplicateRecords;
+  $("#duplicateHeading").textContent = `Duplicate remote records (${report.duplicates.length})`;
   $("#duplicateList").replaceChildren(...renderDuplicates(report.duplicates));
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
