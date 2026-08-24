@@ -12,7 +12,8 @@ import {
   spreadsheetUrl
 } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
-import { DEFAULT_MYSQL_API_BASE_URL, mysqlProvider, normalizeMysqlApiBaseUrl } from "../src/remote-mysql.js";
+import { DEFAULT_MYSQL_API_BASE_URL, mysqlHostPermission, mysqlProvider, normalizeMysqlApiBaseUrl } from "../src/remote-mysql.js";
+import { platform } from "../src/platform.js";
 import { REMOTE_PROVIDER_ID, decodeRemoteProviderId } from "../src/remote-provider.js";
 import { getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
@@ -324,8 +325,22 @@ async function saveMysqlSettings() {
 async function testMysqlConnection() {
   const baseUrl = normalizeMysqlApiBaseUrl($("#mysqlApiBaseUrl").value);
   const token = $("#mysqlApiToken").value.trim();
+  if (!token) throw Object.assign(new Error("Enter the MySQL API token."), { code: "MYSQL_CONFIG_MISSING" });
+  const permissionRequest = platform.requestOptionalHostPermission(mysqlHostPermission(baseUrl));
   $("#mysqlConnectionStatus").textContent = "Requesting the exact API host permission...";
-  const health = await mysqlProvider.testConnection({ baseUrl, token, requestPermission: true });
+  let permissionGranted;
+  try {
+    permissionGranted = await Promise.race([
+      permissionRequest,
+      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Firefox did not answer the host permission request."), { code: "REMOTE_PERMISSION" })), 10_000))
+    ]);
+  } catch (error) {
+    if (error?.code) throw error;
+    throw Object.assign(new Error("Firefox could not grant the MySQL API host permission."), { code: "REMOTE_PERMISSION", cause: error });
+  }
+  if (!permissionGranted) throw Object.assign(new Error("Firefox did not grant the MySQL API host permission."), { code: "REMOTE_PERMISSION" });
+  $("#mysqlConnectionStatus").textContent = "Calling the MySQL API health endpoint...";
+  const health = await mysqlProvider.testConnection({ baseUrl, token, requestPermission: false });
   $("#mysqlConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, MySQL ${health.mysql}.`;
   setStatus("MySQL API connection verified");
   return false;
