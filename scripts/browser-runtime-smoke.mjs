@@ -310,6 +310,95 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
   }
 }
 
+async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
+  const setBackend = async (backend) => {
+    const result = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+      script: `
+        const done = arguments[arguments.length - 1];
+        import(browser.runtime.getURL("src/db.js"))
+          .then((db) => db.setSetting("remote_backend", ${JSON.stringify(backend)}))
+          .then(() => done(true), () => done(false));
+      `,
+      args: []
+    });
+    if (!result) throw new Error(`Could not set browser-smoke backend to ${backend}.`);
+  };
+
+  await setBackend("mysql");
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#google-account` });
+  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav", "#google-account"]);
+  const hiddenMysqlState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `return {
+      active: document.querySelector("#activeRemoteBackend")?.textContent,
+      hash: window.location.hash,
+      accountNavHidden: document.querySelector("#googleAccountNav")?.hidden,
+      accountHidden: document.querySelector("#google-account")?.hidden,
+      spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden,
+      spreadsheetHidden: document.querySelector("#spreadsheet")?.hidden
+    };`,
+    args: []
+  });
+  if (hiddenMysqlState.active !== "MySQL 8.4"
+    || hiddenMysqlState.hash !== "#storage"
+    || !hiddenMysqlState.accountNavHidden
+    || !hiddenMysqlState.accountHidden
+    || !hiddenMysqlState.spreadsheetNavHidden
+    || !hiddenMysqlState.spreadsheetHidden) {
+    throw new Error(`MySQL settings did not hide Google controls safely: ${JSON.stringify(hiddenMysqlState)}`);
+  }
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const target = document.querySelector("#remoteBackendTarget");
+      target.value = "google-sheets";
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Google migration-target settings", `
+    return document.querySelector("#activeRemoteBackend")?.textContent === "MySQL 8.4"
+      && !document.querySelector("#googleAccountNav")?.hidden
+      && !document.querySelector("#google-account")?.hidden
+      && !document.querySelector("#spreadsheetNav")?.hidden
+      && !document.querySelector("#spreadsheet")?.hidden;
+  `);
+
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const target = document.querySelector("#remoteBackendTarget");
+      target.value = "mysql";
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "MySQL migration-target settings", `
+    return document.querySelector("#googleAccountNav")?.hidden
+      && document.querySelector("#google-account")?.hidden;
+  `);
+
+  await setBackend("google-sheets");
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html` });
+  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav"]);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const target = document.querySelector("#remoteBackendTarget");
+      target.value = "mysql";
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    `,
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Google-active settings", `
+    return document.querySelector("#activeRemoteBackend")?.textContent === "Google Sheets"
+      && !document.querySelector("#googleAccountNav")?.hidden
+      && !document.querySelector("#spreadsheetNav")?.hidden;
+  `);
+
+  await setBackend("google-sheets");
+}
+
 async function exercisePopupHistoryPagination(baseUrl, sessionId, origin) {
   const seeded = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
     script: `
@@ -482,6 +571,7 @@ try {
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await exercisePopupTimer(baseUrl, sessionId);
   await exerciseCalendarAndOptions(baseUrl, sessionId, origin);
+  await exerciseProviderAwareSettings(baseUrl, sessionId, origin);
   await exercisePopupHistoryPagination(baseUrl, sessionId, origin);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
