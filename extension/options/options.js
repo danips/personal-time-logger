@@ -12,6 +12,8 @@ import {
   spreadsheetUrl
 } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
+import { DEFAULT_MYSQL_API_BASE_URL, mysqlProvider, normalizeMysqlApiBaseUrl } from "../src/remote-mysql.js";
+import { REMOTE_PROVIDER_ID, decodeRemoteProviderId } from "../src/remote-provider.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -272,6 +274,43 @@ async function saveGoogleCredentials() {
     : "Google credentials saved to Firefox Sync");
 }
 
+function renderStorage(activeBackend) {
+  const active = decodeRemoteProviderId(activeBackend);
+  const label = active === REMOTE_PROVIDER_ID.MYSQL ? "MySQL 8.4" : "Google Sheets";
+  $("#activeRemoteBackend").textContent = label;
+  $("#remoteBackendTarget").value = active;
+  $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
+  $("#google-account").hidden = active !== REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+  $("#spreadsheet").hidden = active !== REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+}
+
+function renderStorageTarget() {
+  $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
+}
+
+async function saveMysqlSettings() {
+  const baseUrl = normalizeMysqlApiBaseUrl($("#mysqlApiBaseUrl").value);
+  const token = $("#mysqlApiToken").value.trim();
+  if (!token) throw Object.assign(new Error("Enter the MySQL API token."), { code: "MYSQL_CONFIG_MISSING" });
+  await mutateSettings([SETTING_KEY.MYSQL_API_BASE_URL, SETTING_KEY.MYSQL_API_TOKEN], (settings) => {
+    settings.set(SETTING_KEY.MYSQL_API_BASE_URL, baseUrl);
+    settings.set(SETTING_KEY.MYSQL_API_TOKEN, token);
+  });
+  $("#mysqlApiBaseUrl").value = baseUrl;
+  setStatus("MySQL API settings saved on this device");
+  return false;
+}
+
+async function testMysqlConnection() {
+  const baseUrl = normalizeMysqlApiBaseUrl($("#mysqlApiBaseUrl").value);
+  const token = $("#mysqlApiToken").value.trim();
+  $("#mysqlConnectionStatus").textContent = "Requesting the exact API host permission...";
+  const health = await mysqlProvider.testConnection({ baseUrl, token, requestPermission: true });
+  $("#mysqlConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, MySQL ${health.mysql}.`;
+  setStatus("MySQL API connection verified");
+  return false;
+}
+
 function renderSpreadsheet(spreadsheetId) {
   const link = $("#spreadsheetLink");
   $("#spreadsheetId").textContent = spreadsheetId || "not set";
@@ -314,6 +353,9 @@ async function refresh() {
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
+  renderStorage(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
+  $("#mysqlApiBaseUrl").value = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
+  $("#mysqlApiToken").value = await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
   renderSpreadsheet(await getSpreadsheetId());
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
@@ -469,6 +511,9 @@ function bindEvents() {
   $("#saveGoogleCredentials").addEventListener("click", (event) => runOptionsAction("save-google-credentials", saveGoogleCredentials, event.currentTarget));
   $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));
   $("#signOutButton").addEventListener("click", (event) => runOptionsAction("google-sign-out", signOutClicked, event.currentTarget));
+  $("#remoteBackendTarget").addEventListener("change", renderStorageTarget);
+  $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget));
+  $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget));
 
 }
 

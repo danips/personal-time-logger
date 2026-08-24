@@ -27,6 +27,7 @@ globalThis.browser = {
 const db = await import("../extension/src/db.js");
 const providers = await import("../extension/src/remote-provider.js");
 const googleProvider = await import("../extension/src/remote-google-sheets.js");
+const mysql = await import("../extension/src/remote-mysql.js");
 
 const fixture = (over = {}) => normalizeEntry({
   id: "provider-entry",
@@ -60,13 +61,68 @@ describe("remote provider selection", () => {
     );
   });
 
-  it("keeps the stable MySQL ID reserved without pretending it is available", () => {
+  it("registers the stable MySQL provider ID", () => {
     assert.equal(providers.REMOTE_PROVIDER_ID.MYSQL, "mysql");
-    assert.deepEqual(providers.registeredRemoteProviderIds(), ["google-sheets"]);
-    assert.throws(
-      () => providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.MYSQL),
-      (error) => error.code === "REMOTE_BACKEND_UNSUPPORTED"
-    );
+    assert.deepEqual(providers.registeredRemoteProviderIds(), ["google-sheets", "mysql"]);
+    assert.equal(providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.MYSQL).id, "mysql");
+  });
+});
+
+describe("MySQL API client", () => {
+  const platformApi = {
+    isOnline: () => true,
+    async hasOptionalHostPermission() { return true; },
+    async requestOptionalHostPermission() { return true; }
+  };
+
+  it("normalizes the configured URL and rejects unsafe production URLs", () => {
+    assert.equal(mysql.normalizeMysqlApiBaseUrl("https://time-api.cordoceo.com///"), "https://time-api.cordoceo.com");
+    assert.throws(() => mysql.normalizeMysqlApiBaseUrl("http://localhost:8080"), (error) => error.code === "MYSQL_CONFIG_INVALID");
+    assert.throws(() => mysql.normalizeMysqlApiBaseUrl("https://user:pass@example.invalid"), (error) => error.code === "MYSQL_CONFIG_INVALID");
+  });
+
+  it("requires a local token before making a request and sends it only as bearer auth", async () => {
+    let calls = 0;
+    const missing = mysql.createMysqlApiClient({
+      baseUrl: "https://time-api.cordoceo.com",
+      token: "",
+      platformApi,
+      fetchImpl: async () => { calls += 1; return null; }
+    });
+    await assert.rejects(() => missing.health(), (error) => error.code === "MYSQL_CONFIG_MISSING");
+    assert.equal(calls, 0);
+
+    let request;
+    const client = mysql.createMysqlApiClient({
+      baseUrl: "https://time-api.cordoceo.com",
+      token: "test-secret-token",
+      platformApi,
+      fetchImpl: async (url, options) => {
+        request = { url, options };
+        return { ok: true, status: 200, async text() { return JSON.stringify({ ok: true, service: "personal-time-logger", apiVersion: 1, schemaVersion: 1, mysql: "8.4" }); } };
+      }
+    });
+    await client.health();
+    assert.equal(request.url, "https://time-api.cordoceo.com/v1/health");
+    assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
+  });
+
+  it("maps stale API responses without exposing token or server text", async () => {
+    const client = mysql.createMysqlApiClient({
+      baseUrl: "https://time-api.cordoceo.com",
+      token: "secret-token-that-must-not-appear",
+      platformApi,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 409,
+        async text() { return JSON.stringify({ error: { code: "REMOTE_VERSION_STALE", message: "secret-token-that-must-not-appear" } }); }
+      })
+    });
+    await assert.rejects(() => client.changeToken(), (error) => {
+      assert.equal(error.code, "REMOTE_VERSION_STALE");
+      assert.equal(error.message.includes("secret-token"), false);
+      return true;
+    });
   });
 });
 
@@ -118,5 +174,16 @@ describe("provider boundary", () => {
     assert.doesNotMatch(reconcile, /from ["']\.\/sheets\.js["']/);
     assert.match(sync, /getActiveRemoteProvider/);
     assert.match(reconcile, /getActiveRemoteProvider/);
+  });
+
+  it("exposes the safe Storage preparation UI and exact API host permission", () => {
+    const options = readFileSync(join(process.cwd(), "extension/options/options.html"), "utf8");
+    const optionsCode = readFileSync(join(process.cwd(), "extension/options/options.js"), "utf8");
+    const manifest = JSON.parse(readFileSync(join(process.cwd(), "extension/manifest.json"), "utf8"));
+    assert.match(options, /id="storage"/);
+    assert.match(options, /id="testMysqlConnection"/);
+    assert.match(optionsCode, /REMOTE_BACKEND_TARGET|remoteBackendTarget/);
+    assert.match(options, /not switched until the verified migration/i);
+    assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
   });
 });

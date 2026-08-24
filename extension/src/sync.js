@@ -20,6 +20,7 @@ const SYNC_LOCK_KEY = "sync_lock";
 const SYNC_LOCK_TTL_MS = 120000;
 const REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.REMOTE_CHANGE_TOKEN;
 const LEGACY_REMOTE_MODIFIED_KEY = SETTING_KEY.REMOTE_MODIFIED_TIME;
+const MYSQL_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN;
 const MULTIPLIER_KEY = SETTING_KEY.DURATION_MULTIPLIER;
 const MULTIPLIER_UPDATED_KEY = SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT;
 const MULTIPLIER_SYNCED_KEY = SETTING_KEY.DURATION_MULTIPLIER_SYNCED_AT;
@@ -56,9 +57,22 @@ function providerOrDefault(provider) {
   return provider || getRemoteProvider();
 }
 
+function changeTokenSettingKey(provider) {
+  return provider?.id === "mysql" ? MYSQL_REMOTE_CHANGE_TOKEN_KEY : REMOTE_CHANGE_TOKEN_KEY;
+}
+
 function syncRecovery(error) {
   if (["AUTH_REQUIRED", "AUTH_EXPIRED", "SCOPE_MISSING"].includes(error?.code)) {
     return "Open Options and sign in again.";
+  }
+  if ([
+    ERROR_CODE.MYSQL_CONFIG_INVALID,
+    ERROR_CODE.MYSQL_CONFIG_MISSING,
+    ERROR_CODE.REMOTE_AUTH_REQUIRED,
+    ERROR_CODE.REMOTE_PERMISSION,
+    ERROR_CODE.REMOTE_API_INCOMPATIBLE
+  ].includes(error?.code)) {
+    return "Open Options Storage settings and verify the MySQL API URL, token, and host permission.";
   }
   if (["SHEET_MISSING", "SPREADSHEET_MISSING", "SHEET_SCHEMA_UNSUPPORTED"].includes(error?.code)) {
     return "Open Options to reconnect or replace the spreadsheet.";
@@ -470,6 +484,7 @@ export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId, pro
   const reseeded = await mutateAllLocalState([
     RECONCILIATION_INTENTS_KEY,
     REMOTE_CHANGE_TOKEN_KEY,
+    MYSQL_REMOTE_CHANGE_TOKEN_KEY,
     LEGACY_REMOTE_MODIFIED_KEY,
     ...(spreadsheetId ? [SETTING_KEY.SPREADSHEET_ID] : [])
   ], ({ entries, settings }) => {
@@ -488,6 +503,7 @@ export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId, pro
     // anything about a replacement sheet, so discard them with the reseed.
     settings.set(RECONCILIATION_INTENTS_KEY, []);
     settings.set(REMOTE_CHANGE_TOKEN_KEY, "");
+    settings.set(MYSQL_REMOTE_CHANGE_TOKEN_KEY, "");
     settings.set(LEGACY_REMOTE_MODIFIED_KEY, "");
     remoteProvider.applyReseedSettings?.(settings, spreadsheetId);
     return applied;
@@ -625,6 +641,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
 
   try {
     const provider = await getActiveRemoteProvider();
+    const changeTokenKey = changeTokenSettingKey(provider);
     phase = "read_local";
     await lease.assert();
     const local = localState(await getAllEntries());
@@ -675,8 +692,10 @@ async function runSyncCycle({ interactiveAuth, force }) {
       }
       const lastSeenModified = String(
         await getSetting(
-          REMOTE_CHANGE_TOKEN_KEY,
-          await getSetting(LEGACY_REMOTE_MODIFIED_KEY, "")
+          changeTokenKey,
+          changeTokenKey === REMOTE_CHANGE_TOKEN_KEY
+            ? await getSetting(LEGACY_REMOTE_MODIFIED_KEY, "")
+            : ""
         ) || ""
       );
       if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
@@ -751,9 +770,9 @@ async function runSyncCycle({ interactiveAuth, force }) {
       ? await provider.getChangeToken({ interactiveAuth })
       : modifiedTime;
     await lease.assert();
-    await setSetting(REMOTE_CHANGE_TOKEN_KEY, nextModified || "");
+    await setSetting(changeTokenKey, nextModified || "");
     // Preserve the old marker for installations upgraded during this refactor.
-    await setSetting(LEGACY_REMOTE_MODIFIED_KEY, nextModified || "");
+    if (changeTokenKey === REMOTE_CHANGE_TOKEN_KEY) await setSetting(LEGACY_REMOTE_MODIFIED_KEY, nextModified || "");
 
     phase = "complete";
     const changed = wroteRemotely
@@ -788,6 +807,7 @@ async function runSyncCycle({ interactiveAuth, force }) {
  */
 export async function clearRemoteReadMarker() {
   await setSetting(REMOTE_CHANGE_TOKEN_KEY, "");
+  await setSetting(MYSQL_REMOTE_CHANGE_TOKEN_KEY, "");
   await setSetting(LEGACY_REMOTE_MODIFIED_KEY, "");
 }
 

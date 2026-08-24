@@ -1,6 +1,7 @@
 import { getSetting } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { googleSheetsProvider } from "./remote-google-sheets.js";
+import { mysqlProvider } from "./remote-mysql.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 export const REMOTE_PROVIDER_ID = Object.freeze({
@@ -9,7 +10,8 @@ export const REMOTE_PROVIDER_ID = Object.freeze({
 });
 
 const PROVIDERS = new Map([
-  [REMOTE_PROVIDER_ID.GOOGLE_SHEETS, googleSheetsProvider]
+  [REMOTE_PROVIDER_ID.GOOGLE_SHEETS, googleSheetsProvider],
+  [REMOTE_PROVIDER_ID.MYSQL, mysqlProvider]
 ]);
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 

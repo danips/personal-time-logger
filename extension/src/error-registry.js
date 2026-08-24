@@ -22,6 +22,14 @@ export const ERROR_REGISTRY = {
     retryable: true, status: "error", title: "Google credentials were not saved",
     detail: "Synchronized extension storage rejected the change.", recovery: "Retry saving in Options. Sign in again if prompted."
   },
+  [ERROR_CODE.MYSQL_CONFIG_INVALID]: {
+    retryable: false, status: "error", title: "MySQL API URL is invalid",
+    detail: "The API URL must be an HTTPS origin without credentials, a query, or a fragment.", recovery: "Check Storage settings and save the HTTPS API URL again."
+  },
+  [ERROR_CODE.MYSQL_CONFIG_MISSING]: {
+    retryable: false, status: "not configured", title: "MySQL API setup is incomplete",
+    detail: "A MySQL API URL and token are required before this backend can be tested.", recovery: "Open Storage settings and enter both values."
+  },
   [ERROR_CODE.AUTH_REQUIRED]: {
     retryable: false, status: "not signed in", title: "Google sign-in is required",
     detail: "This device has no usable Google token.", recovery: "Open Options and sign in."
@@ -81,6 +89,22 @@ export const ERROR_REGISTRY = {
   [ERROR_CODE.REMOTE_BACKEND_UNSUPPORTED]: {
     retryable: false, status: "error", title: "Remote storage backend is unavailable",
     detail: "The selected remote storage backend is not supported by this extension version.", recovery: "Select Google Sheets or update the extension before trying again."
+  },
+  [ERROR_CODE.REMOTE_API_INCOMPATIBLE]: {
+    retryable: false, status: "error", title: "Remote API is incompatible",
+    detail: "The configured remote API does not provide the required Personal Time Logger API contract.", recovery: "Check the API URL and server deployment before retrying."
+  },
+  [ERROR_CODE.REMOTE_AUTH_REQUIRED]: {
+    retryable: false, status: "not authorized", title: "MySQL API authorization is required",
+    detail: "The remote API rejected the configured token.", recovery: "Open Storage settings and save a valid API token."
+  },
+  [ERROR_CODE.REMOTE_PERMISSION]: {
+    retryable: false, status: "permission missing", title: "Remote API permission is missing",
+    detail: "Firefox did not grant access to the configured remote API origin.", recovery: "Use Test connection and approve the exact API host permission."
+  },
+  [ERROR_CODE.REMOTE_VERSION_STALE]: {
+    retryable: true, status: "pending", title: "Remote entry changed during sync",
+    detail: "The remote record changed before this operation could be applied.", recovery: "Sync again or refresh Reconcile before choosing a resolution."
   },
   [ERROR_CODE.API_TIMEOUT]: {
     retryable: true, status: "pending", title: "Google request timed out",

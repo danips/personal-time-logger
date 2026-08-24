@@ -29,6 +29,7 @@
         <nav class="section-nav" aria-label="Options sections">
           <p class="section-nav-label">Sections</p>
           <a href="#appearance">Appearance</a>
+          <a href="#storage">Storage</a>
           <a href="#google-account">Google Account</a>
           <a href="#spreadsheet">Spreadsheet</a>
           <a href="#chatgpt-usage">ChatGPT Usage</a>
@@ -61,6 +62,32 @@
             </div>
             <div id="themePreview" class="theme-preview" aria-hidden="true">
               <span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </section>
+
+          <section id="storage" class="panel options-section" aria-labelledby="storageHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="storageHeading">Storage</h2>
+                <p class="note">IndexedDB remains the local source of truth. This setting controls the one remote backend used for synchronization.</p>
+              </div>
+            </div>
+            <dl>
+              <div><dt>Active remote backend</dt><dd id="activeRemoteBackend">Google Sheets</dd></div>
+            </dl>
+            <label for="remoteBackendTarget">Backend to prepare
+              <select id="remoteBackendTarget">
+                <option value="google-sheets">Google Sheets</option>
+                <option value="mysql">MySQL 8.4</option>
+              </select>
+            </label>
+            <p class="note">Choosing MySQL here only prepares and tests its connection. Existing data is not switched until the verified migration step is implemented.</p>
+            <div id="mysqlStorageFields" hidden>
+              <label for="mysqlApiBaseUrl">HTTPS API base URL<input id="mysqlApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://time-api.cordoceo.com"></label>
+              <label for="mysqlApiToken">API token<input id="mysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
+              <p class="note">The token stays in this Firefox profile and is sent only as a bearer token to the configured API origin. It is not put in Firefox Sync.</p>
+              <div class="actions"><button id="testMysqlConnection" type="button">Test connection</button><button id="saveMysqlSettings" type="button">Save MySQL settings</button></div>
+              <p id="mysqlConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
           </section>
 
