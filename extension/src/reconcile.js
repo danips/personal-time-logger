@@ -277,7 +277,7 @@ function assertLocalExpectation(existing, command) {
 function assertRemoteExpectation(current, command) {
   if (command.remote.kind === "present") {
     if (!current || entryFingerprint(current) !== command.remote.fingerprint) {
-      throw new StorageConflictError("Spreadsheet row changed since reconciliation", {
+      throw new StorageConflictError("Remote entry changed since reconciliation", {
         id: command.id,
         reason: "remote_fingerprint_mismatch"
       });
@@ -285,7 +285,7 @@ function assertRemoteExpectation(current, command) {
     return;
   }
   if (current) {
-    throw new StorageConflictError("Spreadsheet row appeared since reconciliation", {
+    throw new StorageConflictError("Remote entry appeared since reconciliation", {
       id: command.id,
       reason: "remote_unexpected"
     });
