@@ -1,5 +1,6 @@
 config.js
 config.json
+server/mysql-api/config.php
 node_modules/
 web-ext-artifacts/
 *.xpi
