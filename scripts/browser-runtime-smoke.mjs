@@ -356,6 +356,20 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   if (hiddenSpreadsheetHash !== "#storage") {
     throw new Error(`Hidden spreadsheet hash did not fall back to Storage: ${hiddenSpreadsheetHash}`);
   }
+  const hiddenFocusState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const hiddenLink = document.querySelector("#googleAccountNav");
+      hiddenLink?.focus();
+      return {
+        focusedHiddenLink: document.activeElement === hiddenLink,
+        storageHeading: document.querySelector("#storageHeading")?.textContent
+      };
+    `,
+    args: []
+  });
+  if (hiddenFocusState.focusedHiddenLink || hiddenFocusState.storageHeading !== "Storage") {
+    throw new Error(`Hidden settings controls were focusable or Storage was unlabeled: ${JSON.stringify(hiddenFocusState)}`);
+  }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
