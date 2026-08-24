@@ -142,7 +142,7 @@ function renderDifferent(items) {
       differenceTable(item.differences, report.provider?.label || "Remote storage"),
       actionRow([
         { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision }) },
-        { label: "Keep spreadsheet", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) }
+        { label: "Keep remote", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) }
       ])
     );
     return row;
@@ -194,7 +194,7 @@ function renderLocalOnly(items) {
     row.append(
       rowHeading(item.local, item.local.dirty ? ["pending upload"] : []),
       actionRow([
-        { label: "Upload to spreadsheet", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision }) },
+        { label: "Push to remote", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision }) },
         { label: "Delete", action: () => deleteEverywhere(item.id, null, { expectedLocalRevision: item.local.revision }), danger: true }
       ])
     );
@@ -211,7 +211,7 @@ function renderRemoteOnly(items) {
     row.append(
       rowHeading(item.remote),
       actionRow([
-        { label: "Import to this device", action: () => keepRemote(item.remote) },
+        { label: "Import from remote", action: () => keepRemote(item.remote) },
         { label: "Delete", action: () => deleteEverywhere(item.id, item.remote), danger: true }
       ])
     );
