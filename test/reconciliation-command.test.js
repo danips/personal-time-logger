@@ -53,4 +53,10 @@ describe("reconciliation command model", () => {
     assert.match(code, /applyReconciliationCommand\(resolution/);
     assert.match(code, /function replaceReconciliationIntent/);
   });
+
+  it("includes serializable active-provider presentation metadata in scans", () => {
+    assert.match(code, /provider: \{/);
+    assert.match(code, /label: String\(remoteProvider\.label/);
+    assert.match(code, /getRemoteProviderCapabilities\(remoteProvider\)/);
+  });
 });

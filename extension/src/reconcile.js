@@ -1,7 +1,7 @@
 import { getAllEntries, mutateEntryState, mutateSettings, StorageConflictError } from "./db.js";
 import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
 import { notifyEntriesChanged } from "./events.js";
-import { getActiveRemoteProvider } from "./remote-provider.js";
+import { getActiveRemoteProvider, getRemoteProviderCapabilities } from "./remote-provider.js";
 import { nowIso, uuid } from "./time.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
@@ -224,6 +224,11 @@ export async function loadReconciliation({ interactiveAuth = false, provider } =
 
   return {
     ...compareEntries(localEntries.map(normalizeEntry), snapshot.entries, snapshot.duplicates || []),
+    provider: {
+      id: String(remoteProvider.id || ""),
+      label: String(remoteProvider.label || remoteProvider.id || "Remote storage"),
+      capabilities: getRemoteProviderCapabilities(remoteProvider)
+    },
     scannedAt: nowIso()
   };
 }
