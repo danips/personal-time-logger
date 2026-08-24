@@ -78,6 +78,26 @@ describe("remote provider selection", () => {
       duplicateRemoteRecords: false
     });
   });
+
+  it("keeps the provider contract consistent across backends", () => {
+    for (const id of providers.registeredRemoteProviderIds()) {
+      const provider = providers.getRemoteProvider(id);
+      assert.equal(typeof provider.id, "string");
+      assert.equal(typeof provider.label, "string");
+      assert.equal(Object.isFrozen(provider.capabilities), true);
+      for (const method of [
+        "ensureReady",
+        "getChangeToken",
+        "readSnapshot",
+        "appendEntries",
+        "updateEntries",
+        "deleteEntries",
+        "updateConfig"
+      ]) {
+        assert.equal(typeof provider[method], "function", `${id}.${method}`);
+      }
+    }
+  });
 });
 
 describe("MySQL API client", () => {
