@@ -8,7 +8,11 @@ import {
 } from "../src/reconcile.js";
 import { runAction } from "../src/action-runner.js";
 import { onEntriesChanged } from "../src/events.js";
-import { reconciliationActionDisabled, reconciliationActionEligibility } from "../src/reconcile-ui-state.js";
+import {
+  duplicateRecordsSupported,
+  reconciliationActionDisabled,
+  reconciliationActionEligibility
+} from "../src/reconcile-ui-state.js";
 import { syncNow } from "../src/sync.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
 import { $, entryTitle, formatError } from "../src/ui-helpers.js";
@@ -175,6 +179,7 @@ function renderDuplicates(items) {
  * so it always asks first.
  */
 async function confirmDeleteRows(rows) {
+  if (!duplicateRecordsSupported(report)) return;
   const rowIndexes = rows.map((row) => row.rowIndex);
   const confirmed = confirm(
     `Delete ${rowIndexes.length} duplicate row${rowIndexes.length === 1 ? "" : "s"} from the spreadsheet?\n\n`
@@ -239,11 +244,13 @@ function render() {
   $("#inSyncCount").textContent = String(report.inSync);
   $("#divergenceCount").textContent = String(divergenceCount());
 
-  const supportsDuplicateRecords = report.provider?.capabilities?.duplicateRemoteRecords === true;
+  const supportsDuplicateRecords = duplicateRecordsSupported(report);
   $("#duplicateSummaryMetric").hidden = !supportsDuplicateRecords;
   $("#duplicateSection").hidden = !supportsDuplicateRecords;
   $("#duplicateHeading").textContent = `Duplicate remote records (${report.duplicates.length})`;
-  $("#duplicateList").replaceChildren(...renderDuplicates(report.duplicates));
+  $("#duplicateList").replaceChildren(...(
+    supportsDuplicateRecords ? renderDuplicates(report.duplicates) : []
+  ));
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
   $("#remoteOnlyHeading").textContent = `Only in the spreadsheet (${report.remoteOnly.length})`;
@@ -322,9 +329,10 @@ function bindEvents() {
   eventsBound = true;
   $("#rescanButton").addEventListener("click", () => scan());
   $("#syncButton").addEventListener("click", runSync);
-  $("#deleteAllDuplicates").addEventListener("click", () => resolve(() => confirmDeleteRows(
-    report.duplicates.flatMap((item) => item.extraRows)
-  )));
+  $("#deleteAllDuplicates").addEventListener("click", () => {
+    if (!duplicateRecordsSupported(report)) return;
+    return resolve(() => confirmDeleteRows(report.duplicates.flatMap((item) => item.extraRows)));
+  });
   $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different.map((item) => ({
     action: "keepLocal",
     id: item.id,

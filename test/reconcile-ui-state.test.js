@@ -2,9 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  duplicateRecordsSupported,
   reconciliationActionDisabled,
   reconciliationActionEligibility
 } from "../extension/src/reconcile-ui-state.js";
+
+describe("reconciliation provider capabilities", () => {
+  it("only enables duplicate-record repair for supporting providers", () => {
+    assert.equal(duplicateRecordsSupported({ provider: { capabilities: { duplicateRemoteRecords: true } } }), true);
+    assert.equal(duplicateRecordsSupported({ provider: { capabilities: { duplicateRemoteRecords: false } } }), false);
+    assert.equal(duplicateRecordsSupported({}), false);
+  });
+});
 
 describe("reconciliation action state", () => {
   it("keeps every bulk action disabled for an empty report", () => {

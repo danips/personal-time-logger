@@ -1,3 +1,7 @@
+export function duplicateRecordsSupported(report) {
+  return report?.provider?.capabilities?.duplicateRemoteRecords === true;
+}
+
 export function reconciliationActionEligibility(report) {
   return {
     deleteAllDuplicates: Boolean(report?.duplicates?.length),
