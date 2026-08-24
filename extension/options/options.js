@@ -306,8 +306,15 @@ function renderStorage(activeBackend) {
   const active = decodeRemoteProviderId(activeBackend);
   renderActiveBackendLabel(active);
   $("#remoteBackendTarget").value = active;
-  $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
+  renderMysqlStorageFields(active, $("#remoteBackendTarget").value);
   renderStorageProviderVisibility(active, $("#remoteBackendTarget").value);
+}
+
+function renderMysqlStorageFields(activeBackend, targetBackend) {
+  const active = decodeRemoteProviderId(activeBackend);
+  const target = decodeRemoteProviderId(targetBackend);
+  $("#mysqlStorageFields").hidden = target !== REMOTE_PROVIDER_ID.MYSQL;
+  $("#testMysqlConnection").hidden = active === REMOTE_PROVIDER_ID.MYSQL;
 }
 
 function renderActiveBackendLabel(activeBackend) {
@@ -325,9 +332,10 @@ async function refreshActiveBackendLabel() {
 }
 
 async function renderStorageTarget() {
-  $("#mysqlStorageFields").hidden = $("#remoteBackendTarget").value !== REMOTE_PROVIDER_ID.MYSQL;
+  const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
+  renderMysqlStorageFields(active, $("#remoteBackendTarget").value);
   renderStorageProviderVisibility(
-    await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS),
+    active,
     $("#remoteBackendTarget").value
   );
 }
