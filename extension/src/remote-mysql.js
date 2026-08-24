@@ -103,7 +103,7 @@ async function requestJson(path, {
       signal: controller.signal,
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+        ...(body === undefined ? {} : { "Content-Type": "application/json" })
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });

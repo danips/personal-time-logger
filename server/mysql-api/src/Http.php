@@ -48,7 +48,9 @@ final class Http
 
     public static function bearerToken(): string
     {
-        $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        $header = $_SERVER['HTTP_AUTHORIZATION']
+            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+            ?? '';
         if ($header === '' && function_exists('getallheaders')) {
             foreach (getallheaders() as $name => $value) {
                 if (strcasecmp((string) $name, 'Authorization') === 0) {
