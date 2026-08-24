@@ -50,6 +50,7 @@ const expectedFiles = [
   "src/icon.js",
   "src/operation-states.js",
   "src/options-settings.js",
+  "src/options-storage-ui.js",
   "src/page-runtime.js",
   "src/platform.js",
   "src/reconcile-ui-state.js",

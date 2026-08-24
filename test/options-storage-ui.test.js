@@ -13,4 +13,25 @@ describe("storage UI state", () => {
       showSpreadsheet: true
     });
   });
+
+  it("does not mutate Google settings while deciding visibility", () => {
+    const googleSettings = Object.freeze({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      spreadsheetId: "spreadsheet-id"
+    });
+    const before = { ...googleSettings };
+
+    assert.deepEqual(storageUiState({
+      activeProviderId: "mysql",
+      targetProviderId: "mysql",
+      googleSettings
+    }), {
+      showGoogleAccount: false,
+      showSpreadsheet: false
+    });
+    assert.deepEqual(googleSettings, before);
+  });
 });
