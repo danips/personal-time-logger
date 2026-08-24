@@ -330,6 +330,9 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   await setBackend("mysql");
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#google-account` });
   await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav", "#google-account"]);
+  await waitForCondition(baseUrl, sessionId, "MySQL active settings reload", `
+    return document.querySelector("#activeRemoteBackend")?.textContent === "MySQL 8.4";
+  `);
   const hiddenMysqlState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `return {
       active: document.querySelector("#activeRemoteBackend")?.textContent,
