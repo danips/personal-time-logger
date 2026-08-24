@@ -253,7 +253,7 @@ function render() {
   ));
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
-  $("#remoteOnlyHeading").textContent = `Only in the spreadsheet (${report.remoteOnly.length})`;
+  $("#remoteOnlyHeading").textContent = `Only in remote storage (${report.remoteOnly.length})`;
 
   $("#differentList").replaceChildren(...renderDifferent(report.different));
   $("#localOnlyList").replaceChildren(...renderLocalOnly(report.localOnly));
