@@ -62,7 +62,10 @@ Application errors use this shape and never expose PDO or SQL details:
 Entry mutations use `remote_version` fences. Appends are idempotent for an
 identical canonical entry and return `409 REMOTE_APPEND_CONFLICT` for the same
 ID with different content. Successful physical entry/config mutations bump
-`app_meta.change_seq` in the same transaction.
+`app_meta.change_seq` once in the same transaction. A multi-row mutation therefore
+produces one new change token; idempotent or empty mutations do not change the
+token. Multi-entry update/delete batches lock entry rows in ascending ID order
+and reject duplicate IDs.
 
 ## Local verification
 

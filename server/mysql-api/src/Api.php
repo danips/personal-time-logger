@@ -47,46 +47,58 @@ final class Api
 
     private function snapshot(): array
     {
-        $entries = [];
-        $statement = $this->database->pdo()->query(
-            'SELECT id, project, task, description, start_at, end_at, duration_seconds, status,
-                    created_at, updated_at, deleted_at, device_id, revision, multiply, remote_version
-             FROM time_entries ORDER BY id'
-        );
-        foreach ($statement as $row) {
-            $entries[] = [
-                'entry' => $this->entryFromRow($row),
-                'version' => (int) $row['remote_version'],
-            ];
-        }
+        return $this->database->consistentRead(function (PDO $pdo): array {
+            $entries = [];
+            $statement = $pdo->query(
+                'SELECT id, project, task, description, start_at, end_at, duration_seconds, status,
+                        created_at, updated_at, deleted_at, device_id, revision, multiply, remote_version
+                 FROM time_entries ORDER BY id'
+            );
+            foreach ($statement as $row) {
+                $entries[] = [
+                    'entry' => $this->entryFromRow($row),
+                    'version' => (int) $row['remote_version'],
+                ];
+            }
 
-        $config = [];
-        $statement = $this->database->pdo()->query(
-            'SELECT `key`, `value`, updated_at, remote_version FROM config ORDER BY `key`'
-        );
-        foreach ($statement as $row) {
-            $config[] = [
-                'key' => (string) $row['key'],
-                'value' => (string) $row['value'],
-                'updated_at' => Validator::normalizeTimestamp($row['updated_at'], 'updated_at'),
-                'version' => (int) $row['remote_version'],
-            ];
-        }
+            $config = [];
+            $statement = $pdo->query(
+                'SELECT `key`, `value`, updated_at, remote_version FROM config ORDER BY `key`'
+            );
+            foreach ($statement as $row) {
+                $config[] = [
+                    'key' => (string) $row['key'],
+                    'value' => (string) $row['value'],
+                    'updated_at' => Validator::normalizeTimestamp($row['updated_at'], 'updated_at'),
+                    'version' => (int) $row['remote_version'],
+                ];
+            }
 
-        return [
-            'changeToken' => $this->changeToken(),
-            'entries' => $entries,
-            'config' => $config,
-        ];
+            $meta = $pdo->query('SELECT change_seq FROM app_meta WHERE id = 1')->fetch();
+            if ($meta === false) {
+                throw new ApiException(500, 'DATABASE_SCHEMA_INVALID', 'The API metadata row is missing.');
+            }
+
+            return [
+                'changeToken' => (string) $meta['change_seq'],
+                'entries' => $entries,
+                'config' => $config,
+            ];
+        });
     }
 
     private function append(array $body): array
     {
         $entries = $this->list($body, 'entries', 500);
         $normalized = array_map([Validator::class, 'entry'], $entries);
-        $results = [];
-        $this->database->transaction(function (PDO $pdo) use ($normalized, &$results): void {
-            foreach ($normalized as $entry) {
+        $this->assertUniqueIds($normalized);
+        $ordered = $this->withPositions($normalized);
+        usort($ordered, static fn (array $left, array $right): int => strcmp($left['entry']['id'], $right['entry']['id']));
+        $results = array_fill(0, count($ordered), null);
+        $this->database->transaction(function (PDO $pdo) use ($ordered, &$results): void {
+            $changed = false;
+            foreach ($ordered as $item) {
+                $entry = $item['entry'];
                 $select = $pdo->prepare('SELECT * FROM time_entries WHERE id = ? FOR UPDATE');
                 $select->execute([$entry['id']]);
                 $existing = $select->fetch();
@@ -94,7 +106,7 @@ final class Api
                     if ($this->canonicalEntry($this->entryFromRow($existing)) !== $this->canonicalEntry($entry)) {
                         throw new ApiException(409, 'REMOTE_APPEND_CONFLICT', 'An entry with this ID has different content.');
                     }
-                    $results[] = ['id' => $entry['id'], 'version' => (int) $existing['remote_version']];
+                    $results[$item['position']] = ['id' => $entry['id'], 'version' => (int) $existing['remote_version']];
                     continue;
                 }
 
@@ -110,8 +122,11 @@ final class Api
                     $entry['created_at'], $entry['updated_at'], $entry['deleted_at'], $entry['device_id'],
                     $entry['revision'], $entry['multiply'],
                 ]);
+                $changed = true;
+                $results[$item['position']] = ['id' => $entry['id'], 'version' => 1];
+            }
+            if ($changed) {
                 $this->database->changeSeq($pdo);
-                $results[] = ['id' => $entry['id'], 'version' => 1];
             }
         });
         return ['entries' => $results];
@@ -134,9 +149,15 @@ final class Api
             ];
         }
 
-        $results = [];
-        $this->database->transaction(function (PDO $pdo) use ($normalized, &$results): void {
-            foreach ($normalized as $update) {
+        $ids = array_map(static fn (array $update): string => $update['entry']['id'], $normalized);
+        $this->assertUniqueIds($ids);
+        $ordered = $this->withPositions($normalized);
+        usort($ordered, static fn (array $left, array $right): int => strcmp($left['entry']['id'], $right['entry']['id']));
+        $results = array_fill(0, count($ordered), null);
+        $this->database->transaction(function (PDO $pdo) use ($ordered, &$results): void {
+            $changed = false;
+            foreach ($ordered as $item) {
+                $update = $item['value'];
                 $entry = $update['entry'];
                 $existing = $this->lockedEntry($pdo, $entry['id']);
                 $this->assertVersion($existing, $update['expectedVersion']);
@@ -152,8 +173,11 @@ final class Api
                     $entry['id'], $update['expectedVersion'],
                 ]);
                 if ($statement->rowCount() !== 1) throw new ApiException(409, 'REMOTE_VERSION_STALE', 'The remote entry changed before the update.');
+                $changed = true;
+                $results[$item['position']] = ['id' => $entry['id'], 'version' => $update['expectedVersion'] + 1];
+            }
+            if ($changed) {
                 $this->database->changeSeq($pdo);
-                $results[] = ['id' => $entry['id'], 'version' => $update['expectedVersion'] + 1];
             }
         });
         return ['entries' => $results];
@@ -176,16 +200,24 @@ final class Api
             ];
         }
 
-        $deleted = [];
-        $this->database->transaction(function (PDO $pdo) use ($normalized, &$deleted): void {
-            foreach ($normalized as $precondition) {
+        $this->assertUniqueIds(array_map(static fn (array $item): string => $item['id'], $normalized));
+        $ordered = $this->withPositions($normalized);
+        usort($ordered, static fn (array $left, array $right): int => strcmp($left['value']['id'], $right['value']['id']));
+        $deleted = array_fill(0, count($ordered), null);
+        $this->database->transaction(function (PDO $pdo) use ($ordered, &$deleted): void {
+            $changed = false;
+            foreach ($ordered as $item) {
+                $precondition = $item['value'];
                 $existing = $this->lockedEntry($pdo, $precondition['id']);
                 $this->assertVersion($existing, $precondition['expectedVersion']);
                 $statement = $pdo->prepare('DELETE FROM time_entries WHERE id = ? AND remote_version = ?');
                 $statement->execute([$precondition['id'], $precondition['expectedVersion']]);
                 if ($statement->rowCount() !== 1) throw new ApiException(409, 'REMOTE_VERSION_STALE', 'The remote entry changed before deletion.');
+                $changed = true;
+                $deleted[$item['position']] = $precondition['id'];
+            }
+            if ($changed) {
                 $this->database->changeSeq($pdo);
-                $deleted[] = $precondition['id'];
             }
         });
         return ['deleted' => $deleted];
@@ -237,6 +269,29 @@ final class Api
             $result = ['key' => $key, 'version' => $expectedVersion + 1];
         });
         return $result;
+    }
+
+    /** @param array<int, array<string, mixed>> $items @return array<int, array<string, mixed>> */
+    private function withPositions(array $items): array
+    {
+        $positioned = [];
+        foreach ($items as $position => $item) {
+            $positioned[] = ['value' => $item, 'entry' => $item['entry'] ?? $item, 'position' => $position];
+        }
+        return $positioned;
+    }
+
+    /** @param array<int, string|array<string, mixed>> $items */
+    private function assertUniqueIds(array $items): void
+    {
+        $seen = [];
+        foreach ($items as $item) {
+            $id = is_array($item) ? (string) $item['id'] : $item;
+            if (isset($seen[$id])) {
+                throw new ApiException(400, 'INVALID_REQUEST', 'A batch contains duplicate entry IDs.');
+            }
+            $seen[$id] = true;
+        }
     }
 
     private function meta(): array

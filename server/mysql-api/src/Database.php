@@ -45,6 +45,21 @@ final class Database
         }
     }
 
+    /** @template T @param callable(PDO):T $callback @return T */
+    public function consistentRead(callable $callback): mixed
+    {
+        $this->pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        $this->pdo->exec('START TRANSACTION READ ONLY, WITH CONSISTENT SNAPSHOT');
+        try {
+            $result = $callback($this->pdo);
+            $this->pdo->commit();
+            return $result;
+        } catch (\Throwable $error) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $error;
+        }
+    }
+
     public function changeSeq(PDO $pdo): string
     {
         $statement = $pdo->prepare('UPDATE app_meta SET change_seq = change_seq + 1, updated_at = ? WHERE id = 1');
