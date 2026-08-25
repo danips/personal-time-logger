@@ -49,6 +49,7 @@ export function mysqlHostPermission(baseUrl) {
 
 function mapApiError(status, serverCode = "") {
   if (status === 401) return ERROR_CODE.REMOTE_AUTH_REQUIRED;
+  if (status === 403 && serverCode === "ORIGIN_NOT_ALLOWED") return ERROR_CODE.REMOTE_ORIGIN_NOT_ALLOWED;
   if (status === 403) return ERROR_CODE.REMOTE_PERMISSION;
   if (status === 404) return ERROR_CODE.REMOTE_API_INCOMPATIBLE;
   if (status === 409) {
@@ -64,6 +65,7 @@ function mapApiError(status, serverCode = "") {
 function safeApiMessage(code) {
   const messages = {
     [ERROR_CODE.REMOTE_AUTH_REQUIRED]: "The MySQL API rejected the configured token.",
+    [ERROR_CODE.REMOTE_ORIGIN_NOT_ALLOWED]: "The MySQL API rejected the Firefox extension origin.",
     [ERROR_CODE.REMOTE_PERMISSION]: "The MySQL API origin or token does not permit this request.",
     [ERROR_CODE.REMOTE_API_INCOMPATIBLE]: "The response did not match the Personal Time Logger API contract.",
     [ERROR_CODE.REMOTE_APPEND_CONFLICT]: "The MySQL API has a different entry with the same ID.",

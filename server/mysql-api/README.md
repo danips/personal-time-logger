@@ -21,8 +21,11 @@ PHP 8.2+ syntax, PDO MySQL, and no framework or Composer runtime dependency.
 4. Generate a 32-byte random token and store only its SHA-256 hex digest in
    `api_token_sha256`. Put the raw token only in the extension’s device-local
    settings.
-5. Set `cors_origins` to the exact extension origin(s) that need access. Do not
-   use `*` with bearer credentials.
+5. Keep `cors_origins` for exact non-extension origins, and set
+   `allow_moz_extension_origins` to `true` for Firefox clients. Firefox uses a
+   random UUID-based `moz-extension://` origin per browser instance, so this
+   validated scheme-specific policy avoids maintaining one CORS entry per
+   device. Do not use `*` with bearer credentials.
 6. Serve `public/` behind HTTPS. The API should be reachable at one stable
    origin such as `https://time-api.example.com/`.
 7. Test `/v1/health` with the bearer token before configuring the extension.

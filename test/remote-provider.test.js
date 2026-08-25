@@ -157,6 +157,23 @@ describe("MySQL API client", () => {
     });
   });
 
+  it("distinguishes a server CORS rejection from a missing Firefox host permission", async () => {
+    const client = mysql.createMysqlApiClient({
+      baseUrl: "https://time-api.cordoceo.com",
+      token: "test-secret-token",
+      platformApi,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 403,
+        async text() { return JSON.stringify({ error: { code: "ORIGIN_NOT_ALLOWED" } }); }
+      })
+    });
+    await assert.rejects(() => client.changeToken(), (error) => {
+      assert.equal(error.code, "REMOTE_ORIGIN_NOT_ALLOWED");
+      return true;
+    });
+  });
+
   it("strips local-only entry fields before sending mutations", async () => {
     const localEntry = fixture({ dirty: true, last_sync_at: "2026-08-08T10:00:00.000Z", sync_error: "old failure" });
     let requestBody;

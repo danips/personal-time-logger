@@ -23,6 +23,10 @@ final class Config
         if (!is_array($origins) || array_filter($origins, static fn ($origin) => !is_string($origin))) {
             throw new ApiException(500, 'SERVER_CONFIG_INVALID', 'The API CORS configuration is invalid.');
         }
+
+        if (!is_bool($values['allow_moz_extension_origins'] ?? false)) {
+            throw new ApiException(500, 'SERVER_CONFIG_INVALID', 'The Firefox extension CORS setting is invalid.');
+        }
     }
 
     public static function load(): self
@@ -46,7 +50,16 @@ final class Config
     public function allowsOrigin(?string $origin): bool
     {
         if ($origin === null || $origin === '') return false;
-        return in_array($origin, $this->values['cors_origins'], true);
+        if (in_array($origin, $this->values['cors_origins'], true)) return true;
+        if (($this->values['allow_moz_extension_origins'] ?? false) !== true) return false;
+
+        // Firefox assigns each browser instance a random UUID-based extension
+        // origin. Keep the allowance limited to that scheme and UUID shape;
+        // public/index.php still requires a bearer token for every API route.
+        return preg_match(
+            '/\\Amoz-extension:\\/\\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\z/i',
+            $origin
+        ) === 1;
     }
 
     public function tokenMatches(string $token): bool

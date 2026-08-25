@@ -14,8 +14,11 @@ return [
     ],
     // SHA-256 hex digest of the 32-byte random bearer token.
     'api_token_sha256' => 'replace-with-64-character-sha256-hex-digest',
-    // Use exact origins. For Firefox, this is normally the extension origin.
+    // Keep explicit web origins here. Firefox extension origins are random per
+    // browser instance; the validated moz-extension policy below avoids a
+    // per-device allowlist while bearer authentication remains mandatory.
     'cors_origins' => [
-        'moz-extension://replace-with-extension-id',
+        // 'https://your-admin.example.com',
     ],
+    'allow_moz_extension_origins' => true,
 ];

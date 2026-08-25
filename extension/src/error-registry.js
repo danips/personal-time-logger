@@ -114,6 +114,10 @@ export const ERROR_REGISTRY = {
     retryable: false, status: "not authorized", title: "MySQL API authorization is required",
     detail: "The remote API rejected the configured token.", recovery: "Open Storage settings and save a valid API token."
   },
+  [ERROR_CODE.REMOTE_ORIGIN_NOT_ALLOWED]: {
+    retryable: false, status: "API origin not allowed", title: "MySQL API origin is not allowed",
+    detail: "The API rejected this Firefox extension origin for the request.", recovery: "Add the current moz-extension:// origin to the server cors_origins list and allow OPTIONS and POST requests."
+  },
   [ERROR_CODE.REMOTE_PERMISSION]: {
     retryable: false, status: "permission missing", title: "Remote API permission is missing",
     detail: "Firefox did not grant access to the configured remote API origin.", recovery: "Use Test connection and approve the exact API host permission."

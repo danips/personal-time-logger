@@ -1,3 +1,9 @@
+# Personal Time Logger 0.1.54
+
+- Allow validated Firefox extension origins without maintaining a per-device CORS allowlist.
+- Distinguish server-side MySQL origin rejections from missing Firefox host permissions.
+- Add deterministic MySQL CORS configuration tests.
+
 # Personal Time Logger 0.1.53
 
 - Hide Google-specific settings when MySQL is the active/prepared backend.

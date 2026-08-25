@@ -1,6 +1,6 @@
 # Personal Time Logger Extension
 
-Current release: `0.1.53` (`v0.1.53`).
+Current release: `0.1.54` (`v0.1.54`).
 
 A Firefox extension for local-first time tracking with Google Sheets or MySQL remote sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
