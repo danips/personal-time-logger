@@ -4,7 +4,7 @@
   font-size: 14px;
   --time-col: 64px;
   --weekday-col: minmax(112px, 1fr);
-  --weekend-col: minmax(76px, 0.35fr);
+  --weekend-col: minmax(95px, 0.35fr);
   --slot-height: 12px;
   --hour-height: calc(var(--slot-height) * 4);
   --day-height: calc(var(--hour-height) * 24);
@@ -96,7 +96,27 @@ h1 {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 26px;
+}
+
+.calendar-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-heading-row .status[data-status="synced"] {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  font-size: 0;
+  line-height: 1;
+}
+
+.calendar-heading-row .status[data-status="synced"]::before {
+  content: "\2713";
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .undo-resize-button {

@@ -87,6 +87,8 @@ const $recentEntries = $("#recentEntries");
 const $loadMoreRecent = $("#loadMoreRecent");
 const $dirtyBadge = $("#dirtyBadge");
 const $syncStatus = $("#syncStatus");
+const $brandRow = $(".brand-row");
+const $statusRow = $(".status-row");
 const $editPanel = $("#editPanel");
 const $editProjectDot = $("#editProjectDot");
 const $editProject = $("#editProject");
@@ -110,6 +112,15 @@ const $chatGptUsageValues = $("#chatGptUsageValues");
 const $windowSizePresets = $("#windowSizePresets");
 const $windowSizeEditor = $("#windowSizeEditor");
 const $windowSizeFields = $("#windowSizeFields");
+
+function setSyncStatus(status, detail = "") {
+  setStatus($syncStatus, status, detail);
+  if (status === "synced") {
+    $brandRow.append($syncStatus);
+    return;
+  }
+  $statusRow.insertBefore($syncStatus, $dirtyBadge);
+}
 
 function formFields() {
   return {
@@ -688,7 +699,7 @@ async function resizeBrowserWindow(width, height, isWindow) {
   try {
     await resizeCurrentWindow({ width, height, isWindow }, platform);
   } catch (error) {
-    setStatus($syncStatus, "error", formatError(error));
+    setSyncStatus("error", formatError(error));
   }
 }
 
@@ -696,7 +707,7 @@ async function saveWindowSizes() {
   const sizes = readWindowSizeEditor();
   const normalized = sizes.map(normalizeWindowSizePreset);
   if (normalized.some((size) => !size)) {
-    setStatus($syncStatus, "error", `Window sizes must be whole numbers from 1 to ${MAX_WINDOW_SIZE}`);
+    setSyncStatus("error", `Window sizes must be whole numbers from 1 to ${MAX_WINDOW_SIZE}`);
     return;
   }
   windowSizes = normalized;
@@ -766,12 +777,12 @@ async function render() {
 }
 
 async function runSync({ force = false } = {}) {
-  setStatus($syncStatus, "pending");
+  setSyncStatus("pending");
   try {
     const result = await requestBackgroundSync({ force });
-    setStatus($syncStatus, result.status, result.warning);
+    setSyncStatus(result.status, result.warning);
   } catch (error) {
-    setStatus($syncStatus, statusFromError(error), formatError(error));
+    setSyncStatus(statusFromError(error), formatError(error));
   }
 }
 
@@ -788,10 +799,10 @@ function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
       if (button) button.disabled = next;
     },
     onError(error) {
-      setStatus($syncStatus, "error", formatError(error));
+      setSyncStatus("error", formatError(error));
     },
     onFinally() {
-      return render().catch((error) => setStatus($syncStatus, "error", formatError(error)));
+      return render().catch((error) => setSyncStatus("error", formatError(error)));
     }
   });
 }
@@ -845,7 +856,7 @@ function editActiveTimer(event) {
     if (open) $("#project").focus();
     return;
   }
-  showEdit(latest.id).catch((error) => setStatus($syncStatus, "error", formatError(error)));
+  showEdit(latest.id).catch((error) => setSyncStatus("error", formatError(error)));
 }
 
 function editActiveTimerFromKeyboard(event) {
@@ -960,10 +971,10 @@ function bindEvents() {
   $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
     render().catch((error) => {
-      setStatus($syncStatus, "error", formatError(error));
+      setSyncStatus("error", formatError(error));
     });
   });
-  $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
+  $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setSyncStatus("error", formatError(error))));
   $windowSizePresets.addEventListener("click", (event) => {
     const button = event.target.closest("[data-window-width]");
     if (!button) return;
@@ -992,10 +1003,10 @@ function bindEvents() {
   $("#cancelWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(false));
   $chatGptUsageValues.addEventListener("click", (event) => {
     if (event.target.closest(".chatgpt-usage-value")) {
-      platform.openExtensionPage("options/options.html#chatgpt-usage").catch((error) => setStatus($syncStatus, "error", formatError(error)));
+      platform.openExtensionPage("options/options.html#chatgpt-usage").catch((error) => setSyncStatus("error", formatError(error)));
     }
   });
-  $("#openOptions").addEventListener("click", () => platform.openExtensionPage("options/options.html").catch((error) => setStatus($syncStatus, "error", formatError(error))));
+  $("#openOptions").addEventListener("click", () => platform.openExtensionPage("options/options.html").catch((error) => setSyncStatus("error", formatError(error))));
   $("#saveEdit").addEventListener("click", (event) => runPopupAction(`save-entry:${editingId}`, saveEdit, {
     button: event.currentTarget,
     expectedRevision: editingRevision
@@ -1037,7 +1048,7 @@ function bindEvents() {
 
     const row = event.target.closest(".entry-row[data-edit-id]");
     if (row) {
-      showEdit(row.dataset.editId).catch((error) => setStatus($syncStatus, "error", formatError(error)));
+      showEdit(row.dataset.editId).catch((error) => setSyncStatus("error", formatError(error)));
     }
   });
   $recentEntries.addEventListener("keydown", (event) => {
@@ -1046,7 +1057,7 @@ function bindEvents() {
     const row = event.target.closest(".entry-row[data-edit-id]");
     if (!row) return;
     event.preventDefault();
-    showEdit(row.dataset.editId).catch((error) => setStatus($syncStatus, "error", formatError(error)));
+    showEdit(row.dataset.editId).catch((error) => setSyncStatus("error", formatError(error)));
   });
 }
 
@@ -1060,7 +1071,7 @@ async function init() {
         phase: "entries-changed",
         task: render,
         onError(error) {
-          setStatus($syncStatus, "error", formatError(error));
+          setSyncStatus("error", formatError(error));
         }
       });
     });
@@ -1085,7 +1096,7 @@ async function init() {
         phase: "elapsed-tick",
         task: updateElapsed,
         onError(error) {
-          setStatus($syncStatus, "error", formatError(error));
+          setSyncStatus("error", formatError(error));
         }
       });
     }, 1000);

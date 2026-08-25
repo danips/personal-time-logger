@@ -90,7 +90,9 @@ let renderGeneration = 0;
 let clampEditorToViewport = () => {};
 
 function setStatus(message) {
-  $("#statusLine").textContent = message;
+  const status = $("#statusLine");
+  status.textContent = message;
+  status.dataset.status = message;
 }
 
 function runCalendarAction(key, action, { button = null, expectedRevision, afterRender } = {}) {

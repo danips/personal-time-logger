@@ -148,6 +148,21 @@ select:focus-visible {
   color: var(--success);
 }
 
+.brand-row .status[data-status="synced"] {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  font-size: 0;
+  line-height: 1;
+}
+
+.brand-row .status[data-status="synced"]::before {
+  content: "\2713";
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .status[data-status="pending"] {
   color: var(--warning);
 }
