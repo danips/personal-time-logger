@@ -29,6 +29,7 @@
         <nav class="section-nav" aria-label="Options sections">
           <p class="section-nav-label">Sections</p>
           <a href="#appearance">Appearance</a>
+          <a href="#general">General</a>
           <a href="#storage">Storage</a>
           <a id="googleAccountNav" href="#google-account">Google Account</a>
           <a id="spreadsheetNav" href="#spreadsheet">Spreadsheet</a>
@@ -63,6 +64,17 @@
             <div id="themePreview" class="theme-preview" aria-hidden="true">
               <span></span><span></span><span></span><span></span><span></span>
             </div>
+          </section>
+
+          <section id="general" class="panel options-section">
+            <h2>General</h2>
+            <p class="note">Settings that apply to Time Logger regardless of the selected remote storage backend.</p>
+            <label>Sync interval seconds<input id="syncInterval" type="number" min="30" step="1"></label>
+            <label>Duration multiplier<input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001"></label>
+            <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
+            <label>Calendar starts at hour<input id="workdayStartHour" type="number" min="0" max="23" step="1"></label>
+            <p class="note">The Calendar initially starts displaying at this hour.</p>
+            <div class="actions"><button id="saveSettings" type="button">Save Settings</button></div>
           </section>
 
           <section id="storage" class="panel options-section" aria-labelledby="storageHeading">
@@ -131,13 +143,7 @@
             <label>Connect an existing compatible spreadsheet ID<input id="replacementSpreadsheetId" type="text" autocomplete="off" spellcheck="false"></label>
             <div class="actions"><button id="connectSpreadsheet" type="button">Connect spreadsheet</button></div>
             <p class="note">Reconnect keeps the current ID. Connecting or creating a replacement preserves every local entry and syncs that backup to the selected destination.</p>
-            <label>Sync interval seconds<input id="syncInterval" type="number" min="30" step="1"></label>
-            <label>Duration multiplier<input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001"></label>
-            <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
-            <label>Calendar starts at hour<input id="workdayStartHour" type="number" min="0" max="23" step="1"></label>
-            <p class="note">The Calendar initially starts displaying at this hour.</p>
             <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
-            <div class="actions"><button id="saveSettings" type="button">Save Settings</button></div>
           </section>
 
           <section id="chatgpt-usage" class="panel options-section" aria-labelledby="usageHeading">
