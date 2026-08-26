@@ -4,7 +4,8 @@ import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-a
 import { CHATGPT_HOST_PERMISSION, CHATGPT_SESSION_TOKEN_CONSENT_KEY, refreshAllAccounts } from "../src/chatgpt-containers.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
-import { mountEntryEditor } from "../src/entry-editor.js";
+import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
+import { activeTimerState, elapsedTimerState } from "../src/popup-active-state.js";
 import { onEntriesChanged } from "../src/events.js";
 import { requestBackgroundSync } from "../src/sync-request.js";
 import { allocateEntryByLocalDay } from "../src/time-allocation.js";
@@ -115,7 +116,7 @@ const $windowSizeFields = $("#windowSizeFields");
 
 function setSyncStatus(status, detail = "") {
   setStatus($syncStatus, status, detail);
-  if (status === "synced") {
+  if (status === "synced" || status === "pending") {
     $brandRow.append($syncStatus);
     return;
   }
@@ -433,26 +434,29 @@ function renderRecentTimerGroup(group) {
 }
 
 function tickElapsed(latest) {
-  $elapsed.textContent = latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00";
+  $elapsed.textContent = elapsedTimerState(
+    latest,
+    latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00"
+  ).elapsed;
 }
 
 function renderActiveState(latest) {
-  const hasActive = Boolean(latest);
-  $activeTitle.textContent = latest?.task || "No task";
-  $activeDescription.textContent = latest?.description || "";
-  $activeDescription.title = latest?.description || "";
-  tickElapsed(latest);
-  $stopButton.classList.toggle("hidden", !latest);
-  $activePanel.classList.toggle("is-running", hasActive);
+  const state = activeTimerState(latest, {
+    elapsed: latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00",
+    newTimerOpen: $newTimerToggle.getAttribute("aria-expanded") === "true",
+    label: latest ? entryTitle(latest) : "timer"
+  });
+  $activeTitle.textContent = state.title;
+  $activeDescription.textContent = state.description;
+  $activeDescription.title = state.description;
+  $elapsed.textContent = state.elapsed;
+  $stopButton.classList.toggle("hidden", !state.stopVisible);
+  $activePanel.classList.toggle("is-running", state.running);
   $activePanel.tabIndex = 0;
   $activePanel.setAttribute("role", "button");
-  const newTimerOpen = $newTimerToggle.getAttribute("aria-expanded") === "true";
-  $activePanel.setAttribute(
-    "aria-label",
-    latest ? `Edit active timer ${entryTitle(latest)}` : newTimerOpen ? "Hide new timer" : "Start a new timer"
-  );
-  if (hasActive) setNewTimerOpen(false);
-  void updateActiveIcon(hasActive);
+  $activePanel.setAttribute("aria-label", state.ariaLabel);
+  if (state.running) setNewTimerOpen(false);
+  void updateActiveIcon(state.iconActive);
 }
 
 function updateElapsed() {
@@ -873,7 +877,7 @@ function hideEdit() {
   mergeTargetRevisions = new Map();
   $mergeTarget.replaceChildren();
   $mergeEdit.disabled = true;
-  $mergeTools.hidden = true;
+  setEntryEditorMergeAvailability($mergeTools, false);
   $editProjectDot.classList.add("hidden");
   $editPanel.classList.add("hidden");
 }
@@ -889,7 +893,7 @@ function renderMergeTargets(entry, entries) {
   });
   $mergeTarget.replaceChildren(...options);
   $mergeEdit.disabled = !candidates.length;
-  $mergeTools.hidden = !candidates.length;
+  setEntryEditorMergeAvailability($mergeTools, candidates.length > 0);
 }
 
 async function saveEdit() {

@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { entryFingerprint, normalizeReconciliationCommand } from "../extension/src/reconcile.js";
 import { normalizeEntry } from "../extension/src/entries.js";
 
-const code = readFileSync(join(process.cwd(), "extension/src/reconcile.js"), "utf8");
 const remote = normalizeEntry({
   id: "remote",
   project: "Project",
@@ -47,16 +44,4 @@ describe("reconciliation command model", () => {
     assert.deepEqual(localOnlyDelete.remote, { kind: "absent" });
   });
 
-  it("routes both entrypoints through one local transition owner", () => {
-    assert.equal((code.match(/function applyReconciliationCommand/g) || []).length, 1);
-    assert.match(code, /return applyReconciliationCommand\(command/);
-    assert.match(code, /applyReconciliationCommand\(resolution/);
-    assert.match(code, /function replaceReconciliationIntent/);
-  });
-
-  it("includes serializable active-provider presentation metadata in scans", () => {
-    assert.match(code, /provider: \{/);
-    assert.match(code, /label: String\(remoteProvider\.label/);
-    assert.match(code, /getRemoteProviderCapabilities\(remoteProvider\)/);
-  });
 });

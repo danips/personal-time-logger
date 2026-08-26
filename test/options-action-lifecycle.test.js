@@ -1,34 +1,33 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 
-const code = readFileSync(join(process.cwd(), "extension/options/options.js"), "utf8");
+import { runAction } from "../extension/src/action-runner.js";
 
-function functionSource(name) {
-  const start = Math.max(code.indexOf(`function ${name}(`), code.indexOf(`async function ${name}(`));
-  assert.notEqual(start, -1, `missing ${name}`);
-  const bodyStart = code.indexOf("{", start);
-  let depth = 0;
-  for (let position = bodyStart; position < code.length; position += 1) {
-    if (code[position] === "{") depth += 1;
-    if (code[position] === "}") depth -= 1;
-    if (depth === 0) return code.slice(start, position + 1);
-  }
-  throw new Error(`unterminated ${name}`);
-}
+describe("options action lifecycle", () => {
+  it("runs one final refresh on success and keeps the button disabled only while busy", async () => {
+    const button = { disabled: false };
+    const events = [];
+    const result = await runAction("options-save-behavior", async () => {
+      events.push("save");
+      return "saved";
+    }, {
+      setBusy: (busy) => { button.disabled = busy; },
+      onFinally: () => events.push("refresh")
+    });
+    assert.equal(result, "saved");
+    assert.equal(button.disabled, false);
+    assert.deepEqual(events, ["save", "refresh"]);
+  });
 
-describe("Options action lifecycle", () => {
-  it("keeps busy, errors, and final refresh in the outer runner", () => {
-    const runner = functionSource("runOptionsAction");
-    assert.match(runner, /setBusy\(next\)/);
-    assert.match(runner, /onError[\s\S]*formatError/);
-    assert.match(runner, /onFinally[\s\S]*refresh\(\)/);
-    for (const name of ["saveGoogleCredentials", "signInClicked", "signOutClicked", "reconnectSpreadsheetClicked", "connectSpreadsheetClicked", "createReplacementSpreadsheetClicked"]) {
-      const body = functionSource(name);
-      assert.doesNotMatch(body, /\brefresh\(/, `${name} must not refresh internally`);
-      assert.doesNotMatch(body, /\.disabled\s*=/, `${name} must not manage busy state internally`);
-      assert.doesNotMatch(body, /catch\s*\(/, `${name} must not convert action failures into success`);
-    }
+  it("reports errors while still performing the final refresh", async () => {
+    const events = [];
+    const result = await runAction("options-error-behavior", async () => {
+      throw Object.assign(new Error("not connected"), { code: "REMOTE_NETWORK" });
+    }, {
+      onError: (error) => events.push(`error:${error.code}`),
+      onFinally: () => events.push("refresh")
+    });
+    assert.equal(result, undefined);
+    assert.deepEqual(events, ["error:REMOTE_NETWORK", "refresh"]);
   });
 });

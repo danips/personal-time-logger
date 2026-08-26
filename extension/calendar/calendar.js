@@ -2,7 +2,8 @@ import { getEntriesIntersecting, getSetting, mutateSetting } from "../src/db.js"
 import { isActionRunning, runAction } from "../src/action-runner.js";
 import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
-import { mountEntryEditor } from "../src/entry-editor.js";
+import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
+import { moveEntryChanges, ownsGesturePointer, resizeEntryChanges } from "../src/calendar-gesture-state.js";
 import {
   normalizeTempoIssueId,
   normalizeTempoTaskIssueIds,
@@ -89,10 +90,10 @@ let lastResizeUndo = null;
 let renderGeneration = 0;
 let clampEditorToViewport = () => {};
 
-function setStatus(message) {
+function setStatus(message, state = message) {
   const status = $("#statusLine");
   status.textContent = message;
-  status.dataset.status = message;
+  status.dataset.status = state;
 }
 
 function runCalendarAction(key, action, { button = null, expectedRevision, afterRender } = {}) {
@@ -559,7 +560,7 @@ function beginDrag(event) {
     target: null
   };
   gesture.finish = (finishEvent) => {
-    if (finishEvent.pointerId !== gesture?.pointerId || gesture?.kind !== "move") return;
+    if (!ownsGesturePointer(gesture, finishEvent.pointerId, "move")) return;
     return runCalendarAction(`drag-entry:${entry.id}`, endDrag, {
       expectedRevision: entry.revision,
       afterRender: refreshSelectedEntryEditor
@@ -630,7 +631,7 @@ function beginResize(event) {
     target: null
   };
   gesture.finish = (finishEvent) => {
-    if (finishEvent.pointerId !== gesture?.pointerId || gesture?.kind !== "resize") return;
+    if (!ownsGesturePointer(gesture, finishEvent.pointerId, "resize")) return;
     return runCalendarAction(`resize-entry:${entry.id}`, endResize, {
       expectedRevision: entry.revision,
       afterRender: refreshSelectedEntryEditor
@@ -643,7 +644,7 @@ function beginResize(event) {
 }
 
 function moveResize(event) {
-  if (!gesture || gesture.kind !== "resize" || gesture.pointerId !== event.pointerId) return;
+  if (!ownsGesturePointer(gesture, event.pointerId, "resize")) return;
   if (!gesture.active) {
     const distance = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
     if (distance < DRAG_THRESHOLD_PX) return;
@@ -693,9 +694,7 @@ async function endResize() {
     state.block.dataset.skipClick = "";
   }, 0);
 
-  const changes = state.edge === "top"
-    ? { start_at: state.target.date.toISOString() }
-    : { end_at: state.target.date.toISOString() };
+  const changes = resizeEntryChanges(state.edge, state.target.date);
   const undo = {
     id: state.entry.id,
     start_at: state.entry.start_at,
@@ -711,7 +710,7 @@ async function endResize() {
 }
 
 function moveDrag(event) {
-  if (!gesture || gesture.kind !== "move" || gesture.pointerId !== event.pointerId) return;
+  if (!ownsGesturePointer(gesture, event.pointerId, "move")) return;
   if (!gesture.active) {
     const distance = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
     if (distance < DRAG_THRESHOLD_PX) return;
@@ -741,10 +740,7 @@ async function endDrag() {
   }, 0);
 
   const newStart = addMinutes(addDays(weekStart, state.target.dayIndex), state.target.minute);
-  const changes = { start_at: newStart.toISOString() };
-  if (state.entry.end_at) {
-    changes.end_at = new Date(newStart.getTime() + state.durationMs).toISOString();
-  }
+  const changes = moveEntryChanges(state.entry, { start_at: newStart.toISOString() }, state.durationMs);
 
   setResizeUndo(null);
   await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
@@ -771,7 +767,7 @@ async function undoResize() {
 }
 
 async function runSync({ force = false } = {}) {
-  setStatus("Syncing...");
+  setStatus("Syncing...", "pending");
   try {
     const result = await requestBackgroundSync({ force });
     setStatus(result.warning || result.status);
@@ -841,7 +837,7 @@ function openSelectedEntryEditor() {
   });
   $("#calendarMergeTarget").replaceChildren(...mergeOptions);
   $("#calendarMergeButton").disabled = !candidates.length;
-  $("#calendarMergeControl").hidden = !candidates.length;
+  setEntryEditorMergeAvailability($("#calendarMergeControl"), candidates.length > 0);
   $("#duplicateEntryButton").disabled = !entry.end_at;
   $("#duplicateEntryButton").title = entry.end_at
     ? "Create a copy at the same date and time"

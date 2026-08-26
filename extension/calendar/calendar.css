@@ -104,7 +104,8 @@ h1 {
   gap: 8px;
 }
 
-.calendar-heading-row .status[data-status="synced"] {
+.calendar-heading-row .status[data-status="synced"],
+.calendar-heading-row .status[data-status="pending"] {
   display: inline-grid;
   width: 14px;
   height: 14px;
@@ -117,6 +118,12 @@ h1 {
   content: "\2713";
   font-size: 13px;
   font-weight: 800;
+}
+
+.calendar-heading-row .status[data-status="pending"]::before {
+  content: "\23F3";
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 14px;
 }
 
 .undo-resize-button {

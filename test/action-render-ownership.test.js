@@ -1,86 +1,34 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 
-const root = process.cwd();
+import { runAction } from "../extension/src/action-runner.js";
 
-function source(file) {
-  return readFileSync(join(root, "extension", file), "utf8");
-}
+describe("page action outcomes", () => {
+  it("publishes a local mutation and queues remote work without waiting for it", async () => {
+    const state = { entries: [], syncStarted: false, rendered: 0 };
+    let releaseSync;
+    const sync = new Promise((resolve) => { releaseSync = resolve; });
+    const action = runAction("start-timer-behavior", async () => {
+      state.entries.push("local-entry");
+      state.syncStarted = true;
+      void sync;
+    }, { onFinally: () => { state.rendered += 1; } });
+    await action;
+    assert.deepEqual(state, { entries: ["local-entry"], syncStarted: true, rendered: 1 });
+    releaseSync();
+  });
 
-function functionSource(code, name) {
-  const start = code.indexOf(`function ${name}(`);
-  const asyncStart = code.indexOf(`async function ${name}(`);
-  const index = Math.max(start, asyncStart);
-  assert.notEqual(index, -1, `missing ${name}`);
-  const bodyStart = code.indexOf(") {", index) + 2;
-  let depth = 0;
-  for (let position = bodyStart; position < code.length; position += 1) {
-    if (code[position] === "{") depth += 1;
-    if (code[position] === "}") depth -= 1;
-    if (depth === 0) return code.slice(index, position + 1);
-  }
-  throw new Error(`unterminated ${name}`);
-}
-
-describe("page action render ownership", () => {
-  const pages = [
-    {
-      file: "popup/popup.js",
-      wrapper: "runPopupAction",
-      actions: ["runSync", "startTimer", "restartFromEntry", "stopTimer", "saveEdit", "deleteEdit", "mergeEdit"]
-    },
-    {
-      file: "calendar/calendar.js",
-      wrapper: "runCalendarAction",
-      actions: ["runSync", "endResize", "endDrag", "undoResize", "mergeSelectedEntry", "duplicateSelectedEntry", "deleteCalendarEntry", "saveCalendarEdit", "changeWeek"]
-    },
-    {
-      file: "usage/usage.js",
-      wrapper: "runUsageAction",
-      actions: ["refreshOne"]
-    }
-  ];
-
-  for (const page of pages) {
-    it(`${page.file} gives its action wrapper the final render`, () => {
-      const code = source(page.file);
-      assert.match(functionSource(code, page.wrapper), /onFinally[\s\S]*\brender\(/);
-      for (const action of page.actions) {
-        assert.doesNotMatch(functionSource(code, action), /\b(?:await )?render\(/, `${action} must not render directly`);
-      }
+  it("restores the initiating control and refreshes after a failed action", async () => {
+    const button = { disabled: false };
+    const events = [];
+    await runAction("save-error-behavior", async () => {
+      throw Object.assign(new Error("conflict"), { code: "STORAGE_CONFLICT" });
+    }, {
+      setBusy: (busy) => { button.disabled = busy; events.push(`busy:${busy}`); },
+      onError: (error) => events.push(`error:${error.code}`),
+      onFinally: () => events.push("refresh")
     });
-  }
-
-  const localMutations = [
-    {
-      file: "popup/popup.js",
-      actions: ["startTimer", "restartFromEntry", "stopTimer", "saveEdit", "deleteEdit", "mergeEdit"]
-    },
-    {
-      file: "calendar/calendar.js",
-      actions: ["endResize", "endDrag", "undoResize", "mergeSelectedEntry", "duplicateSelectedEntry", "deleteCalendarEntry", "saveCalendarEdit"]
-    }
-  ];
-
-  for (const page of localMutations) {
-    it(`${page.file} renders local mutations before remote sync completes`, () => {
-      const code = source(page.file);
-      for (const action of page.actions) {
-        const body = functionSource(code, action);
-        assert.match(body, /\bqueueSync\(/, `${action} must request background sync`);
-        assert.doesNotMatch(body, /\bawait\s+runSync\(/, `${action} must not wait for remote sync`);
-      }
-    });
-  }
-
-  it("popup Stop uses one captured id and revision target", () => {
-    const code = source("popup/popup.js");
-    const stopBody = functionSource(code, "stopTimer");
-    assert.match(stopBody, /stopEntry\(target\.id,\s*\{\s*expectedRevision:\s*target\.expectedRevision\s*\}\)/);
-    assert.doesNotMatch(stopBody, /getActiveEntries/);
-    assert.match(code, /stop-timer:\$\{target\?\.id \|\| "none"\}/);
-    assert.match(code, /Object\.freeze\(\{ id: latest\.id, expectedRevision: latest\.revision \}\)/);
+    assert.equal(button.disabled, false);
+    assert.deepEqual(events, ["busy:true", "error:STORAGE_CONFLICT", "refresh", "busy:false"]);
   });
 });

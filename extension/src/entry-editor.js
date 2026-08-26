@@ -54,3 +54,9 @@ export function mountEntryEditor(container, {
       </div>
     </form>`;
 }
+
+export function setEntryEditorMergeAvailability(control, hasTargets) {
+  if (!control) return false;
+  control.hidden = !hasTargets;
+  return !control.hidden;
+}

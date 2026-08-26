@@ -148,7 +148,8 @@ select:focus-visible {
   color: var(--success);
 }
 
-.brand-row .status[data-status="synced"] {
+.brand-row .status[data-status="synced"],
+.brand-row .status[data-status="pending"] {
   display: inline-grid;
   width: 14px;
   height: 14px;
@@ -161,6 +162,12 @@ select:focus-visible {
   content: "\2713";
   font-size: 13px;
   font-weight: 800;
+}
+
+.brand-row .status[data-status="pending"]::before {
+  content: "\23F3";
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 14px;
 }
 
 .status[data-status="pending"] {
