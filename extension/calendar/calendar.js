@@ -685,7 +685,7 @@ async function endResize() {
   clearGesture(state, moveResize, "resize-source");
 
   if (!state.active || !state.target) {
-    setStatus("Ready");
+    setStatus("Ready", "synced");
     return;
   }
 
@@ -730,7 +730,7 @@ async function endDrag() {
   clearGesture(state, moveDrag, "drag-source");
 
   if (!state.active || !state.target) {
-    setStatus("Ready");
+    setStatus("Ready", "synced");
     return;
   }
 
@@ -881,7 +881,7 @@ async function clearSelection() {
   closeEditor();
   selectedEntryId = "";
   await render();
-  setStatus("Ready");
+  setStatus("Ready", "synced");
 }
 
 /**
@@ -905,7 +905,7 @@ async function changeWeek(nextStart) {
   setResizeUndo(null);
   weekStart = startOfWeek(nextStart);
   initialScrollDone = false;
-  setStatus("Ready");
+  setStatus("Ready", "synced");
 }
 
 function requestIssueId(task) {
@@ -1058,7 +1058,7 @@ async function init() {
     });
   }
   await render();
-  setStatus("Ready");
+  setStatus("Ready", "synced");
   runCalendarAction("initial-sync", () => runSync({ force: false }));
   if (!refreshTimer) {
     refreshTimer = setInterval(() => {
