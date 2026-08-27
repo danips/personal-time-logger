@@ -203,6 +203,11 @@ entries and shared configuration, and switches the active backend only after
 verification succeeds. The source provider and its data remain available for
 reverse migration.
 
+For a new profile that does not use Google, choose **Use MySQL directly** in
+Storage. This initializes MySQL from that Firefox profile's local data without
+reading Google Sheets. Existing MySQL records that do not match the local data
+are rejected rather than overwritten.
+
 ## Calendar View
 
 The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Ordinary time logs are drawn from their actual start to end. A multiplied completed entry also has a visually distinct tail extending to its effective duration; that tail can overlap other blocks, but it does not move report, daily-total, sync, or Tempo time into a later period. Effective time is allocated proportionally across the actual interval. Entries whose displayed blocks overlap are shown side by side. Set the calendar start hour in Options; the initial calendar view starts displaying at that hour. The default is 07:00.

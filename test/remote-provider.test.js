@@ -274,7 +274,9 @@ describe("provider boundary", () => {
     const manifest = JSON.parse(readFileSync(join(process.cwd(), "extension/manifest.json"), "utf8"));
     assert.match(options, /id="storage"/);
     assert.match(options, /id="testMysqlConnection"/);
+    assert.match(options, /id="activateMysqlFromLocal"/);
     assert.match(optionsCode, /REMOTE_BACKEND_TARGET|remoteBackendTarget/);
+    assert.match(optionsCode, /activateMysqlFromLocal/);
     assert.match(options, /not switched until verified migration succeeds/i);
     assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
   });

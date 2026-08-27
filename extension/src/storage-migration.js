@@ -18,6 +18,7 @@ const MIGRATION_LOCK_TTL_MS = 120_000;
 const MIGRATION_BATCH_SIZE = 100;
 const MAX_STABILIZATION_ATTEMPTS = 3;
 const APP_MARKER_KEY = "app";
+const MYSQL_PROVIDER_ID = REMOTE_PROVIDER_ID.MYSQL;
 const MIGRATION_PHASES = new Set([
   "preparing",
   "seeding",
@@ -289,6 +290,87 @@ async function finishMigration(state) {
 async function failMigration(state, error) {
   if (!state) return;
   await saveState(progressState(state, { phase: "failed", error_code: String(error?.code || "MIGRATION_FAILED") }));
+}
+
+async function localMigrationSnapshot() {
+  const entries = await getAllEntries();
+  const config = {};
+  const updatedAt = String(await getSetting(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, "") || "");
+  if (updatedAt) {
+    config.duration_multiplier = {
+      value: String(await getSetting(SETTING_KEY.DURATION_MULTIPLIER, "1") || "1"),
+      updated_at: updatedAt
+    };
+  }
+  return { entries, config, duplicates: [], quarantined: [] };
+}
+
+/**
+ * Starts MySQL from this profile's local-first data without contacting Google.
+ * This is deliberately separate from migrateStorage: the normal migration
+ * must read the current remote backend, while a new profile may have no Google
+ * account and still need a way to choose MySQL as its first backend.
+ */
+export async function activateMysqlFromLocal({ onProgress } = {}) {
+  const active = await getActiveRemoteProvider();
+  if (active.id === MYSQL_PROVIDER_ID) {
+    throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "MySQL is already the active storage backend.");
+  }
+
+  let state = {
+    migration_id: migrationId(),
+    source_provider: "local",
+    target_provider: MYSQL_PROVIDER_ID,
+    phase: "preparing",
+    attempt: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  await saveState(state);
+  onProgress?.(state);
+
+  try {
+    const targetProvider = getRemoteProvider(MYSQL_PROVIDER_ID);
+
+    await withMigrationLease(state.migration_id, async (lease) => {
+      const options = { lease };
+      const sourceSnapshot = await localMigrationSnapshot();
+      validateSnapshot(sourceSnapshot, "local");
+      const sourceDigest = await migrationDigest(sourceSnapshot);
+      await prepareTarget(targetProvider, lease, options);
+      await lease.assert();
+      let targetSnapshot = await targetProvider.readSnapshot(options);
+      validateSnapshot(targetSnapshot, "target");
+      state = progressState(state, {
+        phase: "seeding",
+        source_digest: sourceDigest,
+        total_entries: sourceSnapshot.entries.length,
+        total_config: canonicalConfig(sourceSnapshot.config).length
+      });
+      await saveState(state);
+      onProgress?.(state);
+
+      await seedTarget(sourceSnapshot, targetProvider, targetSnapshot, state, { lease, options });
+      state = progressState(state, { phase: "verifying" });
+      await saveState(state);
+      onProgress?.(state);
+      targetSnapshot = await targetProvider.readSnapshot(options);
+      validateSnapshot(targetSnapshot, "target");
+      if (await migrationDigest(targetSnapshot) !== sourceDigest) {
+        throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, "The MySQL data does not match this device's local data.");
+      }
+      if (await migrationDigest(await localMigrationSnapshot()) !== sourceDigest) {
+        throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "Local data changed during MySQL setup.");
+      }
+      await switchBackend(MYSQL_PROVIDER_ID, state);
+    });
+
+    await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
+    return finishMigration(state);
+  } catch (error) {
+    await failMigration(state, error);
+    throw error;
+  }
 }
 
 export async function getStorageMigrationState() {

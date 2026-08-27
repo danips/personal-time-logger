@@ -101,7 +101,8 @@
               <label for="mysqlApiBaseUrl">HTTPS API base URL<input id="mysqlApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://time-api.cordoceo.com"></label>
               <label for="mysqlApiToken">API token<input id="mysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
               <p class="note">The token stays in this Firefox profile and is sent only as a bearer token to the configured API origin. It is not put in Firefox Sync.</p>
-              <div class="actions"><button id="testMysqlConnection" type="button">Test connection</button><button id="saveMysqlSettings" type="button">Save MySQL settings</button></div>
+              <div class="actions"><button id="testMysqlConnection" type="button">Test connection</button><button id="saveMysqlSettings" type="button">Save MySQL settings</button><button id="activateMysqlFromLocal" type="button">Use MySQL directly</button></div>
+              <p class="note">Use MySQL directly when you do not want a Google account. This initializes MySQL from this profile's local data only; Google Sheets is not read.</p>
               <p id="mysqlConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
           </section>
