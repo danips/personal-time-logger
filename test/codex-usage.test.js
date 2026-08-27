@@ -39,13 +39,13 @@ describe("ChatGPT usage normalizer", () => {
     });
 
     assert.deepEqual(normalized.account, { plan_type: "team" });
-    assert.equal(normalized.schema_version, 1);
     assert.equal(normalized.primary_window.used_percent, 4);
     assert.equal(normalized.primary_window.remaining_percent, 96);
     assert.equal(normalized.primary_window.reset_at, "2026-08-15T06:05:02.000Z");
     assert.equal(normalized.primary_window.window_seconds, 604800);
     assert.deepEqual(normalized.secondary_window, null);
-    assert.deepEqual(normalized.notices, []);
+    assert.equal("credits" in normalized, false);
+    assert.equal("notices" in normalized, false);
     assert.equal("user_id" in normalized, false);
     assert.equal("account_id" in normalized, false);
     assert.equal(JSON.stringify(normalized).includes("redacted-user-id"), false);
@@ -114,7 +114,6 @@ describe("ChatGPT usage normalizer", () => {
 
     const noWindow = normalizeUsageResponse(fixture({ rate_limit: { primary_window: null } }));
     assert.equal(noWindow.primary_window, null);
-    assert.deepEqual(noWindow.notices, ["usage_window_unavailable"]);
   });
 
   it("derives a reset timestamp from a validated relative reset", () => {
@@ -140,50 +139,30 @@ describe("ChatGPT usage normalizer", () => {
     );
   });
 
-  it("preserves access, reached, unlimited, credit, and overage states", () => {
+  it("preserves access and reached states", () => {
     const value = normalizeUsageResponse(fixture({
       rate_limit: {
         ...fixture().rate_limit,
         allowed: false,
         limit_reached: true,
         limit_reached_type: "weekly"
-      },
-      credits: {
-        has_credits: true,
-        unlimited: true,
-        overage_limit_reached: true,
-        balance: 12.5
       }
     }));
     assert.deepEqual(value.access, { allowed: false, limit_reached: true, limit_reached_type: "weekly" });
-    assert.deepEqual(value.credits, {
-      has_credits: true,
-      unlimited: true,
-      overage_limit_reached: true,
-      balance: 12.5
-    });
   });
 
-  it("accepts the observed object forms of reached type and credit balance", () => {
+  it("accepts the observed object form of reached type without retaining details", () => {
     const value = normalizeUsageResponse(fixture({
-      rate_limit_reached_type: { type: "weekly", details: { intentionally: "not persisted" } },
-      credits: {
-        has_credits: true,
-        unlimited: false,
-        overage_limit_reached: false,
-        balance: { currency: "not persisted" }
-      }
+      rate_limit_reached_type: { type: "weekly", details: { intentionally: "not persisted" } }
     }));
     assert.equal(value.access.limit_reached_type, "weekly");
-    assert.equal(value.credits.balance, null);
     assert.equal(JSON.stringify(value).includes("not persisted"), false);
   });
 
-  it("retains a non-fatal notice for unsupported additional limits without raw data", () => {
+  it("ignores unsupported additional limits without retaining raw data", () => {
     const value = normalizeUsageResponse(fixture({
       additional_rate_limits: { private_shape: "not persisted" }
     }));
-    assert.deepEqual(value.notices, ["unsupported_additional_limit"]);
     assert.equal(JSON.stringify(value).includes("private_shape"), false);
   });
 
@@ -211,6 +190,5 @@ describe("ChatGPT usage normalizer", () => {
     }));
     assert.equal(value.secondary_window.remaining_percent, 90);
     assert.equal(value.secondary_window.reset_at, null);
-    assert.deepEqual(value.notices, []);
   });
 });

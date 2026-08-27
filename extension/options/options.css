@@ -756,7 +756,7 @@ code {
   background: var(--warning-soft);
 }
 
-.account-card,
+.usage-card,
 .row {
   padding: 14px;
   border-color: var(--border);
@@ -764,25 +764,24 @@ code {
   background: var(--surface-subtle);
 }
 
-.account-card[data-stale="true"] {
+.usage-card[data-stale="true"] {
   border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
 }
 
-.account-card[data-expired="true"],
-.account-error {
+.usage-error {
   border-color: var(--danger);
   color: var(--danger);
 }
 
-.account-badge,
+.usage-badge,
 .badge {
   border-color: var(--border);
   background: var(--surface);
   color: var(--muted);
 }
 
-.account-badge,
-.account-notice {
+.usage-badge,
+.usage-notice {
   color: var(--warning);
 }
 
@@ -904,7 +903,7 @@ code {
     background: var(--warning-soft);
   }
 
-  .account-card,
+  .usage-card,
   .row,
   code {
     border-color: var(--border);

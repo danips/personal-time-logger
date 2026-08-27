@@ -43,7 +43,7 @@ describe("database open lifecycle", () => {
     const db = await import(`../extension/src/db.js?versionchange=${Date.now()}`);
     await db.setSetting("version-change", true);
 
-    await openDatabase("timelogger_db", 5);
+    await openDatabase("timelogger_db", 6);
     await assert.rejects(() => db.getSetting("after-version-change"), /VersionError/);
   });
 });

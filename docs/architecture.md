@@ -34,7 +34,7 @@ runtime smoke test, and release pipeline support Firefox only.
 
 ## Local data and settings
 
-`extension/src/db.js` opens IndexedDB database `timelogger_db` (version 4) with two
+`extension/src/db.js` opens IndexedDB database `timelogger_db` (version 5) with two
 stores:
 
 | Store | Contents | Important access paths |

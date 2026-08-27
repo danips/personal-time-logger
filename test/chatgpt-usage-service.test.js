@@ -77,7 +77,6 @@ describe("single-session ChatGPT usage", () => {
     assert.equal(snapshot.primary_window.remaining_percent, 99);
     assert.equal(snapshot.secondary_window.window_seconds, 604_800);
     assert.equal(snapshot.secondary_window.remaining_percent, 93);
-    assert.equal(snapshot.source, "extension_session");
     assert.equal(calls.length, 2);
     assert.equal(calls[0].options.credentials, "include");
     assert.equal(calls[1].options.headers["chatgpt-account-id"], "redacted-account-id");
@@ -123,20 +122,14 @@ describe("single-session ChatGPT usage", () => {
     assert.equal(JSON.stringify(state).includes("deactivated_workspace"), false);
   });
 
-  it("clears the current snapshot and legacy multi-account settings", async () => {
+  it("clears the current snapshot and consent", async () => {
     const { values, overrides } = harness();
     values.set(CHATGPT_USAGE_STATE_KEY, { snapshot: {} });
-    values.set("chatgpt_usage_accounts", [{ id: "legacy" }]);
-    values.set("chatgpt_usage_account_generation", 2);
-    values.set("chatgpt_usage_profile_salt", "legacy-salt");
 
     await clearChatGptUsageData(overrides);
     for (const key of [
       CHATGPT_USAGE_STATE_KEY,
-      CHATGPT_SESSION_TOKEN_CONSENT_KEY,
-      "chatgpt_usage_accounts",
-      "chatgpt_usage_account_generation",
-      "chatgpt_usage_profile_salt"
+      CHATGPT_SESSION_TOKEN_CONSENT_KEY
     ]) {
       assert.equal(values.has(key), false);
     }

@@ -82,7 +82,7 @@ function usageWindow(window, fallbackLabel) {
   section.append(heading);
 
   const value = document.createElement("div");
-  value.className = "account-value";
+  value.className = "usage-value";
   value.textContent = `${window.remaining_percent}%`;
   const suffix = document.createElement("span");
   suffix.textContent = " remaining";
@@ -96,12 +96,12 @@ function usageWindow(window, fallbackLabel) {
   section.append(progress);
 
   const used = document.createElement("p");
-  used.className = "account-used";
+  used.className = "usage-used";
   used.textContent = `${window.used_percent}% used`;
   section.append(used);
 
   const reset = document.createElement("p");
-  reset.className = "account-reset";
+  reset.className = "usage-reset";
   reset.textContent = window.reset_at
     ? `Resets ${formatDate(window.reset_at)} (${formatCountdown(window.reset_at)})`
     : "Reset time unavailable";
@@ -119,7 +119,7 @@ function renderSnapshot(state) {
     $snapshot.append(empty);
     if (state.last_error) {
       const error = document.createElement("p");
-      error.className = "account-error";
+      error.className = "usage-error";
       error.textContent = messageFor(state.last_error);
       $snapshot.append(error);
     }
@@ -128,17 +128,17 @@ function renderSnapshot(state) {
 
   const stale = snapshotAge(snapshot) > STALE_AFTER_MS;
   const card = document.createElement("article");
-  card.className = "account-card";
+  card.className = "usage-card";
   card.dataset.stale = String(stale);
 
   const heading = document.createElement("div");
-  heading.className = "account-heading";
+  heading.className = "usage-heading";
   const title = document.createElement("h3");
   title.textContent = snapshot.account?.plan_type ? `ChatGPT ${snapshot.account.plan_type}` : "ChatGPT usage";
   heading.append(title);
   if (stale) {
     const badge = document.createElement("span");
-    badge.className = "account-badge";
+    badge.className = "usage-badge";
     badge.textContent = "Stale";
     heading.append(badge);
   }
@@ -152,26 +152,26 @@ function renderSnapshot(state) {
 
   if (!snapshot.primary_window && !snapshot.secondary_window) {
     const unavailable = document.createElement("p");
-    unavailable.className = "account-notice";
+    unavailable.className = "usage-notice";
     unavailable.textContent = "ChatGPT did not publish a current usage window.";
     card.append(unavailable);
   }
 
   const stateLine = document.createElement("p");
-  stateLine.className = "account-state";
+  stateLine.className = "usage-state";
   stateLine.textContent = snapshot.access.limit_reached
     ? `Limit reached${snapshot.access.limit_reached_type ? ` · ${snapshot.access.limit_reached_type}` : ""}`
     : snapshot.access.allowed ? "Usage allowed" : "Usage not allowed";
   card.append(stateLine);
 
   const collected = document.createElement("p");
-  collected.className = "account-collected";
+  collected.className = "usage-collected";
   collected.textContent = `Last refreshed: ${formatDate(snapshot.collected_at)}`;
   card.append(collected);
 
   if (state.last_error) {
     const error = document.createElement("p");
-    error.className = "account-error";
+    error.className = "usage-error";
     error.textContent = messageFor(state.last_error);
     card.append(error);
   }

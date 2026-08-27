@@ -1,7 +1,7 @@
 import { ERROR_CODE } from "./error-codes.js";
 
 const DB_NAME = "timelogger_db";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const ENTRY_STORE = "time_entries";
 const SETTINGS_STORE = "settings";
 const LOCK_GENERATION_SUFFIX = ":generation";
@@ -14,6 +14,12 @@ const ENTRY_INDEX = {
   STATUS: "status"
 };
 const LEGACY_DIRTY_INDEX = "dirty";
+const V5_RESET_SETTING_KEYS = [
+  "chatgpt_usage_accounts",
+  "chatgpt_usage_account_generation",
+  "chatgpt_usage_profile_salt",
+  "chatgpt_usage_state"
+];
 
 let dbPromise = null;
 
@@ -55,8 +61,11 @@ function openDb() {
         : db.createObjectStore(ENTRY_STORE, { keyPath: "id" });
       ensureEntryIndexes(entries);
       if (event.oldVersion < 4) migrateDirtyEntryKeys(entries);
-      if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
-        db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+      const settings = db.objectStoreNames.contains(SETTINGS_STORE)
+        ? request.transaction.objectStore(SETTINGS_STORE)
+        : db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+      if (event.oldVersion < 5) {
+        for (const key of V5_RESET_SETTING_KEYS) settings.delete(key);
       }
     };
 

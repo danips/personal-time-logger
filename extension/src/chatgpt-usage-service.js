@@ -13,11 +13,6 @@ const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const USAGE_PATH = "/backend-api/wham/usage";
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
-const LEGACY_USAGE_KEYS = [
-  "chatgpt_usage_accounts",
-  "chatgpt_usage_account_generation",
-  "chatgpt_usage_profile_salt"
-];
 
 let inFlightRefresh = null;
 
@@ -53,14 +48,12 @@ export function normalizeChatGptUsageState(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {
       snapshot: null,
-      last_success_at: null,
       last_attempt_at: 0,
       last_error: null
     };
   }
   return {
     snapshot: value.snapshot && typeof value.snapshot === "object" ? value.snapshot : null,
-    last_success_at: typeof value.last_success_at === "string" ? value.last_success_at : null,
     last_attempt_at: Number.isFinite(Number(value.last_attempt_at)) ? Number(value.last_attempt_at) : 0,
     last_error: value.last_error && typeof value.last_error === "object" ? value.last_error : null
   };
@@ -215,10 +208,7 @@ export async function requestCurrentChatGptUsage(overrides = {}) {
   });
   await throwForResponse(usageResponse);
   const body = await readBoundedJson(usageResponse);
-  return {
-    ...normalizeUsageResponse(body, { collectedAt: new Date(deps.now()).toISOString() }),
-    source: "extension_session"
-  };
+  return normalizeUsageResponse(body, { collectedAt: new Date(deps.now()).toISOString() });
 }
 
 export async function getChatGptUsageState(overrides = {}) {
@@ -254,7 +244,6 @@ export async function refreshChatGptUsage(overrides = {}) {
       const snapshot = await requestCurrentChatGptUsage({ ...overrides, now: deps.now, fetch: deps.fetch, language: deps.language });
       const state = {
         snapshot,
-        last_success_at: snapshot.collected_at,
         last_attempt_at: attemptedAt,
         last_error: null
       };
@@ -283,7 +272,7 @@ export async function refreshChatGptUsage(overrides = {}) {
 
 export async function clearChatGptUsageData(overrides = {}) {
   const deps = dependencies(overrides);
-  const keys = [CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, ...LEGACY_USAGE_KEYS];
+  const keys = [CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY];
   if (overrides.mutateSettings || (!overrides.getSetting && !overrides.setSetting && !overrides.removeSetting)) {
     await deps.mutateSettings(keys, (settings) => {
       for (const key of keys) settings.delete(key);

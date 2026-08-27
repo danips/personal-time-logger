@@ -13,7 +13,7 @@ before(async () => {
 });
 
 describe("IndexedDB repository", () => {
-  it("creates the version-4 stores and round-trips entries and settings", async () => {
+  it("creates the version-5 stores and round-trips entries and settings", async () => {
     const entry = { id: "entry-1", project: "Project", revision: 1, dirty: true };
 
     await db.setSetting("profile", { name: "Test user" });
@@ -40,8 +40,8 @@ describe("IndexedDB repository", () => {
   });
 
   it("shares committed data across independent database connections", async () => {
-    const first = indexedDB.open("timelogger_db", 4);
-    const second = indexedDB.open("timelogger_db", 4);
+    const first = indexedDB.open("timelogger_db", 5);
+    const second = indexedDB.open("timelogger_db", 5);
     const [firstConnection, secondConnection] = await Promise.all([
       new Promise((resolve, reject) => {
         first.onsuccess = () => resolve(first.result);
