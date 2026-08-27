@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { parse } from "acorn";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
@@ -10,6 +10,7 @@ const extensionRoot = join(root, "extension");
 const MODULE_DIRECTORIES = ["src", "popup", "calendar", "options", "reconcile", "background", "usage", "content"];
 
 function jsFiles(directory) {
+  if (!existsSync(join(extensionRoot, directory))) return [];
   return readdirSync(join(extensionRoot, directory))
     .filter((name) => name.endsWith(".js"))
     .map((name) => `${directory}/${name}`);
