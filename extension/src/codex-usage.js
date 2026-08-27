@@ -1,5 +1,3 @@
-export const CHATGPT_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
-export const OFFICIAL_USAGE_URL = "https://chatgpt.com/codex/cloud/settings/analytics#usage";
 export const USAGE_SCHEMA_VERSION = 1;
 
 export class UsageError extends Error {
@@ -105,38 +103,7 @@ function hasUnsupportedAdditionalLimit(raw, rateLimit) {
   );
 }
 
-function accountSource(raw) {
-  const account = isRecord(raw.account) ? raw.account : raw;
-  return {
-    email: optionalString(account.email ?? raw.email, "account.email"),
-    plan_type: optionalString(account.plan_type ?? raw.plan_type, "account.plan_type")
-  };
-}
-
-/**
- * Extracts only the transient identity fields needed for duplicate detection.
- * Callers must not persist or display this return value.
- */
-export function extractUsageIdentity(raw) {
-  if (!isRecord(raw)) throw schemaError("usage response is not an object");
-  const account = isRecord(raw.account) ? raw.account : {};
-  const rawUserId = raw.user_id ?? account.user_id;
-  const rawAccountId = raw.account_id ?? account.account_id;
-  // Identity is only a duplicate-detection aid, never required to display a
-  // usage response. Some valid account responses omit one of these fields.
-  if (rawUserId !== undefined && rawUserId !== null && typeof rawUserId !== "string") {
-    throw schemaError("user_id has an invalid type");
-  }
-  if (rawAccountId !== undefined && rawAccountId !== null && typeof rawAccountId !== "string") {
-    throw schemaError("account_id has an invalid type");
-  }
-  if (!rawUserId || !rawAccountId) return null;
-  const userId = rawUserId;
-  const accountId = rawAccountId;
-  return { user_id: userId, account_id: accountId };
-}
-
-export function normalizeUsageResponse(raw, { label = "ChatGPT account", collectedAt = new Date().toISOString() } = {}) {
+export function normalizeUsageResponse(raw, { collectedAt = new Date().toISOString() } = {}) {
   if (!isRecord(raw)) throw schemaError("usage response is not an object");
   if (!("rate_limit" in raw) && !("plan_type" in raw) && !("credits" in raw)) {
     throw schemaError("usage response has no recognized usage fields");
@@ -158,7 +125,7 @@ export function normalizeUsageResponse(raw, { label = "ChatGPT account", collect
     secondaryNotice = secondaryWindow === null;
   }
 
-  const account = accountSource(raw);
+  const account = isRecord(raw.account) ? raw.account : raw;
   const notices = [];
   if (!primaryWindow) notices.push("usage_window_unavailable");
   if (hasUnsupportedAdditionalLimit(raw, rateLimit)) notices.push("unsupported_additional_limit");
@@ -167,9 +134,7 @@ export function normalizeUsageResponse(raw, { label = "ChatGPT account", collect
   return {
     schema_version: USAGE_SCHEMA_VERSION,
     account: {
-      label: String(label || "ChatGPT account"),
-      email: account.email,
-      plan_type: account.plan_type
+      plan_type: optionalString(account.plan_type ?? raw.plan_type, "account.plan_type")
     },
     access: {
       allowed: optionalBoolean(rateLimit.allowed, "rate_limit.allowed", true),
@@ -180,32 +145,6 @@ export function normalizeUsageResponse(raw, { label = "ChatGPT account", collect
     secondary_window: secondaryWindow,
     credits: normalizeCredits(raw.credits),
     collected_at: new Date(collectedAt).toISOString(),
-    notices,
-    official_usage_url: OFFICIAL_USAGE_URL
+    notices
   };
-}
-
-export function normalizeBridgeResult(result, options = {}) {
-  if (!isRecord(result)) throw new UsageError("service_error", "The ChatGPT usage bridge returned no result");
-  if (result.ok === false || (typeof result.status === "number" && result.status < 200)) {
-    throw new UsageError(result.error_code || "service_error", "ChatGPT usage could not be read", {
-      http_status: Number.isFinite(result.status) ? result.status : null,
-      retry_after_seconds: Number.isFinite(result.retry_after_seconds) ? result.retry_after_seconds : null
-    });
-  }
-  if (typeof result.status !== "number") throw new UsageError("service_error", "The ChatGPT usage bridge returned no status");
-  if (result.status === 401) throw new UsageError("sign_in_required", "Sign in to ChatGPT in this container");
-  if (result.status === 403) throw new UsageError("access_denied", "ChatGPT denied usage access");
-  if (result.status === 404 || result.status === 410) throw new UsageError("endpoint_unavailable", "ChatGPT usage endpoint is unavailable");
-  if (result.status === 429) throw new UsageError("temporarily_rate_limited", "ChatGPT temporarily rate-limited this request");
-  if (result.status < 200 || result.status >= 300) throw new UsageError("service_error", "ChatGPT usage returned an error");
-  try {
-    return {
-      ...normalizeUsageResponse(result.body, options),
-      source: result.transport === "page_world_session" ? "page_fallback" : "isolated"
-    };
-  } catch (error) {
-    if (error instanceof UsageError) throw error;
-    throw schemaError("The ChatGPT usage response could not be validated");
-  }
 }

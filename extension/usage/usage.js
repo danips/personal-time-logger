@@ -1,60 +1,44 @@
+import { runAction } from "../src/action-runner.js";
+import { getSetting, setSetting } from "../src/db.js";
 import {
   CHATGPT_HOST_PERMISSION,
   CHATGPT_SESSION_TOKEN_CONSENT_KEY,
-  createAccountContainer,
-  disconnectAccount,
-  getChatGptAccounts,
-  refreshAccount,
-  refreshAllAccounts,
-  verifyAccount,
-  clearChatGptUsageData
-} from "../src/chatgpt-containers.js";
-import { runAction } from "../src/action-runner.js";
-import { getSetting, setSetting } from "../src/db.js";
-import { OFFICIAL_USAGE_URL, UsageError } from "../src/codex-usage.js";
+  clearChatGptUsageData,
+  getChatGptUsageState,
+  refreshChatGptUsage
+} from "../src/chatgpt-usage-service.js";
+import { UsageError } from "../src/codex-usage.js";
 import { platform } from "../src/platform.js";
 import { startPage } from "../src/page-runtime.js";
 
 const AUTO_REFRESH_AFTER_MS = 5 * 60 * 1000;
 const STALE_AFTER_MS = 15 * 60 * 1000;
-const RETRY_DELAY_MS = 2_000;
 
 const $ = (selector) => document.querySelector(selector);
 const $status = $("#pageStatus");
 const $grant = $("#grantAccess");
-const $setup = $("#setupPanel");
-const $label = $("#accountLabel");
-const $accounts = $("#accounts");
-const $refreshAll = $("#refreshAll");
+const $refresh = $("#refreshUsage");
 const $clearData = $("#clearData");
 const $sessionTokenConsent = $("#sessionTokenConsent");
-const retryTimers = new Map();
+const $snapshot = $("#usageSnapshot");
 let sessionTokenConsent = false;
 let renderGeneration = 0;
 let eventsBound = false;
 
 function messageFor(error) {
-  if (error?.code === "sign_in_required" && error.http_status === 401) {
-    return "The ChatGPT usage endpoint returned HTTP 401 for this container session. Reload the ChatGPT tab and try again.";
-  }
   if (error?.code === "schema_changed") {
-    const detail = typeof error.message === "string" && error.message
-      ? ` (${error.message})`
-      : "";
+    const detail = typeof error.message === "string" && error.message ? ` (${error.message})` : "";
     return `ChatGPT returned an unexpected usage response${detail}.`;
   }
   const messages = {
-    permission_required: "Grant ChatGPT access before refreshing an account.",
-    containers_unavailable: "Firefox containers are unavailable in this profile.",
-    sign_in_required: "Sign in to ChatGPT in this container, then try again.",
+    permission_required: "Grant ChatGPT access before refreshing usage.",
+    consent_required: "Confirm the in-memory session-token notice before refreshing usage.",
+    sign_in_required: "Sign in to ChatGPT in your normal Firefox profile, then try again.",
+    workspace_deactivated: "ChatGPT is still using a deactivated workspace. Switch ChatGPT to your personal workspace, then refresh.",
     access_denied: "ChatGPT denied access to the usage response.",
     endpoint_unavailable: "The private ChatGPT usage endpoint is unavailable.",
     network_error: "The ChatGPT usage request could not reach the service.",
-    temporarily_rate_limited: "ChatGPT is temporarily rate-limiting this account.",
-    duplicate_account: "That ChatGPT account is already connected.",
-    account_mismatch: "This container is signed in to a different ChatGPT account.",
-    container_deleted: "The Firefox container for this account no longer exists.",
-    invalid_label: "Enter a local label for this account."
+    temporarily_rate_limited: "ChatGPT is temporarily rate-limiting usage checks."
   };
   return messages[error?.code] || error?.message || "ChatGPT usage operation failed.";
 }
@@ -79,38 +63,119 @@ function formatCountdown(resetAt, now = Date.now()) {
   return `in ${parts.join(" ")}`;
 }
 
+export function usageWindowLabel(window, fallback) {
+  const seconds = Number(window?.window_seconds);
+  if (seconds === 5 * 60 * 60) return "5-hour limit";
+  if (seconds === 7 * 24 * 60 * 60) return "Weekly limit";
+  return fallback;
+}
+
 function snapshotAge(snapshot) {
   return Date.now() - new Date(snapshot?.collected_at || 0).getTime();
 }
 
-function isExpired(snapshot) {
-  return Boolean(snapshot?.primary_window?.reset_at) && new Date(snapshot.primary_window.reset_at).getTime() <= Date.now();
+function usageWindow(window, fallbackLabel) {
+  const section = document.createElement("section");
+  section.className = "usage-window";
+  const heading = document.createElement("h3");
+  heading.textContent = usageWindowLabel(window, fallbackLabel);
+  section.append(heading);
+
+  const value = document.createElement("div");
+  value.className = "account-value";
+  value.textContent = `${window.remaining_percent}%`;
+  const suffix = document.createElement("span");
+  suffix.textContent = " remaining";
+  value.append(suffix);
+  section.append(value);
+
+  const progress = document.createElement("progress");
+  progress.max = 100;
+  progress.value = window.remaining_percent;
+  progress.setAttribute("aria-label", `${window.remaining_percent}% ${heading.textContent.toLowerCase()} remaining`);
+  section.append(progress);
+
+  const used = document.createElement("p");
+  used.className = "account-used";
+  used.textContent = `${window.used_percent}% used`;
+  section.append(used);
+
+  const reset = document.createElement("p");
+  reset.className = "account-reset";
+  reset.textContent = window.reset_at
+    ? `Resets ${formatDate(window.reset_at)} (${formatCountdown(window.reset_at)})`
+    : "Reset time unavailable";
+  section.append(reset);
+  return section;
 }
 
-function isStale(snapshot) {
-  return snapshotAge(snapshot) > STALE_AFTER_MS;
-}
+function renderSnapshot(state) {
+  $snapshot.replaceChildren();
+  const snapshot = state.snapshot;
+  if (!snapshot) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No ChatGPT usage snapshot yet. Sign in to ChatGPT and refresh.";
+    $snapshot.append(empty);
+    if (state.last_error) {
+      const error = document.createElement("p");
+      error.className = "account-error";
+      error.textContent = messageFor(state.last_error);
+      $snapshot.append(error);
+    }
+    return;
+  }
 
-function appendLink(parent, text, url) {
-  const link = document.createElement("a");
-  link.textContent = text;
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  parent.append(link);
-}
+  const stale = snapshotAge(snapshot) > STALE_AFTER_MS;
+  const card = document.createElement("article");
+  card.className = "account-card";
+  card.dataset.stale = String(stale);
 
-function usageTab(account) {
-  return platform.createTab({ url: OFFICIAL_USAGE_URL, cookieStoreId: account.cookie_store_id, active: true });
-}
+  const heading = document.createElement("div");
+  heading.className = "account-heading";
+  const title = document.createElement("h3");
+  title.textContent = snapshot.account?.plan_type ? `ChatGPT ${snapshot.account.plan_type}` : "ChatGPT usage";
+  heading.append(title);
+  if (stale) {
+    const badge = document.createElement("span");
+    badge.className = "account-badge";
+    badge.textContent = "Stale";
+    heading.append(badge);
+  }
+  card.append(heading);
 
-function errorCode(account) {
-  return account.last_error?.code || "";
-}
+  const windows = document.createElement("div");
+  windows.className = "usage-windows";
+  if (snapshot.primary_window) windows.append(usageWindow(snapshot.primary_window, "Primary limit"));
+  if (snapshot.secondary_window) windows.append(usageWindow(snapshot.secondary_window, "Secondary limit"));
+  card.append(windows);
 
-function consentRequired() {
-  $status.textContent = "Confirm the in-memory session-token notice before checking ChatGPT usage.";
-  $sessionTokenConsent.focus();
+  if (!snapshot.primary_window && !snapshot.secondary_window) {
+    const unavailable = document.createElement("p");
+    unavailable.className = "account-notice";
+    unavailable.textContent = "ChatGPT did not publish a current usage window.";
+    card.append(unavailable);
+  }
+
+  const stateLine = document.createElement("p");
+  stateLine.className = "account-state";
+  stateLine.textContent = snapshot.access.limit_reached
+    ? `Limit reached${snapshot.access.limit_reached_type ? ` · ${snapshot.access.limit_reached_type}` : ""}`
+    : snapshot.access.allowed ? "Usage allowed" : "Usage not allowed";
+  card.append(stateLine);
+
+  const collected = document.createElement("p");
+  collected.className = "account-collected";
+  collected.textContent = `Last refreshed: ${formatDate(snapshot.collected_at)}`;
+  card.append(collected);
+
+  if (state.last_error) {
+    const error = document.createElement("p");
+    error.className = "account-error";
+    error.textContent = messageFor(state.last_error);
+    card.append(error);
+  }
+  $snapshot.append(card);
 }
 
 function runUsageAction(key, action, button = null) {
@@ -129,235 +194,36 @@ function runUsageAction(key, action, button = null) {
   });
 }
 
-async function retryTransient(accountId) {
-  if (retryTimers.has(accountId)) return;
-  retryTimers.set(accountId, true);
-  await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-  try {
-    await refreshAccount(accountId, { ignoreCooldown: true });
-  } finally {
-    retryTimers.delete(accountId);
-  }
-}
-
-async function refreshOne(accountId, label, { automatic = false } = {}) {
-  try {
-    const outcome = await refreshAccount(accountId, { ignoreCooldown: automatic });
-    $status.textContent = outcome.kind === "skipped"
-      ? `${label} refresh skipped: ${outcome.reason}.`
-      : `${label} refreshed.`;
-  } catch (error) {
-    if (error?.code === "network_error") {
-      try {
-        await retryTransient(accountId);
-        $status.textContent = `${label} refreshed after a network retry.`;
-      } catch (retryError) {
-        $status.textContent = `${label}: ${messageFor(retryError)}`;
-      }
-    } else {
-      $status.textContent = `${label}: ${messageFor(error)}`;
-    }
-  }
-}
-
-function accountCard(account, enabled) {
-  const snapshot = account.snapshot;
-  const stale = Boolean(snapshot && isStale(snapshot));
-  const expired = Boolean(snapshot && isExpired(snapshot));
-  const card = document.createElement("article");
-  card.className = "account-card";
-  card.dataset.stale = String(stale);
-  card.dataset.expired = String(expired);
-
-  const heading = document.createElement("div");
-  heading.className = "account-heading";
-  const title = document.createElement("h3");
-  title.textContent = account.label;
-  heading.append(title);
-  if (stale || expired) {
-    const badge = document.createElement("span");
-    badge.className = "account-badge";
-    badge.textContent = expired ? "Expired" : "Stale";
-    heading.append(badge);
-  }
-  card.append(heading);
-
-  const meta = document.createElement("p");
-  meta.className = "account-meta";
-  if (account.email) {
-    meta.textContent = `${account.email}${account.plan_type ? ` · ${account.plan_type}` : ""}`;
-  } else {
-    meta.textContent = account.pending_setup ? "Setup pending — sign in in the Firefox container tab." : "No email provided by ChatGPT.";
-  }
-  card.append(meta);
-
-  if (snapshot?.primary_window) {
-    const remaining = snapshot.primary_window.remaining_percent;
-    const value = document.createElement("div");
-    value.className = "account-value";
-    value.textContent = String(remaining);
-    const suffix = document.createElement("span");
-    suffix.textContent = "% Weekly usage remaining";
-    value.append(suffix);
-    card.append(value);
-
-    const progress = document.createElement("progress");
-    progress.max = 100;
-    progress.value = remaining;
-    progress.setAttribute("aria-label", `${remaining}% weekly usage remaining`);
-    card.append(progress);
-
-    const used = document.createElement("p");
-    used.className = "account-used";
-    used.textContent = `${snapshot.primary_window.used_percent}% used`;
-    card.append(used);
-
-    const reset = document.createElement("p");
-    reset.className = "account-reset";
-    reset.textContent = `Resets ${formatDate(snapshot.primary_window.reset_at)} (${formatCountdown(snapshot.primary_window.reset_at)})`;
-    card.append(reset);
-
-    const state = document.createElement("p");
-    state.className = "account-state";
-    const states = [];
-    if (snapshot.access.limit_reached) states.push("Limit reached");
-    else if (snapshot.access.allowed) states.push("Usage allowed");
-    else states.push("Usage not allowed");
-    if (snapshot.credits.unlimited) states.push("Unlimited credits");
-    if (snapshot.credits.has_credits) states.push("Credits available");
-    if (snapshot.credits.overage_limit_reached) states.push("Overage limit reached");
-    state.textContent = states.join(" · ");
-    card.append(state);
-
-    if (snapshot.notices.length) {
-      const notice = document.createElement("p");
-      notice.className = "account-notice";
-      notice.textContent = "An additional ChatGPT limit is not supported by this experimental reader. ";
-      appendLink(notice, "Open official Usage page", snapshot.official_usage_url || OFFICIAL_USAGE_URL);
-      card.append(notice);
-    }
-
-    const collected = document.createElement("p");
-    collected.className = "account-collected";
-    collected.textContent = `Last successful refresh: ${formatDate(snapshot.collected_at)}${stale ? " · stale" : ""}`;
-    card.append(collected);
-  } else if (snapshot) {
-    const unavailable = document.createElement("p");
-    unavailable.className = "account-notice";
-    unavailable.textContent = "ChatGPT did not publish a current usage window for this account. ";
-    appendLink(unavailable, "Open official Usage page", snapshot.official_usage_url || OFFICIAL_USAGE_URL);
-    card.append(unavailable);
-
-    const collected = document.createElement("p");
-    collected.className = "account-collected";
-    collected.textContent = `Last successful refresh: ${formatDate(snapshot.collected_at)}${stale ? " · stale" : ""}`;
-    card.append(collected);
-  }
-
-  if (snapshot?.source) {
-    const source = document.createElement("p");
-    source.className = "account-collected";
-    source.textContent = snapshot.source === "page_fallback"
-      ? "Source: page fallback — experimental and unverified"
-      : "Source: isolated extension request";
-    card.append(source);
-  }
-
-  const storedError = errorCode(account);
-  if (storedError) {
-    const error = document.createElement("p");
-    error.className = "account-error";
-    error.textContent = account.last_error?.message || messageFor({ code: storedError });
-    card.append(error);
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "actions account-actions";
-  const refresh = document.createElement("button");
-  refresh.type = "button";
-  refresh.textContent = "Refresh";
-  refresh.disabled = !enabled;
-  refresh.title = enabled ? "Refresh this account" : "Grant ChatGPT access and confirm the session-token notice to refresh";
-  refresh.addEventListener("click", () => runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account.id, account.label), refresh));
-  actions.append(refresh);
-
-  const openUsage = document.createElement("button");
-  openUsage.type = "button";
-  openUsage.textContent = "Open ChatGPT Usage";
-  openUsage.addEventListener("click", () => usageTab(account).catch((error) => { $status.textContent = messageFor(error); }));
-  actions.append(openUsage);
-
-  if (account.pending_setup || storedError === "sign_in_required" || storedError === "account_mismatch") {
-    const signIn = document.createElement("button");
-    signIn.type = "button";
-    signIn.textContent = "Sign in";
-    signIn.addEventListener("click", () => usageTab(account).catch((error) => { $status.textContent = messageFor(error); }));
-    actions.append(signIn);
-  }
-
-  if (account.pending_setup) {
-    const check = document.createElement("button");
-    check.type = "button";
-    check.textContent = "Check signed-in account";
-    check.disabled = !enabled;
-    check.addEventListener("click", () => runUsageAction(`verify-account:${account.id}`, async () => {
-      if (!sessionTokenConsent) return consentRequired();
-      $status.textContent = `Checking ${account.label}…`;
-      try {
-        await verifyAccount(account.cookie_store_id);
-        $status.textContent = `${account.label} is connected.`;
-      } catch (error) {
-        $status.textContent = `${account.label}: ${messageFor(error)}`;
-      }
-    }, check));
-    actions.append(check);
-  }
-
-  const disconnect = document.createElement("button");
-  disconnect.type = "button";
-  disconnect.textContent = "Disconnect";
-  disconnect.addEventListener("click", () => runUsageAction(`disconnect-account:${account.id}`, async () => {
-    if (!confirm(`Disconnect ${account.label}? The Firefox container will remain.`)) return;
-    await disconnectAccount(account.id);
-  }, disconnect));
-  actions.append(disconnect);
-  card.append(actions);
-  return card;
+async function refreshUsage({ automatic = false } = {}) {
+  const outcome = await refreshChatGptUsage({ ignoreCooldown: !automatic });
+  $status.textContent = outcome.kind === "skipped" ? "Usage is already up to date." : "ChatGPT usage refreshed.";
 }
 
 async function render({ autoRefresh = true } = {}) {
   const generation = ++renderGeneration;
-  const [permitted, storedConsent, accounts] = await Promise.all([
+  const [permitted, storedConsent, state] = await Promise.all([
     platform.hasOptionalHostPermission(CHATGPT_HOST_PERMISSION),
     getSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, false),
-    getChatGptAccounts()
+    getChatGptUsageState()
   ]);
   if (generation !== renderGeneration) return;
+
   sessionTokenConsent = Boolean(storedConsent);
   const enabled = permitted && sessionTokenConsent;
   $sessionTokenConsent.checked = sessionTokenConsent;
   $grant.hidden = permitted;
   $grant.disabled = !sessionTokenConsent;
-  $setup.hidden = !enabled;
-  $clearData.disabled = false;
-  $refreshAll.hidden = !enabled || !accounts.length;
-  $accounts.replaceChildren();
-  if (!accounts.length) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = permitted ? "No ChatGPT accounts connected yet." : "Grant access to set up an account.";
-    $accounts.append(empty);
+  $refresh.disabled = !enabled;
+  renderSnapshot(state);
+
+  if (!sessionTokenConsent) {
+    $status.textContent = "Confirm the in-memory session-token notice to enable usage checks.";
   } else {
-    for (const account of accounts) $accounts.append(accountCard(account, enabled));
+    $status.textContent = permitted ? "ChatGPT access is granted." : "Grant ChatGPT access to read usage.";
   }
-  if (permitted && !sessionTokenConsent) {
-    $status.textContent = "Confirm the in-memory session-token notice to enable ChatGPT usage checks.";
-  } else {
-    $status.textContent = permitted ? "ChatGPT access is granted." : "ChatGPT access is not granted.";
-  }
-  if (autoRefresh && enabled) {
-    const due = accounts.filter((account) => account.snapshot && (snapshotAge(account.snapshot) > AUTO_REFRESH_AFTER_MS || isExpired(account.snapshot)));
-    for (const account of due) runUsageAction(`refresh-account:${account.id}`, () => refreshOne(account.id, account.label, { automatic: true }));
+
+  if (autoRefresh && enabled && (!state.snapshot || snapshotAge(state.snapshot) > AUTO_REFRESH_AFTER_MS)) {
+    void runUsageAction("refresh-chatgpt-usage", () => refreshUsage({ automatic: true }), $refresh);
   }
 }
 
@@ -366,38 +232,26 @@ function bindEvents() {
   eventsBound = true;
 
   $grant.addEventListener("click", () => runUsageAction("grant-chatgpt-access", async () => {
-  if (!sessionTokenConsent) return consentRequired();
-  $status.textContent = "Requesting ChatGPT access…";
-  const granted = await platform.requestOptionalHostPermission(CHATGPT_HOST_PERMISSION);
-  if (!granted) throw new UsageError("permission_required", "ChatGPT access was not granted");
+    if (!sessionTokenConsent) throw new UsageError("consent_required", "Confirm session-token use first");
+    $status.textContent = "Requesting ChatGPT access…";
+    const granted = await platform.requestOptionalHostPermission(CHATGPT_HOST_PERMISSION);
+    if (!granted) throw new UsageError("permission_required", "ChatGPT access was not granted");
   }, $grant));
 
-  $("#addAccount").addEventListener("click", () => runUsageAction("add-chatgpt-account", async () => {
-  if (!sessionTokenConsent) return consentRequired();
-  await createAccountContainer($label.value);
-  $label.value = `Account ${Math.min((await getChatGptAccounts()).length + 1, 3)}`;
-  $status.textContent = "Firefox opened a ChatGPT tab. Sign in there, then use Check signed-in account.";
-  }, $("#addAccount")));
-
-  $refreshAll.addEventListener("click", () => runUsageAction("refresh-all-chatgpt-accounts", async () => {
-  if (!sessionTokenConsent) return consentRequired();
-  try {
-    const results = await refreshAllAccounts();
-    const succeeded = results.filter((result) => result.ok).length;
-    $status.textContent = `${succeeded} of ${results.length} account refreshes succeeded.`;
-  } catch (error) {
-    $status.textContent = messageFor(error);
-  }
-  }, $refreshAll));
+  $refresh.addEventListener("click", () => runUsageAction(
+    "refresh-chatgpt-usage",
+    () => refreshUsage({ automatic: false }),
+    $refresh
+  ));
 
   $clearData.addEventListener("click", () => runUsageAction("clear-chatgpt-data", async () => {
-  if (!confirm("Clear all local ChatGPT usage bindings, snapshots, fingerprints, and the profile salt? Firefox containers and sessions will remain.")) return;
-  await clearChatGptUsageData();
+    if (!confirm("Clear the local ChatGPT usage snapshot and consent setting?")) return;
+    await clearChatGptUsageData();
   }, $clearData));
 
   $sessionTokenConsent.addEventListener("change", () => runUsageAction("save-chatgpt-consent", async () => {
-  sessionTokenConsent = $sessionTokenConsent.checked;
-  await setSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, sessionTokenConsent);
+    sessionTokenConsent = $sessionTokenConsent.checked;
+    await setSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, sessionTokenConsent);
   }, $sessionTokenConsent));
 }
 

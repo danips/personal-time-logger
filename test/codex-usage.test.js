@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  CHATGPT_USAGE_URL,
-  OFFICIAL_USAGE_URL,
-  extractUsageIdentity,
-  normalizeBridgeResult,
-  normalizeUsageResponse
-} from "../extension/src/codex-usage.js";
+import { normalizeUsageResponse } from "../extension/src/codex-usage.js";
 
 const fixture = (over = {}) => ({
   user_id: "redacted-user-id",
@@ -39,30 +33,12 @@ const fixture = (over = {}) => ({
 });
 
 describe("ChatGPT usage normalizer", () => {
-  it("centralizes the private endpoint and official fallback URL", () => {
-    assert.equal(CHATGPT_USAGE_URL, "https://chatgpt.com/backend-api/wham/usage");
-    assert.equal(OFFICIAL_USAGE_URL, "https://chatgpt.com/codex/cloud/settings/analytics#usage");
-  });
-
-  it("records whether data came from the isolated reader or page fallback", () => {
-    assert.equal(normalizeBridgeResult({ status: 200, body: fixture() }).source, "isolated");
-    assert.equal(
-      normalizeBridgeResult({ status: 200, body: fixture(), transport: "page_world_session" }).source,
-      "page_fallback"
-    );
-  });
-
   it("normalizes the redacted Business/team response shape", () => {
     const normalized = normalizeUsageResponse(fixture(), {
-      label: "Account 1",
       collectedAt: "2026-08-08T12:00:00.000Z"
     });
 
-    assert.deepEqual(normalized.account, {
-      label: "Account 1",
-      email: "member-one@example.invalid",
-      plan_type: "team"
-    });
+    assert.deepEqual(normalized.account, { plan_type: "team" });
     assert.equal(normalized.schema_version, 1);
     assert.equal(normalized.primary_window.used_percent, 4);
     assert.equal(normalized.primary_window.remaining_percent, 96);
@@ -162,10 +138,6 @@ describe("ChatGPT usage normalizer", () => {
       })),
       { code: "schema_changed" }
     );
-    assert.throws(
-      () => extractUsageIdentity(fixture({ user_id: 42 })),
-      { code: "schema_changed" }
-    );
   });
 
   it("preserves access, reached, unlimited, credit, and overage states", () => {
@@ -213,35 +185,11 @@ describe("ChatGPT usage normalizer", () => {
     }));
     assert.deepEqual(value.notices, ["unsupported_additional_limit"]);
     assert.equal(JSON.stringify(value).includes("private_shape"), false);
-    assert.equal(value.official_usage_url, OFFICIAL_USAGE_URL);
   });
 
   it("ignores unknown additive fields", () => {
     const value = normalizeUsageResponse(fixture());
     assert.equal("additive_field_from_future" in value, false);
-  });
-
-  it("accepts a valid usage response without optional identity fields", () => {
-    const raw = fixture();
-    delete raw.user_id;
-    delete raw.account_id;
-    assert.equal(extractUsageIdentity(raw), null);
-    assert.equal(normalizeUsageResponse(raw).primary_window.remaining_percent, 96);
-  });
-
-  it("does not reject valid usage when only one optional identity field is present", () => {
-    const raw = fixture();
-    delete raw.user_id;
-    assert.equal(extractUsageIdentity(raw), null);
-    assert.equal(normalizeUsageResponse(raw).primary_window.remaining_percent, 96);
-  });
-
-  it("reads optional identity fields from a nested account object", () => {
-    const raw = fixture();
-    delete raw.user_id;
-    delete raw.account_id;
-    raw.account = { user_id: "nested-user", account_id: "nested-account" };
-    assert.deepEqual(extractUsageIdentity(raw), { user_id: "nested-user", account_id: "nested-account" });
   });
 
   it("rejects missing required objects and wrong field types", () => {
@@ -264,21 +212,5 @@ describe("ChatGPT usage normalizer", () => {
     assert.equal(value.secondary_window.remaining_percent, 90);
     assert.equal(value.secondary_window.reset_at, null);
     assert.deepEqual(value.notices, []);
-  });
-
-  it("maps malformed bridge bodies and HTTP outcomes to stable errors", () => {
-    assert.throws(() => normalizeBridgeResult({ status: 200, body: "not-json" }), { code: "schema_changed" });
-    assert.throws(() => normalizeBridgeResult({ status: 401, ok: false, error_code: "sign_in_required" }), (error) => {
-      assert.equal(error.code, "sign_in_required");
-      assert.equal(error.http_status, 401);
-      return true;
-    });
-    assert.throws(() => normalizeBridgeResult({ status: 403, ok: false, error_code: "access_denied" }), { code: "access_denied" });
-    assert.throws(() => normalizeBridgeResult({ status: 404, ok: false, error_code: "endpoint_unavailable" }), { code: "endpoint_unavailable" });
-    assert.throws(() => normalizeBridgeResult({ status: 429, ok: false, error_code: "temporarily_rate_limited", retry_after_seconds: 12 }), (error) => {
-      assert.equal(error.code, "temporarily_rate_limited");
-      assert.equal(error.retry_after_seconds, 12);
-      return true;
-    });
   });
 });

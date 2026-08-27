@@ -95,33 +95,6 @@ export const platform = {
     return apiCall(rawApi.permissions.request, rawApi.permissions, { origins: [origin] });
   },
 
-  contextualIdentitiesAvailable() {
-    return Boolean(rawApi.contextualIdentities);
-  },
-
-  async createContextualIdentity(name, color = "blue", icon = "fingerprint") {
-    if (!rawApi.contextualIdentities || !rawApi.contextualIdentities.create) {
-      throw new Error("Firefox contextual identities are unavailable");
-    }
-    return apiCall(rawApi.contextualIdentities.create, rawApi.contextualIdentities, { name, color, icon });
-  },
-
-  async getContextualIdentity(cookieStoreId) {
-    if (!rawApi.contextualIdentities || !rawApi.contextualIdentities.get) return null;
-    try {
-      return await apiCall(rawApi.contextualIdentities.get, rawApi.contextualIdentities, cookieStoreId);
-    } catch (error) {
-      if (/not found|does not exist/i.test(error.message || "")) return null;
-      throw error;
-    }
-  },
-
-  async removeContextualIdentity(cookieStoreId) {
-    if (!rawApi.contextualIdentities || !rawApi.contextualIdentities.remove) return false;
-    await apiCall(rawApi.contextualIdentities.remove, rawApi.contextualIdentities, cookieStoreId);
-    return true;
-  },
-
   async createTab(details) {
     if (!rawApi.tabs || !rawApi.tabs.create) throw new Error("Browser tabs API is unavailable");
     return apiCall(rawApi.tabs.create, rawApi.tabs, details);
@@ -161,70 +134,11 @@ export const platform = {
     return apiCall(rawApi.windows.update, rawApi.windows, windowId, { width, height });
   },
 
-  async queryChatGptTabs(cookieStoreId) {
-    if (!rawApi.tabs || !rawApi.tabs.query) return [];
-    return apiCall(rawApi.tabs.query, rawApi.tabs, {
-      url: "https://chatgpt.com/*",
-      cookieStoreId
-    });
-  },
-
-  async waitForTabComplete(tabId, timeoutMs = 20_000) {
-    if (!rawApi.tabs || !rawApi.tabs.onUpdated) {
-      throw new Error("Browser tab update events are unavailable");
-    }
-
-    return new Promise((resolve, reject) => {
-      let timer;
-      let settled = false;
-      const cleanup = () => {
-        rawApi.tabs.onUpdated.removeListener(onUpdated);
-        clearTimeout(timer);
-      };
-      const settle = (callback) => (value) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        callback(value);
-      };
-      const onUpdated = async (updatedTabId, changeInfo) => {
-        if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-        try {
-          const tab = await getTab(tabId);
-          if (!tab) throw new Error("ChatGPT tab is no longer available");
-          settle(resolve)(tab);
-        } catch (error) {
-          settle(reject)(error);
-        }
-      };
-      timer = setTimeout(() => {
-        settle(reject)(new Error("Timed out waiting for the ChatGPT tab to load"));
-      }, timeoutMs);
-      rawApi.tabs.onUpdated.addListener(onUpdated);
-      // Register first, then re-check so completion in the gap cannot strand
-      // the wait until timeout.
-      getTab(tabId).then((current) => {
-        if (!current) throw new Error("ChatGPT tab is no longer available");
-        if (current.status === "complete") settle(resolve)(current);
-      }).catch(settle(reject));
-    });
-  },
-
-  async sendTabMessage(tabId, message) {
-    if (!rawApi.tabs || !rawApi.tabs.sendMessage) throw new Error("Browser messaging API is unavailable");
-    return apiCall(rawApi.tabs.sendMessage, rawApi.tabs, tabId, message);
-  },
-
   async sendRuntimeMessage(message) {
     if (!rawApi.runtime || !rawApi.runtime.sendMessage) {
       throw new Error("Extension messaging API is unavailable");
     }
     return apiCall(rawApi.runtime.sendMessage, rawApi.runtime, message);
-  },
-
-  async removeTab(tabId) {
-    if (!rawApi.tabs || !rawApi.tabs.remove) return;
-    return apiCall(rawApi.tabs.remove, rawApi.tabs, tabId);
   },
 
   isOnline() {

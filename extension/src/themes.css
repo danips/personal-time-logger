@@ -203,7 +203,6 @@ html[data-theme] label,
 html[data-theme] dt,
 html[data-theme] .status,
 html[data-theme] .note,
-html[data-theme] .container-note,
 html[data-theme] .empty,
 html[data-theme] .row-meta {
   color: var(--muted);
@@ -239,7 +238,7 @@ html[data-theme] #saveSettings,
 html[data-theme] #saveTempoSettings,
 html[data-theme] #syncButton,
 html[data-theme] #grantAccess,
-html[data-theme] #addAccount,
+html[data-theme] #refreshUsage,
 html[data-theme] #startButton {
   border-color: var(--accent);
   background: var(--accent);

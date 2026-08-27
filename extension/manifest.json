@@ -2,12 +2,10 @@
   "manifest_version": 3,
   "name": "Personal Time Logger",
   "description": "Local-first time tracking with Google Sheets sync and Tempo upload.",
-  "version": "0.1.57",
+  "version": "0.1.58",
   "permissions": [
     "alarms",
-    "storage",
-    "contextualIdentities",
-    "cookies"
+    "storage"
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",
@@ -17,28 +15,6 @@
     "https://chatgpt.com/*",
     "https://api.tempo.io/*",
     "https://time-api.cordoceo.com/*"
-  ],
-  "content_scripts": [
-    {
-      "matches": [
-        "https://chatgpt.com/*"
-      ],
-      "js": [
-        "content/chatgpt-usage-page.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://chatgpt.com/*"
-      ],
-      "js": [
-        "content/chatgpt-usage.js"
-      ],
-      "run_at": "document_idle",
-      "world": "ISOLATED"
-    }
   ],
   "background": {
     "scripts": [

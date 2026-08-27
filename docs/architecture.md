@@ -10,7 +10,7 @@ Popup / Calendar / Options / Reconcile ─┐
 Usage page ─────────────────────────────┼── extension/src/ domain modules ── IndexedDB
 Background alarm ───────────────────────┤          │                  │
                                          │          ├── browser APIs    └── entries + settings
-ChatGPT content scripts ────────────────┘          └── remote providers
+ChatGPT usage service ─────────────────┘          └── remote providers
                                                         ├── Google Sheets / Drive APIs
                                                         └── MySQL HTTPS API
 ```
@@ -24,8 +24,8 @@ ChatGPT content scripts ────────────────┘     
 | Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; a fixed runtime message delegates Tempo transport to the background context through `extension/src/tempo.js`. |
 | Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; active backend and preparation target stay separate; OAuth client settings use synchronized browser storage, while tokens remain local. |
 | Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
-| Usage | `extension/usage/usage.js` | Firefox-only ChatGPT account setup and usage display. | It can run standalone or mounted in Options, and requests optional ChatGPT permission before contacting that host. |
-| ChatGPT content scripts | `extension/content/chatgpt-usage.js`, `extension/content/chatgpt-usage-page.js` | Fetch the private usage endpoint in the isolated world; use the page world only after a 401. | The bridge correlates bounded messages by request ID. Session tokens stay in page memory and are never persisted by the extension. |
+| Usage | `extension/usage/usage.js` | Displays the current Firefox ChatGPT session's 5-hour and weekly limits. | It can run standalone or mounted in Options and delegates the fixed session-authenticated request to `extension/src/chatgpt-usage-service.js`. |
+| ChatGPT usage service | `extension/src/chatgpt-usage-service.js` | Fetches the fixed session and usage endpoints directly from the extension context. | The access token stays in memory for one request and is never persisted, logged, or sent outside ChatGPT. |
 
 `extension/src/platform.js` is the browser API adapter. It isolates Firefox promise APIs
 and Chromium callback APIs so the domain modules do not branch on browser
@@ -40,7 +40,7 @@ stores:
 | Store | Contents | Important access paths |
 | --- | --- | --- |
 | `time_entries` | Local-first time records, including `dirty`, tombstone, sync-error, and revision bookkeeping. Dirty records persist a derived `dirty_key: 1`; clean records omit it. | Primary ID plus indexes for active timers, dirty-entry counts, deletion, start/end time, and status. |
-| `settings` | Device-local configuration, sync/reconciliation state, locks, diagnostics, tokens, and ChatGPT account data. | Named keys; general extension keys live in `extension/src/setting-keys.js`. |
+| `settings` | Device-local configuration, sync/reconciliation state, locks, diagnostics, tokens, and the current ChatGPT usage snapshot. | Named keys; general extension keys live in `extension/src/setting-keys.js`. |
 
 The OAuth client ID and secret are the deliberate exception: they live in
 `browser.storage.sync` so a Firefox profile can restore the configuration.

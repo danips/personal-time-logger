@@ -1,7 +1,11 @@
 import { getActiveEntries, getDirtyEntryCount, getEntriesIntersecting, getEntry, getSetting, getVisibleEntries, setSetting } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
-import { CHATGPT_ACCOUNTS_KEY, normalizeChatGptAccounts } from "../src/chatgpt-account-cache.js";
-import { CHATGPT_HOST_PERMISSION, CHATGPT_SESSION_TOKEN_CONSENT_KEY, refreshAllAccounts } from "../src/chatgpt-containers.js";
+import {
+  CHATGPT_HOST_PERMISSION,
+  CHATGPT_SESSION_TOKEN_CONSENT_KEY,
+  getChatGptUsageState,
+  refreshChatGptUsage
+} from "../src/chatgpt-usage-service.js";
 import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
@@ -753,27 +757,25 @@ async function loadWindowSizes() {
 }
 
 async function renderChatGptUsageSummary(isCurrent) {
-  const summaries = normalizeChatGptAccounts(await getSetting(CHATGPT_ACCOUNTS_KEY, []))
-    .map((account) => ({
-      label: account.email || account.label || "ChatGPT account",
-      remaining: compactPercent(account.snapshot?.primary_window?.remaining_percent),
-      resetAt: account.snapshot?.primary_window?.reset_at || "",
-      collectedAt: account.snapshot?.collected_at || account.last_success_at || ""
-    }))
-    .filter((account) => account.remaining);
+  const { snapshot } = await getChatGptUsageState();
   if (!isCurrent()) return false;
 
-  $chatGptUsageSummary.classList.toggle("hidden", summaries.length === 0);
-  if (!summaries.length) return true;
+  const windows = [
+    { label: "5h", window: snapshot?.primary_window },
+    { label: "Week", window: snapshot?.secondary_window }
+  ].filter(({ window }) => compactPercent(window?.remaining_percent));
+  $chatGptUsageSummary.classList.toggle("hidden", windows.length === 0);
+  if (!windows.length) return true;
 
-  const values = summaries.map((account) => {
-    const nextRefresh = shortDateTime(account.resetAt) || "not provided";
-    const lastUpdate = shortDateTime(account.collectedAt) || "not available";
-    const detail = `Account: ${account.label}\nNext allowance refresh: ${nextRefresh}\nLast update: ${lastUpdate}`;
+  const values = windows.map(({ label, window }) => {
+    const remaining = compactPercent(window.remaining_percent);
+    const nextRefresh = shortDateTime(window.reset_at) || "not provided";
+    const lastUpdate = shortDateTime(snapshot.collected_at) || "not available";
+    const detail = `${label} limit: ${remaining} remaining\nResets: ${nextRefresh}\nLast update: ${lastUpdate}`;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chatgpt-usage-value";
-    button.textContent = account.remaining;
+    button.textContent = `${label} ${remaining}`;
     button.title = detail;
     button.setAttribute("aria-label", `Open ChatGPT usage limits. ${detail.replaceAll("\n", ". ")}`);
     return button;
@@ -783,15 +785,14 @@ async function renderChatGptUsageSummary(isCurrent) {
 }
 
 async function refreshChatGptUsageOnOpen() {
-  const [accounts, consent, permitted] = await Promise.all([
-    getSetting(CHATGPT_ACCOUNTS_KEY, []),
+  const [consent, permitted] = await Promise.all([
     getSetting(CHATGPT_SESSION_TOKEN_CONSENT_KEY, false),
     platform.hasOptionalHostPermission(CHATGPT_HOST_PERMISSION)
   ]);
-  if (!consent || !permitted || !normalizeChatGptAccounts(accounts).length) return;
+  if (!consent || !permitted) return;
 
   try {
-    await refreshAllAccounts();
+    await refreshChatGptUsage();
   } catch {
     // Keep the last successful snapshot visible when a popup-open refresh fails.
   }

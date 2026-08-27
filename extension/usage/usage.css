@@ -56,7 +56,6 @@ h2 { font-size: 18px; }
 }
 
 .panel > p + p { margin-top: 10px; }
-.container-note { color: var(--muted); font-size: 13px; }
 .consent-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; color: var(--text); font-size: 13px; }
 .consent-row input { width: auto; min-height: 0; margin-top: 3px; }
 .notice {
@@ -103,6 +102,8 @@ input {
 }
 
 .account-card h3 { margin: 0; font-size: 16px; }
+.usage-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+.usage-window { padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
 .account-meta { margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
 .account-error { margin-top: 8px; color: #c5221f; }
 .account-card[data-stale="true"] { border-color: #d29922; }

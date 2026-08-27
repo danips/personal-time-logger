@@ -617,7 +617,7 @@ try {
     ["calendar/calendar.html", ["#calendarGrid", "#statusLine"]],
     ["reconcile/reconcile.html", ["#summary", "#syncButton"]],
     ["options/options.html", ["#diagnosticsSummary", "#saveSettings"]],
-    ["usage/usage.html", ["#accounts", "#pageStatus"]]
+    ["usage/usage.html", ["#usageSnapshot", "#refreshUsage", "#pageStatus"]]
   ];
   for (const [page, selectors] of pages) {
     await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/${page}` });

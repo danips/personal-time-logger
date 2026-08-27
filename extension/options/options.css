@@ -583,7 +583,6 @@ h3 {
 
 .status,
 .note,
-.container-note,
 .empty,
 .row-meta,
 dt,
@@ -712,7 +711,7 @@ button:active:not(:disabled) {
 #saveTempoSettings,
 #syncButton,
 #grantAccess,
-#addAccount {
+#refreshUsage {
   border-color: var(--accent);
   background: var(--accent);
   color: #ffffff;
@@ -724,7 +723,7 @@ button:active:not(:disabled) {
 #saveTempoSettings:hover:not(:disabled),
 #syncButton:hover:not(:disabled),
 #grantAccess:hover:not(:disabled),
-#addAccount:hover:not(:disabled) {
+#refreshUsage:hover:not(:disabled) {
   border-color: var(--accent-strong);
   background: var(--accent-strong);
 }
@@ -893,7 +892,7 @@ code {
   #saveTempoSettings,
   #syncButton,
   #grantAccess,
-  #addAccount {
+  #refreshUsage {
     border-color: var(--accent);
     background: #668df0;
     color: #101522;
