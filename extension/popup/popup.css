@@ -197,7 +197,7 @@ select:focus-visible {
 
 .active-panel {
   margin-bottom: 10px;
-  padding: 11px 12px;
+  padding: 6px 12px;
   border-color: var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -303,7 +303,7 @@ label,
 }
 
 .week-group-header {
-  padding: 6px 9px;
+  padding: 4px 9px;
   border-color: var(--border);
   border-radius: 8px;
   background: var(--surface-subtle);
@@ -324,7 +324,7 @@ label,
 }
 
 .entry-row {
-  padding: 9px 10px;
+  padding: 4px 10px;
   border-color: var(--border);
   border-radius: 11px;
   background: var(--surface);
@@ -1223,7 +1223,7 @@ textarea {
 
 .window-size-section,
 .chatgpt-usage-summary {
-  padding: 7px 8px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 9px;
 }
