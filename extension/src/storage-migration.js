@@ -154,6 +154,25 @@ function compareTarget(source, target) {
   return { sourceEntries, targetEntries, sourceConfig, targetConfig };
 }
 
+function assertLocalCompatibleWithRemote(local, remote) {
+  const localEntries = mapEntries(local);
+  const remoteEntries = mapEntries(remote);
+  for (const [id, entry] of localEntries) {
+    if (!remoteEntries.has(id) || !sameEntry(entry, remoteEntries.get(id))) {
+      throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `MySQL does not contain the same local entry (${id}).`);
+    }
+  }
+
+  const localConfig = mapConfig(local);
+  const remoteConfig = mapConfig(remote);
+  for (const [key, value] of localConfig) {
+    const remoteValue = remoteConfig.get(key);
+    if (!remoteValue || remoteValue.value !== value.value || remoteValue.updated_at !== value.updated_at) {
+      throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `MySQL does not contain the same local configuration (${key}).`);
+    }
+  }
+}
+
 function progressState(state, patch) {
   return {
     ...state,
@@ -362,6 +381,61 @@ export async function activateMysqlFromLocal({ onProgress } = {}) {
       if (await migrationDigest(await localMigrationSnapshot()) !== sourceDigest) {
         throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "Local data changed during MySQL setup.");
       }
+      await switchBackend(MYSQL_PROVIDER_ID, state);
+    });
+
+    await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
+    return finishMigration(state);
+  } catch (error) {
+    await failMigration(state, error);
+    throw error;
+  }
+}
+
+/**
+ * Makes an existing MySQL dataset the active backend without contacting
+ * Google. Local entries are checked first so an existing local edit cannot be
+ * silently discarded; MySQL-only entries are then imported by the normal sync
+ * pull after the backend switch.
+ */
+export async function activateMysqlFromRemote({ onProgress } = {}) {
+  const active = await getActiveRemoteProvider();
+  if (active.id === MYSQL_PROVIDER_ID) {
+    throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "MySQL is already the active storage backend.");
+  }
+
+  let state = {
+    migration_id: migrationId(),
+    source_provider: active.id,
+    target_provider: MYSQL_PROVIDER_ID,
+    phase: "preparing",
+    attempt: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  await saveState(state);
+  onProgress?.(state);
+
+  try {
+    const targetProvider = getRemoteProvider(MYSQL_PROVIDER_ID);
+    await withMigrationLease(state.migration_id, async (lease) => {
+      const options = { lease };
+      await prepareTarget(targetProvider, lease, options);
+      await lease.assert();
+      const targetSnapshot = await targetProvider.readSnapshot(options);
+      validateSnapshot(targetSnapshot, "target");
+      const localSnapshot = await localMigrationSnapshot();
+      validateSnapshot(localSnapshot, "local");
+      assertLocalCompatibleWithRemote(localSnapshot, targetSnapshot);
+      state = progressState(state, {
+        phase: "verifying",
+        source_digest: await migrationDigest(targetSnapshot),
+        total_entries: targetSnapshot.entries.length,
+        total_config: canonicalConfig(targetSnapshot.config).length,
+        completed_entries: targetSnapshot.entries.length
+      });
+      await saveState(state);
+      onProgress?.(state);
       await switchBackend(MYSQL_PROVIDER_ID, state);
     });
 

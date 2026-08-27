@@ -275,8 +275,10 @@ describe("provider boundary", () => {
     assert.match(options, /id="storage"/);
     assert.match(options, /id="testMysqlConnection"/);
     assert.match(options, /id="activateMysqlFromLocal"/);
+    assert.match(options, /id="activateMysqlFromRemote"/);
     assert.match(optionsCode, /REMOTE_BACKEND_TARGET|remoteBackendTarget/);
     assert.match(optionsCode, /activateMysqlFromLocal/);
+    assert.match(optionsCode, /activateMysqlFromRemote/);
     assert.match(options, /not switched until verified migration succeeds/i);
     assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
   });

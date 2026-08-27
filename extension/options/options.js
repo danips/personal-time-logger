@@ -15,7 +15,7 @@ import { syncNow } from "../src/sync.js";
 import { DEFAULT_MYSQL_API_BASE_URL, mysqlHostPermission, mysqlProvider, normalizeMysqlApiBaseUrl } from "../src/remote-mysql.js";
 import { platform } from "../src/platform.js";
 import { REMOTE_PROVIDER_ID, decodeRemoteProviderId } from "../src/remote-provider.js";
-import { activateMysqlFromLocal, getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
+import { activateMysqlFromLocal, activateMysqlFromRemote, getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -316,6 +316,7 @@ function renderMysqlStorageFields(activeBackend, targetBackend) {
   $("#mysqlStorageFields").hidden = target !== REMOTE_PROVIDER_ID.MYSQL;
   $("#testMysqlConnection").hidden = active === REMOTE_PROVIDER_ID.MYSQL;
   $("#activateMysqlFromLocal").hidden = !(active !== REMOTE_PROVIDER_ID.MYSQL && target === REMOTE_PROVIDER_ID.MYSQL);
+  $("#activateMysqlFromRemote").hidden = !(active !== REMOTE_PROVIDER_ID.MYSQL && target === REMOTE_PROVIDER_ID.MYSQL);
 }
 
 function renderActiveBackendLabel(activeBackend) {
@@ -443,6 +444,30 @@ async function activateMysqlFromLocalClicked() {
     throw error;
   }
   setStatus("MySQL is now the active storage backend");
+  return true;
+}
+
+async function activateMysqlFromRemoteClicked() {
+  const active = decodeRemoteProviderId(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
+  if (active === REMOTE_PROVIDER_ID.MYSQL) throw Object.assign(new Error("MySQL is already the active backend."), { code: "MIGRATION_SOURCE_UNSAFE" });
+  if (globalThis.confirm && !globalThis.confirm("This will not read Google Sheets. It will make the existing MySQL data the active data for this Firefox profile and import it locally. Any conflicting local entries will block the switch. Continue?")) return false;
+  $("#migrationStatus").textContent = "Adopting existing MySQL data...";
+  try {
+    await activateMysqlFromRemote({
+      onProgress(state) {
+        $("#migrationStatus").textContent = `MySQL adoption ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
+      }
+    });
+  } catch (error) {
+    const state = await getStorageMigrationState().catch(() => null);
+    const diagnostic = error?.message && error.message !== formatError(error)
+      ? ` (${error.code || "MYSQL_ADOPTION_FAILED"}: ${error.message})`
+      : "";
+    $("#migrationStatus").textContent = `${formatError(error)}${diagnostic}`;
+    if (state?.phase === "post_switch") await refreshActiveBackendLabel();
+    throw error;
+  }
+  setStatus("Existing MySQL data is now active");
   return true;
 }
 
@@ -659,6 +684,7 @@ function bindEvents() {
   $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget, { refreshOnError: false }));
   $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromLocal").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-local", activateMysqlFromLocalClicked, event.currentTarget, { refreshOnError: false }));
+  $("#activateMysqlFromRemote").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-remote", activateMysqlFromRemoteClicked, event.currentTarget, { refreshOnError: false }));
 
   window.addEventListener("focus", () => {
     void refreshActiveBackendLabel().catch(() => {});
