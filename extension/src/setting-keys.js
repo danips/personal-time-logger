@@ -20,6 +20,7 @@ export const SETTING_KEY = Object.freeze({
   MYSQL_API_BASE_URL: "mysql_api_base_url",
   MYSQL_API_TOKEN: "mysql_api_token",
   MYSQL_REMOTE_CHANGE_TOKEN: "mysql_remote_change_token",
+  REMOTE_BACKEND_ESTABLISHED: "remote_backend_established",
   STORAGE_MIGRATION_STATE: "storage_migration_state",
   RECONCILIATION_INTENTS: "reconciliation_intents",
   REMOTE_BACKEND: "remote_backend",

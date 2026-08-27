@@ -198,6 +198,11 @@ Spreadsheet settings are shown when Google is active or selected as the
 preparation target, and are hidden during ordinary MySQL use without deleting
 Google credentials, tokens, or spreadsheet state.
 
+On a new installation, Options first asks whether to start with Google Sheets
+or MySQL. The remaining settings stay hidden until the selected backend has
+been established. MySQL setup can either adopt an existing remote dataset or
+initialize it from this profile's local data.
+
 Storage migration pauses ordinary synchronization, verifies the canonical
 entries and shared configuration, and switches the active backend only after
 verification succeeds. The source provider and its data remain available for

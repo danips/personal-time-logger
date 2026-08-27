@@ -283,6 +283,7 @@ async function withMigrationLease(id, callback) {
 async function switchBackend(targetId, state) {
   await mutateSettings([
     SETTING_KEY.REMOTE_BACKEND,
+    SETTING_KEY.REMOTE_BACKEND_ESTABLISHED,
     SETTING_KEY.REMOTE_CHANGE_TOKEN,
     SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN,
     SETTING_KEY.REMOTE_MODIFIED_TIME,
@@ -292,6 +293,7 @@ async function switchBackend(targetId, state) {
     SETTING_KEY.STORAGE_MIGRATION_STATE
   ], (settings) => {
     settings.set(SETTING_KEY.REMOTE_BACKEND, targetId);
+    settings.set(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, true);
     settings.set(SETTING_KEY.REMOTE_CHANGE_TOKEN, "");
     settings.set(SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN, "");
     settings.set(SETTING_KEY.REMOTE_MODIFIED_TIME, "");

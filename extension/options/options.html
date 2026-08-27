@@ -25,7 +25,43 @@
         <p id="statusLine" class="status" role="status" aria-live="polite">Loading...</p>
       </header>
 
-      <div class="options-layout">
+      <section id="firstRunSetup" class="panel first-run-setup" hidden aria-labelledby="firstRunHeading">
+        <p class="eyebrow">First-time setup</p>
+        <h2 id="firstRunHeading">Choose where your time data starts</h2>
+        <p class="note">Choose a remote backend before configuring the rest of the extension. The remaining settings will appear after the backend is ready.</p>
+        <div id="setupProviderChoices" class="setup-choice-grid">
+          <button id="chooseGoogleSetup" class="setup-choice" type="button">
+            <strong>Start with Google Sheets</strong>
+            <span>Sign in and use a Google spreadsheet as the remote backend.</span>
+          </button>
+          <button id="chooseMysqlSetup" class="setup-choice" type="button">
+            <strong>Start with MySQL</strong>
+            <span>Connect to an existing MySQL dataset or start from local data.</span>
+          </button>
+        </div>
+        <div id="setupGoogle" class="setup-provider" hidden>
+          <h3>Set up Google Sheets</h3>
+          <label for="setupGoogleClientId">OAuth client ID<input id="setupGoogleClientId" type="text" autocomplete="off" spellcheck="false"></label>
+          <label for="setupGoogleClientSecret">OAuth client secret<input id="setupGoogleClientSecret" type="password" autocomplete="off" spellcheck="false"></label>
+          <p class="note">After sign-in, the extension will find or create the compatible spreadsheet.</p>
+          <div id="setupDeviceAuthPanel" class="device-auth" hidden>
+            <p>Google device sign-in code</p>
+            <strong id="setupDeviceUserCode"></strong>
+            <p>Open <a id="setupDeviceVerificationUrl" href="#" target="_blank" rel="noreferrer"></a> and enter the code above.</p>
+            <p id="setupDeviceAuthExpires" class="note"></p>
+          </div>
+          <div class="actions"><button id="setupGoogleBack" type="button">Back</button><button id="setupGoogleButton" type="button">Save and sign in</button></div>
+        </div>
+        <div id="setupMysql" class="setup-provider" hidden>
+          <h3>Set up MySQL</h3>
+          <label for="setupMysqlApiBaseUrl">HTTPS API base URL<input id="setupMysqlApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://time-api.cordoceo.com"></label>
+          <label for="setupMysqlApiToken">API token<input id="setupMysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
+          <p class="note">The token stays in this Firefox profile and is sent only to the configured API origin.</p>
+          <div class="actions"><button id="setupMysqlBack" type="button">Back</button><button id="setupMysqlExistingButton" type="button">Use existing MySQL data</button><button id="setupMysqlLocalButton" type="button">Start from local data</button></div>
+        </div>
+      </section>
+
+      <div id="settingsLayout" class="options-layout" hidden>
         <nav class="section-nav" aria-label="Options sections">
           <p class="section-nav-label">Sections</p>
           <a href="#appearance">Appearance</a>

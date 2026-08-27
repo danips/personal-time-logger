@@ -34,6 +34,7 @@ import { storageUiState } from "../src/options-storage-ui.js";
 
 let diagnostics = [];
 let eventsBound = false;
+let auxiliaryPagesInitialized = false;
 let syncSectionNavigation = () => {};
 
 function renderThemeSelection({ theme, highContrast }) {
@@ -146,6 +147,34 @@ function setStatus(message) {
   $("#statusLine").textContent = message;
 }
 
+async function backendIsEstablished() {
+  if (await getSetting(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, false)) return true;
+
+  // Existing installations predate the explicit marker. Their backend or
+  // provider state is enough to avoid showing first-run setup again.
+  const backend = await getSetting(SETTING_KEY.REMOTE_BACKEND, null);
+  if (backend) return true;
+  if (await getSpreadsheetId()) return true;
+  const tokenData = await getSetting(SETTING_KEY.GOOGLE_TOKEN_DATA, null);
+  return Boolean(tokenData?.access_token || tokenData?.refresh_token);
+}
+
+async function markBackendEstablished(providerId) {
+  await mutateSettings([
+    SETTING_KEY.REMOTE_BACKEND,
+    SETTING_KEY.REMOTE_BACKEND_ESTABLISHED
+  ], (settings) => {
+    settings.set(SETTING_KEY.REMOTE_BACKEND, providerId);
+    settings.set(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, true);
+  });
+}
+
+async function initializeAuxiliaryPages() {
+  if (auxiliaryPagesInitialized) return;
+  auxiliaryPagesInitialized = true;
+  await Promise.all([initUsagePage(), initReconcilePage()]);
+}
+
 function runOptionsAction(key, action, button, actionOptions) {
   const refreshOnError = (actionOptions || {}).refreshOnError !== false;
   let refreshAfterAction = true;
@@ -187,6 +216,25 @@ function setDeviceAuthPanel(details = null) {
     : "";
   panel.hidden = false;
 
+  window.open(verificationUrl, "_blank", "noopener,noreferrer");
+}
+
+function setSetupDeviceAuthPanel(details = null) {
+  const panel = $("#setupDeviceAuthPanel");
+  if (!panel) return;
+  if (!details) {
+    panel.hidden = true;
+    return;
+  }
+  const verificationUrl = details.verification_url_complete || details.verification_url;
+  const expiresIn = Number(details.expires_in || 0);
+  $("#setupDeviceUserCode").textContent = details.user_code || "";
+  $("#setupDeviceVerificationUrl").textContent = details.verification_url || verificationUrl;
+  $("#setupDeviceVerificationUrl").href = verificationUrl;
+  $("#setupDeviceAuthExpires").textContent = expiresIn
+    ? `Code expires in about ${Math.round(expiresIn / 60)} minutes.`
+    : "";
+  panel.hidden = false;
   window.open(verificationUrl, "_blank", "noopener,noreferrer");
 }
 
@@ -360,14 +408,19 @@ function renderMigration(activeBackend, migrationState) {
   }
 }
 
-async function saveMysqlSettings() {
-  const baseUrl = normalizeMysqlApiBaseUrl($("#mysqlApiBaseUrl").value);
-  const token = $("#mysqlApiToken").value.trim();
+async function saveMysqlSettingsValues(rawBaseUrl, rawToken) {
+  const baseUrl = normalizeMysqlApiBaseUrl(rawBaseUrl);
+  const token = String(rawToken || "").trim();
   if (!token) throw Object.assign(new Error("Enter the MySQL API token."), { code: "MYSQL_CONFIG_MISSING" });
   await mutateSettings([SETTING_KEY.MYSQL_API_BASE_URL, SETTING_KEY.MYSQL_API_TOKEN], (settings) => {
     settings.set(SETTING_KEY.MYSQL_API_BASE_URL, baseUrl);
     settings.set(SETTING_KEY.MYSQL_API_TOKEN, token);
   });
+  return { baseUrl, token };
+}
+
+async function saveMysqlSettings() {
+  const { baseUrl } = await saveMysqlSettingsValues($("#mysqlApiBaseUrl").value, $("#mysqlApiToken").value);
   $("#mysqlApiBaseUrl").value = baseUrl;
   setStatus("MySQL API settings saved on this device");
   return false;
@@ -471,6 +524,58 @@ async function activateMysqlFromRemoteClicked() {
   return true;
 }
 
+function renderFirstRun(established) {
+  $("#firstRunSetup").hidden = established;
+  $("#settingsLayout").hidden = !established;
+  if (!established) {
+    history.replaceState(null, "", "#setup");
+    $("#statusLine").textContent = "Choose a storage backend to begin";
+    return;
+  }
+  syncSectionNavigation();
+}
+
+function selectFirstRunProvider(providerId) {
+  const google = providerId === REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+  $("#setupProviderChoices").hidden = true;
+  $("#setupGoogle").hidden = !google;
+  $("#setupMysql").hidden = google;
+}
+
+async function setupGoogleClicked() {
+  await setOAuthClientCredentials($("#setupGoogleClientId").value, $("#setupGoogleClientSecret").value);
+  setStatus("Opening Google sign-in...");
+  await signIn({
+    onDeviceCode(details) {
+      setSetupDeviceAuthPanel(details);
+      setStatus("Enter the Google device code, then leave this page open...");
+    }
+  });
+  setSetupDeviceAuthPanel(null);
+  setStatus("Signed in. Looking for your spreadsheet...");
+  await syncNow({ force: true });
+  await markBackendEstablished(REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
+  setStatus("Google Sheets is ready");
+  return true;
+}
+
+async function setupMysqlClicked(source) {
+  const { baseUrl } = await saveMysqlSettingsValues($("#setupMysqlApiBaseUrl").value, $("#setupMysqlApiToken").value);
+  $("#mysqlApiBaseUrl").value = baseUrl;
+  $("#mysqlApiToken").value = $("#setupMysqlApiToken").value.trim();
+  $("#migrationStatus").textContent = source === "remote"
+    ? "Adopting existing MySQL data..."
+    : "Starting MySQL from local data...";
+  const activate = source === "remote" ? activateMysqlFromRemote : activateMysqlFromLocal;
+  await activate({
+    onProgress(state) {
+      $("#migrationStatus").textContent = `MySQL setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
+    }
+  });
+  setStatus("MySQL is ready");
+  return true;
+}
+
 function renderSpreadsheet(spreadsheetId) {
   const link = $("#spreadsheetLink");
   $("#spreadsheetId").textContent = spreadsheetId || "not set";
@@ -513,11 +618,15 @@ async function refresh() {
   $("#deviceId").textContent = await getDeviceId();
   $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
   $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
+  $("#setupGoogleClientId").value = config.GOOGLE_CLIENT_ID || "";
+  $("#setupGoogleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
   const activeBackend = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
   renderStorage(activeBackend);
   renderMigration(activeBackend, await getStorageMigrationState());
   $("#mysqlApiBaseUrl").value = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
   $("#mysqlApiToken").value = await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
+  $("#setupMysqlApiBaseUrl").value = $("#mysqlApiBaseUrl").value;
+  $("#setupMysqlApiToken").value = $("#mysqlApiToken").value;
   renderSpreadsheet(await getSpreadsheetId());
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
@@ -538,6 +647,9 @@ async function refresh() {
   }
   $("#signInButton").hidden = auth.signedIn;
   $("#signOutButton").hidden = !auth.signedIn;
+  const established = await backendIsEstablished();
+  renderFirstRun(established);
+  if (established) await initializeAuxiliaryPages();
 }
 
 async function signInClicked() {
@@ -553,6 +665,9 @@ async function signInClicked() {
   // spreadsheet and shows its ID without a separate code path.
   setStatus("Signed in. Looking for your spreadsheet...");
   await syncNow({ force: true });
+  if (decodeRemoteProviderId(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS)) === REMOTE_PROVIDER_ID.GOOGLE_SHEETS) {
+    await markBackendEstablished(REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
+  }
   if (await getSpreadsheetId()) setStatus("Signed in and spreadsheet ready");
 }
 
@@ -685,6 +800,20 @@ function bindEvents() {
   $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromLocal").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-local", activateMysqlFromLocalClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromRemote").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-remote", activateMysqlFromRemoteClicked, event.currentTarget, { refreshOnError: false }));
+  $("#chooseGoogleSetup").addEventListener("click", () => selectFirstRunProvider(REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
+  $("#chooseMysqlSetup").addEventListener("click", () => selectFirstRunProvider(REMOTE_PROVIDER_ID.MYSQL));
+  $("#setupGoogleBack").addEventListener("click", () => {
+    setSetupDeviceAuthPanel(null);
+    $("#setupProviderChoices").hidden = false;
+    $("#setupGoogle").hidden = true;
+  });
+  $("#setupMysqlBack").addEventListener("click", () => {
+    $("#setupProviderChoices").hidden = false;
+    $("#setupMysql").hidden = true;
+  });
+  $("#setupGoogleButton").addEventListener("click", (event) => runOptionsAction("setup-google", setupGoogleClicked, event.currentTarget, { refreshOnError: false }));
+  $("#setupMysqlExistingButton").addEventListener("click", (event) => runOptionsAction("setup-mysql-existing", () => setupMysqlClicked("remote"), event.currentTarget, { refreshOnError: false }));
+  $("#setupMysqlLocalButton").addEventListener("click", (event) => runOptionsAction("setup-mysql-local", () => setupMysqlClicked("local"), event.currentTarget, { refreshOnError: false }));
 
   window.addEventListener("focus", () => {
     void refreshActiveBackendLabel().catch(() => {});
@@ -696,8 +825,7 @@ async function init() {
   bindEvents();
   bindSectionNavigation();
   await refresh();
-  await Promise.all([initUsagePage(), initReconcilePage()]);
-  setStatus("Ready");
+  if (await backendIsEstablished()) setStatus("Ready");
 }
 
 startPage({ page: "options", title: "Options", init });
