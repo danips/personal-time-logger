@@ -460,7 +460,28 @@ function renderActiveState(latest) {
 }
 
 function updateElapsed() {
+  if (!activeEntries[0]) return;
   tickElapsed(activeEntries[0]);
+}
+
+function startElapsedTicker() {
+  if (ticker || !activeEntries[0]) return;
+  ticker = setInterval(() => {
+    void runPageTask({
+      page: "popup",
+      phase: "elapsed-tick",
+      task: updateElapsed,
+      onError(error) {
+        setSyncStatus("error", formatError(error));
+      }
+    });
+  }, 1000);
+}
+
+function stopElapsedTicker() {
+  if (!ticker) return;
+  clearInterval(ticker);
+  ticker = null;
 }
 
 function setNewTimerOpen(open) {
@@ -481,6 +502,11 @@ async function renderActive(isCurrent) {
   if (!isCurrent()) return false;
   activeEntries = entries;
   renderActiveState(activeEntries[0]);
+  if (activeEntries[0]) {
+    startElapsedTicker();
+  } else {
+    stopElapsedTicker();
+  }
 
   if (activeEntries.length > 1) {
     $activeWarning.textContent = `Warning: ${activeEntries.length} active timers exist. Older active entries are marked needs_review on sync.`;
@@ -1093,22 +1119,10 @@ async function init() {
   // broadcast re-renders this popup, so no local poller is needed.
   await runSync({ force: false });
   await render();
-  if (!ticker) {
-    ticker = setInterval(() => {
-      void runPageTask({
-        page: "popup",
-        phase: "elapsed-tick",
-        task: updateElapsed,
-        onError(error) {
-          setSyncStatus("error", formatError(error));
-        }
-      });
-    }, 1000);
-  }
 }
 
 window.addEventListener("pagehide", () => {
-  if (ticker) clearInterval(ticker);
+  stopElapsedTicker();
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
 });
 
