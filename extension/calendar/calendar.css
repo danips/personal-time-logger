@@ -798,18 +798,6 @@ textarea:focus-visible,
   color: var(--accent);
 }
 
-#syncButton {
-  border-color: var(--button-primary);
-  background: var(--button-primary);
-  color: #ffffff;
-  font-weight: 700;
-}
-
-#syncButton:hover {
-  border-color: var(--accent-strong);
-  background: var(--accent-strong);
-}
-
 #sendTempoButton {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
   background: var(--accent-soft);
@@ -915,10 +903,6 @@ textarea {
 
   .toolbar {
     background: color-mix(in srgb, var(--surface) 90%, transparent);
-  }
-
-  #syncButton {
-    color: #101522;
   }
 
   .entry-block:hover {

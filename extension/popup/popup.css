@@ -895,9 +895,9 @@ textarea {
 }
 
 .play-button {
-  width: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
   border-radius: 50%;
   border-color: color-mix(in srgb, var(--success) 48%, var(--border));
   background: var(--success-soft);

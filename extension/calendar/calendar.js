@@ -1019,7 +1019,6 @@ function bindEvents() {
   $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
   $("#sendTempoButton").addEventListener("click", (event) => runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget }));
-  $("#syncButton").addEventListener("click", (event) => runCalendarAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
   $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, {
     button: event.currentTarget,
     expectedRevision: lastResizeUndo?.revision,
