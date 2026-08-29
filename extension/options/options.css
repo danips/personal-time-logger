@@ -641,7 +641,7 @@ a:hover {
 }
 
 .section-nav {
-  top: 24px;
+  top: 34px;
   gap: 4px;
   padding: 10px;
   border-color: var(--border);
@@ -878,7 +878,7 @@ code {
   }
 
   .section-nav {
-    top: 8px;
+    top: 22px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     backdrop-filter: blur(16px);
   }
