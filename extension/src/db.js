@@ -242,6 +242,12 @@ export async function getSetting(key, fallback = null) {
   return record ? record.value : fallback;
 }
 
+export async function getAllSettings() {
+  return store(SETTINGS_STORE, "readonly", async (s) => Object.fromEntries(
+    (await requestToPromise(s.getAll())).map(({ key, value }) => [key, clone(value)])
+  ));
+}
+
 export async function setSetting(key, value) {
   await store(SETTINGS_STORE, "readwrite", (s) => requestToPromise(s.put({ key, value })));
   return value;

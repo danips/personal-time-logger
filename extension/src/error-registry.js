@@ -150,6 +150,14 @@ export const ERROR_REGISTRY = {
     retryable: true, status: "pending", title: "Sync is waiting before retrying",
     detail: "A recent Google failure started a temporary backoff.", recovery: "Wait for the retry deadline before syncing again."
   },
+  [ERROR_CODE.BACKUP_INVALID]: {
+    retryable: false, status: "error", title: "Backup file is invalid",
+    detail: "The selected file is not a valid Personal Time Logger backup.", recovery: "Choose a backup exported by this extension."
+  },
+  [ERROR_CODE.BACKUP_NOT_SYNCED]: {
+    retryable: true, status: "error", title: "Backup requires a completed sync",
+    detail: "The backup was not created or restored because local data is not fully synchronized.", recovery: "Resolve the sync problem, then retry."
+  },
   [ERROR_CODE.SYNC_BUSY]: {
     retryable: true, status: "pending", title: "Another sync is active",
     detail: "A different extension context owns the current sync lease.", recovery: "Wait for it to finish, then retry."

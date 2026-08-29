@@ -1,9 +1,10 @@
-import { getAllEntries, getSetting, mutateSettings } from "../src/db.js";
+import { getAllEntries, getAllSettings, getDirtyEntryCount, getSetting, mutateAllLocalState, mutateSettings } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
-import { getDeviceId } from "../src/entries.js";
+import { SHEET_HEADERS, decodePersistedEntry, getDeviceId } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
 import { clearDiagnostics, diagnosticsText, getDiagnostics } from "../src/diagnostics.js";
+import { ERROR_CODE } from "../src/error-codes.js";
 import { NEXT_DUE_KEY, scheduleSyncHeartbeat } from "../src/background-schedule.js";
 import {
   adoptSpreadsheet,
@@ -21,7 +22,7 @@ import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
-import { bindThemeControls, THEME_OPTIONS } from "../src/themes.js";
+import { bindThemeControls, readThemePreferences, saveThemePreferences, THEME_OPTIONS } from "../src/themes.js";
 import { initReconcilePage } from "../reconcile/reconcile.js";
 import { initUsagePage } from "../usage/usage.js";
 import {
@@ -37,6 +38,135 @@ let eventsBound = false;
 let auxiliaryPagesInitialized = false;
 let settingsLayoutWasVisible = false;
 let syncSectionNavigation = () => {};
+
+const BACKUP_FORMAT = "personal-time-logger-backup";
+const BACKUP_SCHEMA_VERSION = 1;
+const BACKUP_SETTING_KEYS = Object.freeze([
+  SETTING_KEY.CHATGPT_USAGE_SESSION_TOKEN_CONSENT,
+  SETTING_KEY.DURATION_MULTIPLIER,
+  SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
+  SETTING_KEY.MYSQL_API_BASE_URL,
+  SETTING_KEY.SYNC_INTERVAL_SECONDS,
+  SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID,
+  SETTING_KEY.TEMPO_TASK_ISSUE_IDS,
+  SETTING_KEY.WINDOW_RESIZE_PRESETS,
+  SETTING_KEY.WORKDAY_START_HOUR
+]);
+
+function backupError(code) {
+  return Object.assign(new Error("The backup operation could not complete."), { code });
+}
+
+function entryBackupFingerprint(entry) {
+  return JSON.stringify(SHEET_HEADERS.map((field) => entry[field]));
+}
+
+function parseBackup(text) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw backupError(ERROR_CODE.BACKUP_INVALID);
+  }
+  if (!value || value.format !== BACKUP_FORMAT || value.schema_version !== BACKUP_SCHEMA_VERSION
+    || !Array.isArray(value.entries) || !value.settings || typeof value.settings !== "object" || Array.isArray(value.settings)) {
+    throw backupError(ERROR_CODE.BACKUP_INVALID);
+  }
+
+  const ids = new Set();
+  const entries = value.entries.map((entry) => {
+    let decoded;
+    try {
+      decoded = decodePersistedEntry(entry);
+    } catch {
+      throw backupError(ERROR_CODE.BACKUP_INVALID);
+    }
+    if (decoded.dirty || ids.has(decoded.id)) throw backupError(ERROR_CODE.BACKUP_INVALID);
+    ids.add(decoded.id);
+    return { ...decoded, dirty: false, last_sync_at: "", sync_error: "" };
+  });
+  const settings = Object.fromEntries(BACKUP_SETTING_KEYS
+    .filter((key) => Object.hasOwn(value.settings, key))
+    .map((key) => [key, value.settings[key]]));
+  const appearance = value.appearance && typeof value.appearance === "object" && !Array.isArray(value.appearance)
+    ? value.appearance
+    : null;
+  return { entries, settings, appearance };
+}
+
+async function ensureBackupSync() {
+  const result = await syncNow({ force: true });
+  if (result?.status !== "synced" || await getDirtyEntryCount()) {
+    throw backupError(ERROR_CODE.BACKUP_NOT_SYNCED);
+  }
+}
+
+async function exportBackupClicked() {
+  setStatus("Synchronizing before creating backup...");
+  await ensureBackupSync();
+  const [entries, allSettings] = await Promise.all([getAllEntries(), getAllSettings()]);
+  const settings = Object.fromEntries(BACKUP_SETTING_KEYS
+    .filter((key) => Object.hasOwn(allSettings, key))
+    .map((key) => [key, allSettings[key]]));
+  const backup = {
+    format: BACKUP_FORMAT,
+    schema_version: BACKUP_SCHEMA_VERSION,
+    exported_at: nowIso(),
+    settings,
+    appearance: readThemePreferences(),
+    entries
+  };
+  const blob = new Blob([`${JSON.stringify(backup, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `personal-time-logger-backup-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+  setStatus(`Backup downloaded (${entries.length} entr${entries.length === 1 ? "y" : "ies"})`);
+}
+
+async function importBackupClicked(file) {
+  if (!file) return false;
+  const backup = parseBackup(await file.text());
+  if (globalThis.confirm && !globalThis.confirm(
+    `Restore ${backup.entries.length} entr${backup.entries.length === 1 ? "y" : "ies"} from this backup? Existing entries with the same ID will be compared and conflicts will be left unchanged.`
+  )) return false;
+
+  setStatus("Synchronizing before restoring backup...");
+  await ensureBackupSync();
+  const summary = { added: 0, settingsChanged: 0, conflicts: [] };
+  await mutateAllLocalState(BACKUP_SETTING_KEYS, ({ entries, settings }) => {
+    for (const [key, value] of Object.entries(backup.settings)) {
+      if (JSON.stringify(settings.get(key)) !== JSON.stringify(value)) {
+        settings.set(key, value);
+        summary.settingsChanged += 1;
+      }
+    }
+    for (const entry of backup.entries) {
+      const current = entries.get(entry.id);
+      if (!current) {
+        entries.set(entry.id, { ...entry, dirty: true });
+        summary.added += 1;
+      } else if (entryBackupFingerprint(current) !== entryBackupFingerprint(entry)) {
+        summary.conflicts.push(entry.id);
+      }
+    }
+  });
+  if (backup.appearance) saveThemePreferences(backup.appearance);
+
+  if (summary.added || summary.settingsChanged) {
+    setStatus("Synchronizing restored backup...");
+    await ensureBackupSync();
+  }
+  const conflictIds = summary.conflicts.slice(0, 5).join(", ");
+  const conflictSuffix = summary.conflicts.length > 5 ? ", …" : "";
+  const conflictText = summary.conflicts.length
+    ? ` ${summary.conflicts.length} entr${summary.conflicts.length === 1 ? "y conflict was" : "y conflicts were"} left unchanged (${conflictIds}${conflictSuffix}).`
+    : "";
+  setStatus(`Backup restored: ${summary.added} entr${summary.added === 1 ? "y" : "ies"} added, ${summary.settingsChanged} setting${summary.settingsChanged === 1 ? "" : "s"} changed.${conflictText}`);
+  return true;
+}
 
 function renderThemeSelection({ theme, highContrast }) {
   const selected = THEME_OPTIONS.find(({ id }) => id === theme);
@@ -146,7 +276,7 @@ async function saveTempoSettings() {
 }
 
 function setStatus(message) {
-  for (const id of ["statusLine", "firstRunStatus"]) {
+  for (const id of ["statusLine", "firstRunStatus", "backupStatus"]) {
     const status = document.getElementById(id);
     if (status) status.textContent = message;
   }
@@ -787,6 +917,13 @@ function bindEvents() {
   $("#copyDiagnostics").addEventListener("click", copyDiagnosticsClicked);
   $("#exportDiagnostics").addEventListener("click", exportDiagnosticsClicked);
   $("#clearDiagnostics").addEventListener("click", (event) => runOptionsAction("clear-diagnostics", clearDiagnosticsClicked, event.currentTarget));
+  $("#exportBackup").addEventListener("click", (event) => runOptionsAction("export-backup", exportBackupClicked, event.currentTarget));
+  $("#chooseBackupFile").addEventListener("click", () => $("#importBackupFile").click());
+  $("#importBackupFile").addEventListener("change", (event) => {
+    const input = event.currentTarget;
+    void runOptionsAction("import-backup", () => importBackupClicked(input.files?.[0]))
+      .finally(() => { input.value = ""; });
+  });
   $("#addTempoMapping").addEventListener("click", () => {
     const row = createTempoMappingRow();
     $("#tempoMappings").append(row);
