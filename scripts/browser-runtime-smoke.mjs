@@ -198,6 +198,17 @@ async function exercisePopupTimer(baseUrl, sessionId) {
 }
 
 async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
+  const optionsReady = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      import(browser.runtime.getURL("src/db.js"))
+        .then((db) => db.setSetting("remote_backend", "google-sheets"))
+        .then(() => done(true), () => done(false));
+    `,
+    args: []
+  });
+  if (!optionsReady) throw new Error("Could not establish a backend for Options smoke coverage.");
+
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
   await waitForPage(baseUrl, sessionId, ["#calendarGrid", "#statusLine"]);
   const selectedWeek = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
@@ -349,7 +360,7 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     args: []
   });
   if (hiddenMysqlState.active !== "MySQL 8.4"
-    || hiddenMysqlState.hash !== "#storage"
+    || hiddenMysqlState.hash !== "#appearance"
     || !hiddenMysqlState.accountNavHidden
     || !hiddenMysqlState.accountHidden
     || !hiddenMysqlState.spreadsheetNavHidden
@@ -365,8 +376,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     script: "return window.location.hash;",
     args: []
   });
-  if (hiddenSpreadsheetHash !== "#storage") {
-    throw new Error(`Hidden spreadsheet hash did not fall back to Storage: ${hiddenSpreadsheetHash}`);
+  if (hiddenSpreadsheetHash !== "#appearance") {
+    throw new Error(`Hidden spreadsheet hash did not fall back to Appearance: ${hiddenSpreadsheetHash}`);
   }
   const hiddenFocusState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
