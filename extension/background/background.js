@@ -5,18 +5,24 @@ import {
   NEXT_DUE_KEY,
   scheduleSyncHeartbeat,
   scheduleWithFallback,
-  SYNC_ALARM
+  SYNC_ALARM,
+  UPDATE_CHECK_ALARM
 } from "../src/background-schedule.js";
 import { platform } from "../src/platform.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { ERROR_CODE } from "../src/error-codes.js";
-import { SYNC_REQUEST_MESSAGE } from "../src/sync-request.js";
+import {
+  SYNC_REQUEST_MESSAGE,
+  UPDATE_CHECK_MESSAGE,
+  UPDATE_INSTALL_MESSAGE
+} from "../src/sync-request.js";
 import {
   sendTempoWorklogs,
   TEMPO_UPLOAD_MESSAGE,
   tempoXhrRequest
 } from "../src/tempo.js";
+const UPDATE_CHECK_MINUTES = 24 * 60;
 
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
@@ -99,6 +105,43 @@ async function scheduleHeartbeat() {
   });
 }
 
+async function runUpdateCheck() {
+  try {
+    const result = await platform.requestUpdateCheck();
+    if (result?.status === "update_available" && result.version) {
+      await setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, result.version);
+    } else if (result?.status === "no_update") {
+      await setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, "");
+    }
+  } catch (error) {
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "update_check",
+      error,
+      recovery: "Firefox will retry the extension update check later."
+    }).catch(() => {});
+    return { ok: false };
+  }
+  return { ok: true };
+}
+
+function scheduleUpdateCheck() {
+  return platform.scheduleAlarm(UPDATE_CHECK_ALARM, UPDATE_CHECK_MINUTES);
+}
+
+async function installAvailableUpdate() {
+  const result = await platform.requestUpdateCheck();
+  if (result?.status === "update_available" && result.version) {
+    await setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, result.version);
+    await platform.reload();
+    return { ok: true, version: result.version };
+  }
+  const availableVersion = await getSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, "");
+  if (!availableVersion) return { ok: false, available: false };
+  await platform.reload();
+  return { ok: true, version: availableVersion };
+}
+
 async function runAlarmLifecycle() {
   try {
     await runBackgroundSync();
@@ -118,8 +161,17 @@ async function runAlarmLifecycle() {
 }
 
 platform.onAlarm((alarm) => {
+  if (alarm.name === UPDATE_CHECK_ALARM) {
+    void runUpdateCheck();
+    return;
+  }
   if (alarm.name !== SYNC_ALARM) return;
   void runAlarmLifecycle();
+});
+
+platform.onUpdateAvailable(({ version } = {}) => {
+  if (!version) return;
+  void setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, version).catch(() => {});
 });
 
 // A new version may need to see the spreadsheet to migrate or repair it, so the
@@ -129,6 +181,7 @@ async function handleInstalled({ reason }) {
   try {
     await clearRemoteReadMarker();
     await setSetting(NEXT_DUE_KEY, 0);
+    await setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, "");
   } catch (error) {
     // The guaranteed scheduling attempt in finally still gives this context a
     // chance to recover once IndexedDB is available again.
@@ -177,8 +230,12 @@ async function uploadTempoWorklogs(message, sender) {
 
 platform.onRuntimeMessage((message, sender) => {
   if (message?.type === SYNC_REQUEST_MESSAGE) return runRequestedSync(message);
+  if (message?.type === UPDATE_CHECK_MESSAGE) return runUpdateCheck();
+  if (message?.type === UPDATE_INSTALL_MESSAGE) return installAvailableUpdate();
   if (message?.type !== TEMPO_UPLOAD_MESSAGE) return undefined;
   return uploadTempoWorklogs(message, sender);
 });
 
 void scheduleHeartbeat();
+void scheduleUpdateCheck();
+void runUpdateCheck();

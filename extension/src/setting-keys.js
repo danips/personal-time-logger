@@ -37,6 +37,7 @@ export const SETTING_KEY = Object.freeze({
   TEMPO_AUTHOR_ACCOUNT_ID: "tempo_author_account_id",
   TEMPO_TASK_ISSUE_IDS: "tempo_task_issue_ids",
   TIME_ENTRIES_SHEET_ID: "time_entries_sheet_id",
+  UPDATE_AVAILABLE_VERSION: "update_available_version",
   WINDOW_RESIZE_PRESETS: "window_resize_presets",
   WORKDAY_START_HOUR: "workday_start_hour"
 });

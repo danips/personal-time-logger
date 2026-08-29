@@ -11,7 +11,11 @@ import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
 import { activeTimerState, elapsedTimerState } from "../src/popup-active-state.js";
 import { onEntriesChanged } from "../src/events.js";
-import { requestBackgroundSync } from "../src/sync-request.js";
+import {
+  requestBackgroundSync,
+  UPDATE_CHECK_MESSAGE,
+  UPDATE_INSTALL_MESSAGE
+} from "../src/sync-request.js";
 import { allocateEntryByLocalDay } from "../src/time-allocation.js";
 import {
   addDays,
@@ -88,6 +92,8 @@ const $activeDescription = $("#activeDescription");
 const $elapsed = $("#elapsed");
 const $stopButton = $("#stopButton");
 const $activeWarning = $("#activeWarning");
+const $updateNotice = $("#updateNotice");
+const $installUpdate = $("#installUpdate");
 const $recentEntries = $("#recentEntries");
 const $loadMoreRecent = $("#loadMoreRecent");
 const $dirtyBadge = $("#dirtyBadge");
@@ -802,6 +808,10 @@ async function render() {
   const generation = ++renderGeneration;
   const isCurrent = () => generation === renderGeneration;
   if (!(await renderActive(isCurrent))) return;
+  const updateVersion = await getSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, "");
+  if (!isCurrent()) return;
+  $updateNotice.classList.toggle("hidden", !updateVersion);
+  if (updateVersion) $installUpdate.textContent = `Update ${updateVersion} available — click to install`;
   if (!(await renderChatGptUsageSummary(isCurrent))) return;
   if (!(await renderDirtyBadge(isCurrent))) return;
   await renderRecent(isCurrent);
@@ -821,6 +831,11 @@ function queueSync() {
   // The edit is already committed locally. Let the background keep the remote
   // sync alive if this short-lived popup closes before it completes.
   void runSync({ force: false });
+}
+
+async function syncAndCheckForUpdate() {
+  await runSync({ force: true });
+  await platform.sendRuntimeMessage({ type: UPDATE_CHECK_MESSAGE });
 }
 
 function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
@@ -998,7 +1013,15 @@ function bindEvents() {
   });
   $activePanel.addEventListener("click", editActiveTimer);
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
-  $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", () => runSync({ force: true }), { button: event.currentTarget }));
+  $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", syncAndCheckForUpdate, { button: event.currentTarget }));
+  $installUpdate.addEventListener("click", () => {
+    $installUpdate.disabled = true;
+    $installUpdate.textContent = "Installing update…";
+    void platform.sendRuntimeMessage({ type: UPDATE_INSTALL_MESSAGE }).catch(() => {
+      $installUpdate.disabled = false;
+      $installUpdate.textContent = "Update could not be installed — try again";
+    });
+  });
   $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
     render().catch((error) => {

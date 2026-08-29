@@ -178,6 +178,21 @@ export const platform = {
     rawApi.runtime.onInstalled.addListener(listener);
   },
 
+  onUpdateAvailable(listener) {
+    if (!rawApi.runtime || !rawApi.runtime.onUpdateAvailable) return;
+    rawApi.runtime.onUpdateAvailable.addListener(listener);
+  },
+
+  async requestUpdateCheck() {
+    if (!rawApi.runtime?.requestUpdateCheck) return { status: "unsupported" };
+    return apiCall(rawApi.runtime.requestUpdateCheck, rawApi.runtime);
+  },
+
+  async reload() {
+    if (!rawApi.runtime?.reload) throw new Error("Browser extension reload is unavailable");
+    return apiCall(rawApi.runtime.reload, rawApi.runtime);
+  },
+
   onRuntimeMessage(listener) {
     if (!rawApi.runtime || !rawApi.runtime.onMessage) return;
     rawApi.runtime.onMessage.addListener((message, sender, sendResponse) => {

@@ -1,6 +1,8 @@
 import { platform } from "./platform.js";
 
 export const SYNC_REQUEST_MESSAGE = "timelogger_request_sync";
+export const UPDATE_CHECK_MESSAGE = "timelogger_request_update_check";
+export const UPDATE_INSTALL_MESSAGE = "timelogger-install-update";
 
 function responseError(response) {
   const error = new Error(response?.error?.message || "Background sync request failed");

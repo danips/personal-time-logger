@@ -35,6 +35,7 @@ import { storageUiState } from "../src/options-storage-ui.js";
 let diagnostics = [];
 let eventsBound = false;
 let auxiliaryPagesInitialized = false;
+let settingsLayoutWasVisible = false;
 let syncSectionNavigation = () => {};
 
 function renderThemeSelection({ theme, highContrast }) {
@@ -532,11 +533,16 @@ function renderFirstRun(established) {
   $("#firstRunSetup").hidden = established;
   $("#settingsLayout").hidden = !established;
   if (!established) {
+    settingsLayoutWasVisible = false;
     history.replaceState(null, "", "#setup");
     setStatus("Choose a storage backend to begin");
     return;
   }
-  syncSectionNavigation({ scroll: true });
+  // The layout is hidden during first-run setup, so reveal-and-scroll once to
+  // honor an initial section hash. Refreshes after saves must not move the
+  // user's viewport back to the first section.
+  syncSectionNavigation({ scroll: !settingsLayoutWasVisible });
+  settingsLayoutWasVisible = true;
 }
 
 function selectFirstRunProvider(providerId) {

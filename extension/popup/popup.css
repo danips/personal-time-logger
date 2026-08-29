@@ -240,6 +240,28 @@ h2 {
   color: var(--warning);
 }
 
+.update-notice {
+  margin-bottom: 10px;
+}
+
+.update-notice button {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.update-notice button:hover {
+  border-color: var(--accent);
+}
+
 .active-panel {
   display: flex;
   align-items: center;
