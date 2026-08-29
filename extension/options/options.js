@@ -145,7 +145,10 @@ async function saveTempoSettings() {
 }
 
 function setStatus(message) {
-  $("#statusLine").textContent = message;
+  for (const id of ["statusLine", "firstRunStatus"]) {
+    const status = document.getElementById(id);
+    if (status) status.textContent = message;
+  }
 }
 
 async function backendIsEstablished() {
@@ -530,7 +533,7 @@ function renderFirstRun(established) {
   $("#settingsLayout").hidden = !established;
   if (!established) {
     history.replaceState(null, "", "#setup");
-    $("#statusLine").textContent = "Choose a storage backend to begin";
+    setStatus("Choose a storage backend to begin");
     return;
   }
   syncSectionNavigation({ scroll: true });

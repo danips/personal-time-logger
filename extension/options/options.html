@@ -12,23 +12,11 @@
   </head>
   <body data-page="options">
     <main class="page">
-      <header class="options-header">
-        <div class="brand-row">
-          <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="8"></circle></svg>
-          </span>
-          <div>
-            <p class="eyebrow">Time Logger</p>
-            <h1>Settings</h1>
-          </div>
-        </div>
-        <p id="statusLine" class="status" role="status" aria-live="polite">Loading...</p>
-      </header>
-
       <section id="firstRunSetup" class="panel first-run-setup" hidden aria-labelledby="firstRunHeading">
         <p class="eyebrow">First-time setup</p>
         <h2 id="firstRunHeading">Choose where your time data starts</h2>
         <p class="note">Choose a remote backend before configuring the rest of the extension. The remaining settings will appear after the backend is ready.</p>
+        <p id="firstRunStatus" class="status" role="status" aria-live="polite">Loading...</p>
         <div id="setupProviderChoices" class="setup-choice-grid">
           <button id="chooseGoogleSetup" class="setup-choice" type="button">
             <strong>Start with Google Sheets</strong>
@@ -63,6 +51,18 @@
 
       <div id="settingsLayout" class="options-layout" hidden>
         <nav class="section-nav" aria-label="Options sections">
+          <div class="section-nav-header">
+            <div class="brand-row">
+              <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="8"></circle></svg>
+              </span>
+              <div>
+                <p class="eyebrow">Time Logger</p>
+                <h1>Settings</h1>
+              </div>
+            </div>
+            <p id="statusLine" class="status" role="status" aria-live="polite">Loading...</p>
+          </div>
           <p class="section-nav-label">Sections</p>
           <a href="#appearance">Appearance</a>
           <a href="#general">General</a>

@@ -32,10 +32,6 @@ body {
   padding: 28px 0 48px;
 }
 
-.options-header {
-  margin-bottom: 18px;
-}
-
 h1,
 h2,
 p {
@@ -572,10 +568,6 @@ body {
   padding: 34px 0 64px;
 }
 
-.options-header {
-  margin-bottom: 24px;
-}
-
 .brand-row {
   display: flex;
   align-items: center;
@@ -625,10 +617,6 @@ h3 {
   letter-spacing: -0.015em;
 }
 
-.options-header > .status {
-  margin: 8px 0 0 58px;
-}
-
 .status,
 .note,
 .empty,
@@ -660,6 +648,30 @@ a:hover {
   border-radius: 14px;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   box-shadow: var(--shadow-sm);
+}
+
+.section-nav-header {
+  padding: 2px 2px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-nav-header .brand-row {
+  gap: 9px;
+}
+
+.section-nav-header .brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+
+.section-nav-header h1 {
+  font-size: 20px;
+}
+
+.section-nav-header > .status {
+  margin: 8px 0 0;
+  line-height: 1.35;
 }
 
 .section-nav-label {
@@ -860,10 +872,6 @@ code {
     padding-top: 22px;
   }
 
-  .options-header > .status {
-    margin-left: 0;
-  }
-
   .options-layout {
     grid-template-columns: 1fr;
     gap: 16px;
@@ -873,6 +881,10 @@ code {
     top: 8px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     backdrop-filter: blur(16px);
+  }
+
+  .section-nav-header {
+    grid-column: 1 / -1;
   }
 
   .panel {
