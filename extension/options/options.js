@@ -50,14 +50,15 @@ function bindSectionNavigation() {
   const setActive = (id) => {
     for (const link of links) link.classList.toggle("active", link.hash === `#${id}`);
   };
-  syncSectionNavigation = () => {
+  syncSectionNavigation = ({ scroll = false } = {}) => {
     const requestedId = window.location.hash.slice(1);
     const requestedSection = requestedId && document.getElementById(requestedId);
     const requestedLink = links.find((link) => link.hash === `#${requestedId}`);
     const visible = requestedSection && !requestedSection.hidden && requestedLink && !requestedLink.hidden;
-    const nextId = visible ? requestedId : "storage";
+    const nextId = visible ? requestedId : "appearance";
     if (nextId !== requestedId) history.replaceState(null, "", `#${nextId}`);
     setActive(nextId);
+    if (scroll) document.getElementById(nextId)?.scrollIntoView({ block: "start" });
   };
   for (const link of links) {
     link.addEventListener("click", () => setActive(link.hash.slice(1)));
@@ -532,7 +533,7 @@ function renderFirstRun(established) {
     $("#statusLine").textContent = "Choose a storage backend to begin";
     return;
   }
-  syncSectionNavigation();
+  syncSectionNavigation({ scroll: true });
 }
 
 function selectFirstRunProvider(providerId) {
