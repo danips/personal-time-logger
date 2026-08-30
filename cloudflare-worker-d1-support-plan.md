@@ -655,8 +655,8 @@ Prove the server contract and D1 semantics independently of Firefox.
 ## Acceptance checks
 
 - [ ] Worker tests pass from a clean checkout after the documented install step.
-- [ ] Tests do not require network access after dependencies are installed.
-- [ ] Tests do not use a developer's real D1 database.
+- [x] Tests do not require network access after dependencies are installed.
+- [x] Tests do not use a developer's real D1 database.
 - [ ] A deliberately broken guard/transaction test fails for the expected reason.
 
 ---
@@ -1019,7 +1019,7 @@ Prove the combined extension/server change is safe to hand off.
   bash server/mysql-api/tests/run.sh
   ```
 
-- [ ] Inspect the built XPI/source manifest and confirm:
+- [x] Inspect the built XPI/source manifest and confirm:
 
   - new D1 extension modules are packaged;
   - Worker source, Wrangler config, migrations, tests, and README are not packaged
@@ -1027,7 +1027,7 @@ Prove the combined extension/server change is safe to hand off.
   - no token, digest, database ID, account ID, or developer URL is packaged;
   - the only new host declaration is the optional workers.dev wildcard.
 
-- [ ] Search tracked changes for common secret patterns and the exact synthetic
+- [x] Search tracked changes for common secret patterns and the exact synthetic
   test tokens. Do not print environment secrets while searching.
 - [ ] Manually test in a fresh Firefox profile against a disposable Cloudflare
   account/database:
