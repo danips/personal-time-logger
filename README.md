@@ -2,7 +2,7 @@
 
 Current release: `0.1.54` (`v0.1.54`).
 
-A Firefox extension for local-first time tracking with Google Sheets or MySQL remote sync. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
+A Firefox extension for local-first time tracking with Google Sheets, MySQL, or a user-owned Cloudflare Worker + D1 backend. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
 ## What Is Included
 
@@ -18,6 +18,7 @@ A Firefox extension for local-first time tracking with Google Sheets or MySQL re
 - IndexedDB local storage using database `timelogger_db`.
 - Google Sheets API sync with `time_entries` as the canonical remote tab.
 - MySQL 8.4 sync through an authenticated HTTPS API, with resumable verified migration between providers.
+- Cloudflare Worker + D1 sync through an authenticated user-owned HTTPS API, with resumable verified migration between providers.
 - Refresh-token-capable Google device OAuth flow for Firefox.
 - Experimental ChatGPT 5-hour and weekly usage controls for the current Firefox session.
 - Unit tests over the pure logic, run with `npm test`.
@@ -193,7 +194,9 @@ preparation target never changes the active backend; only a verified migration
 does that.
 
 Google Sheets is the legacy/default provider. MySQL 8.4 is configured with an
-HTTPS API base URL and a device-local bearer token. Google Account and
+HTTPS API base URL and a device-local bearer token. Cloudflare Worker + D1 is
+configured with a `workers.dev` HTTPS URL and a device-local bearer token; the
+Worker stores only the token's SHA-256 digest. Google Account and
 Spreadsheet settings are shown when Google is active or selected as the
 preparation target, and are hidden during ordinary MySQL use without deleting
 Google credentials, tokens, or spreadsheet state.
@@ -208,15 +211,25 @@ entries and shared configuration, and switches the active backend only after
 verification succeeds. The source provider and its data remain available for
 reverse migration.
 
-For a new profile that does not use Google, choose **Use MySQL directly** in
-Storage. This initializes MySQL from that Firefox profile's local data without
-reading Google Sheets. Existing MySQL records that do not match the local data
-are rejected rather than overwritten.
+For a new profile that does not use Google, choose the direct setup action for
+MySQL or Cloudflare D1 in Storage. This initializes the selected backend from
+that Firefox profile's local data without reading Google Sheets. Existing
+remote records that do not match the local data are rejected rather than
+overwritten.
 
-If MySQL already contains the authoritative data, choose **Use existing MySQL
-data** instead. This verifies any local records that are already present,
-switches the backend, and imports MySQL-only records into the local database;
-it does not require Google sign-in.
+If MySQL or Cloudflare D1 already contains the authoritative data, choose the
+corresponding **Use existing ... data** action instead. This verifies any local
+records that are already present, switches the backend, and imports remote-only
+records into the local database; it does not require Google sign-in.
+
+### Cloudflare Worker + D1 setup
+
+The backend is an isolated Worker and D1 database owned and operated by the
+user. Follow [the backend operations guide](server/cloudflare-d1/README.md) to
+create the database, apply migrations, configure the digest-only secret, and
+deploy the Worker. The extension's Storage page then accepts the Worker URL and
+the raw token locally. Cloudflare's free limits and product terms can change;
+check Cloudflare's current documentation before relying on them.
 
 ## Calendar View
 

@@ -10,3 +10,9 @@
 - Show Google setup automatically when Google Sheets is active or selected as a migration target.
 - Make local/remote reconciliation provider-neutral and identify the active remote backend.
 - Hide Google Sheet duplicate-row repair when the active backend does not support duplicate remote records.
+# Unreleased
+
+- Added an optional user-owned Cloudflare Worker + D1 remote backend with a
+  digest-only Worker secret, atomic versioned mutations, local-first migration,
+  and setup controls in Options. See `server/cloudflare-d1/README.md` for
+  deployment and operations.

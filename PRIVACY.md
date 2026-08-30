@@ -10,6 +10,17 @@ The optional Tempo upload stores the user-entered Tempo API token, author accoun
 
 The optional MySQL backend sends canonical time entries and shared duration configuration to the HTTPS API origin entered by the user. The Firefox extension never connects directly to MySQL and never receives the database credentials. The user-generated API bearer token is stored only in the local Firefox profile, is not put in Firefox Sync, and is sent only in the `Authorization` header to that configured API origin. The API host permission is requested for that exact origin. The extension does not send time-entry data, the token, or database credentials to the extension developer, analytics, Google, or any other endpoint.
 
+## Cloudflare Worker + D1 remote storage
+
+The optional Cloudflare backend sends canonical time entries and shared duration
+configuration to the user-owned Worker URL configured in Options. The Worker
+stores those records in the user's D1 database. The raw bearer token is stored
+only in the local Firefox profile; it is not included in Firefox Sync, extension
+backups, URLs, diagnostics, release artifacts, or error messages. The Worker
+configuration stores only the token's SHA-256 digest, never the raw token. A D1
+database ID is an identifier, not a credential. The extension does not send
+data to the project developer or any analytics service.
+
 When the user clicks **Send to Tempo** for the first time, Firefox asks for optional access to `https://api.tempo.io`. After the user confirms the upload, a fixed message asks the extension background context to send the displayed week's completed worklogs directly to Tempo. The background context reads the locally stored token and uses its host permission so the request does not depend on Tempo providing page CORS headers. Each request contains the configured author account ID and Jira issue ID plus the entry description, local start date, and effective duration. The API token is sent only as the Tempo bearer authorization header and is never included in the page message. Running timers are not sent. No Tempo credential or worklog is sent to the extension developer, analytics, Google, or any endpoint other than Tempo as part of this action.
 
 ## ChatGPT usage limits
