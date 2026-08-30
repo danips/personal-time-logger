@@ -623,10 +623,16 @@ async function testCloudflareD1Connection() {
   if (!token) throw Object.assign(new Error("Enter the Cloudflare D1 API token."), { code: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING });
   const permissionRequest = platform.requestOptionalHostPermission(cloudflareD1HostPermission(baseUrl));
   $("#cloudflareD1ConnectionStatus").textContent = "Requesting the exact Worker host permission...";
-  const permissionGranted = await Promise.race([
-    permissionRequest,
-    new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Firefox did not answer the host permission request."), { code: ERROR_CODE.REMOTE_PERMISSION })), 10_000))
-  ]);
+  let permissionGranted;
+  try {
+    permissionGranted = await Promise.race([
+      permissionRequest,
+      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Firefox did not answer the host permission request."), { code: ERROR_CODE.REMOTE_PERMISSION })), 10_000))
+    ]);
+  } catch (error) {
+    if (error?.code) throw error;
+    throw Object.assign(new Error("Firefox could not grant the Worker host permission."), { code: ERROR_CODE.REMOTE_PERMISSION, cause: error });
+  }
   if (!permissionGranted) throw Object.assign(new Error("Firefox did not grant the Worker host permission."), { code: ERROR_CODE.REMOTE_PERMISSION });
   $("#cloudflareD1ConnectionStatus").textContent = "Calling the Worker health endpoint...";
   const health = await cloudflareD1Provider.testConnection({ baseUrl, token, requestPermission: false });

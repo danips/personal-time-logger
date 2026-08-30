@@ -300,7 +300,7 @@ making D1 pretend to be MySQL.
 
 ## Steps
 
-- [ ] Create `extension/src/remote-api-client.js` by extracting only genuinely
+- [x] Create `extension/src/remote-api-client.js` by extracting only genuinely
   shared pieces from `remote-mysql.js`:
 
   - HTTPS base-URL parsing and normalization;
@@ -389,7 +389,7 @@ Wrangler.
   - migrations directory;
   - no token or token digest.
 
-- [ ] Ignore the user's copied account-specific `wrangler.jsonc` only if it could
+- [x] Ignore the user's copied account-specific `wrangler.jsonc` only if it could
   contain account-specific values. Do not ignore the example.
 - [x] Create `migrations/0001_initial.sql` with:
 
@@ -669,7 +669,7 @@ Connect the proven Worker API to the existing provider boundary.
 
 ## Steps
 
-- [ ] Add setting keys:
+- [x] Add setting keys:
 
   ```text
   CLOUDFLARE_D1_API_BASE_URL
@@ -680,7 +680,7 @@ Connect the proven Worker API to the existing provider boundary.
 - [x] Add stable error codes for missing/invalid D1 configuration if the shared
   generic codes cannot express the correct recovery text. Do not reuse
   `MYSQL_CONFIG_*` for D1.
-- [ ] Make generic API errors/provider recovery messages provider-neutral where
+- [x] Make generic API errors/provider recovery messages provider-neutral where
   they currently say only Google or MySQL, especially `API_TIMEOUT`,
   `API_NETWORK`, `API_ERROR`, `RATE_LIMIT`, `OFFLINE`, `BACKOFF`,
   `REMOTE_AUTH_REQUIRED`, and `REMOTE_ORIGIN_NOT_ALLOWED`.
@@ -719,7 +719,7 @@ Connect the proven Worker API to the existing provider boundary.
 - [x] Treat a later-chunk failure explicitly. Do not report that the full operation
   succeeded. Earlier successful chunks are safe to retry because append is
   idempotent and sync rereads remote versions.
-- [ ] Add focused recovery tests proving that after a chunk 2 failure:
+- [x] Add focused recovery tests proving that after a chunk 2 failure:
 
   - no local record is falsely acknowledged;
   - the next forced sync rereads the remote snapshot;
@@ -896,10 +896,10 @@ Cloudflare knowledge.
 
 ## Steps
 
-- [ ] Write `server/cloudflare-d1/README.md` for a user starting with only a free
+- [x] Write `server/cloudflare-d1/README.md` for a user starting with only a free
   Cloudflare account and Node 20+.
 - [ ] Verify every command against the pinned Wrangler version.
-- [ ] Document this exact flow, adjusting flags only when verified:
+- [x] Document this exact flow, adjusting flags only when verified:
 
   1. Install dependencies with `npm ci` inside `server/cloudflare-d1`.
   2. Authenticate with `npx wrangler login`.
@@ -920,10 +920,10 @@ Cloudflare knowledge.
   13. Enter the URL/raw token in extension Options, click Test connection, then
       choose local seeding or existing D1 adoption.
 
-- [ ] Commands that handle the raw token must avoid shell history where practical.
+- [x] Commands that handle the raw token must avoid shell history where practical.
   Offer a safe interactive method and warn users not to paste secrets into issue
   reports or screenshots.
-- [ ] Explain the difference between:
+- [x] Explain the difference between:
 
   - local Wrangler D1 data;
   - the remote production D1 database;
@@ -931,7 +931,7 @@ Cloudflare knowledge.
   - the Worker secret containing only its digest;
   - the database ID, which is configuration but not the bearer credential.
 
-- [ ] Add upgrade instructions:
+- [x] Add upgrade instructions:
 
   1. back up/export D1;
   2. pull the new code;
@@ -941,7 +941,7 @@ Cloudflare knowledge.
   6. deploy Worker;
   7. test health and sync.
 
-- [ ] Add token rotation instructions. A safe rotation is:
+- [x] Add token rotation instructions. A safe rotation is:
 
   1. stop editing timers briefly;
   2. generate a new raw token/digest;
@@ -952,11 +952,11 @@ Cloudflare knowledge.
   Do not promise zero-downtime rotation unless the implementation deliberately
   supports two digests.
 
-- [ ] Add backup/restore instructions using official Wrangler D1 export/import or
+- [x] Add backup/restore instructions using official Wrangler D1 export/import or
   Time Travel commands verified for the pinned version. Clearly warn that restore
   replaces remote state and must not be run casually while devices are syncing.
-- [ ] Document the free limits with a link and “subject to change” wording.
-- [ ] Add troubleshooting for:
+- [x] Document the free limits with a link and “subject to change” wording.
+- [x] Add troubleshooting for:
 
   ```text
   401 invalid token
@@ -972,7 +972,7 @@ Cloudflare knowledge.
   local Wrangler database mistaken for production
   ```
 
-- [ ] Update root `README.md`, `docs/architecture.md`, `PRIVACY.md`, and release
+- [x] Update root `README.md`, `docs/architecture.md`, `PRIVACY.md`, and release
   notes/documentation as appropriate:
 
   - list three remote providers;

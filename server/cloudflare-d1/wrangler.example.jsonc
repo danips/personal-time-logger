@@ -1,11 +1,11 @@
 {
-  "name": "REPLACE_WITH_YOUR_WORKER_NAME",
+  "name": "personal-time-logger",
   "main": "src/index.js",
   "compatibility_date": "2026-08-30",
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "REPLACE_WITH_YOUR_D1_DATABASE_NAME",
+      "database_name": "personal-time-logger",
       "database_id": "REPLACE_WITH_THE_ID_RETURNED_BY_WRANGLER_D1_CREATE",
       "migrations_dir": "migrations"
     }

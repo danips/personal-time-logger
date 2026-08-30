@@ -56,12 +56,15 @@ npm run deploy
 
 The deployment output provides the `https://...workers.dev` URL. Use that URL
 in Options, then use **Test Cloudflare D1 connection** before selecting a
-migration action. A direct smoke check is:
+migration action. For a direct smoke check, read the raw token interactively
+again and clear it immediately afterward:
 
 ```bash
+read -r -s PTL_RAW_TOKEN
 curl --fail \
   -H "Authorization: Bearer $PTL_RAW_TOKEN" \
   https://your-worker.your-subdomain.workers.dev/v1/health
+unset PTL_RAW_TOKEN
 ```
 
 Do not put a real token in shell history, source files, URLs, or bug reports.
@@ -74,9 +77,24 @@ Add forward-only SQL files under `migrations/` and apply them explicitly. Check
 the migration output before deploying code that depends on a new schema:
 
 ```bash
+npx wrangler d1 migrations list personal-time-logger --remote
 npm run db:migrate:local
 npm run db:migrate:remote
 ```
+
+For a normal upgrade, export a backup first, pull the new repository code,
+run `npm ci` in this directory, inspect pending migrations with the command
+above, apply them remotely, deploy the Worker, and test health and one sync
+from the extension. Apply a migration before deploying code that requires its
+new columns.
+
+### Token rotation
+
+Pause timer edits briefly, generate a new raw token and digest, replace the
+`PTL_API_TOKEN_SHA256` Worker secret, and update/test every extension device
+promptly. Devices using the old token receive `401` until updated; this v1
+configuration deliberately does not promise zero-downtime dual-token
+rotation.
 
 Wrangler rolls back a migration that fails, leaving the previous successful
 migration applied. Before any risky remote change, export a SQL backup:
@@ -110,16 +128,35 @@ fresh backup first.
 - Cloudflare pricing, free allowances, backup retention, and limits are product
   details outside this repository; consult Cloudflare's current D1
   [local-development](https://developers.cloudflare.com/d1/best-practices/local-development/)
-  documentation before operating at scale.
+  and [limits](https://developers.cloudflare.com/d1/platform/limits/)
+  documentation before operating at scale. These details are subject to change.
 
 ## Troubleshooting
 
 - `401`: verify the raw token hashes to the current `PTL_API_TOKEN_SHA256`
   secret; the raw token is never recoverable from the Worker.
-- `403`: use the exact `https://*.workers.dev` URL in Options and grant the
-  optional host permission when Firefox asks.
+- `403`: use the exact `https://*.workers.dev` URL in Options, grant the
+  optional host permission when Firefox asks, and ensure the request Origin is
+  the extension origin accepted by the Worker.
+- `404`: check that the Worker URL is the deployed Worker and that the path is
+  `/v1/health`.
+- Firefox host permission denied: click Test connection again and approve the
+  exact Worker origin; canceling the prompt leaves the active backend alone.
+- Incompatible API/schema health: deploy the Worker from the same repository
+  revision as the extension contract, then test health again.
+- D1 migration not applied: run `npx wrangler d1 migrations list
+  personal-time-logger --remote`, then `npm run db:migrate:remote`.
+- Free allowance exhausted or a CPU/query limit reached: wait for the
+  applicable reset (some limits reset at 00:00 UTC), reduce batch pressure,
+  or consult Cloudflare's current limits; these product limits are subject to
+  change.
 - Migration errors: inspect the migration number and remote output, restore
   from a verified backup only after confirming the database identity, then
   deploy compatible code.
+- Unrelated target data: direct setup/adoption refuses records it cannot prove
+  belong to this migration. Use the intended empty/verified target rather than
+  overwriting it.
+- Lost raw token: generate a new token, rotate the digest secret, and update
+  every device; the old token cannot be recovered from D1.
 - Local/remote confusion: check whether the command has `--local` or
   `--remote`; local Wrangler data is not the deployed D1 database.
