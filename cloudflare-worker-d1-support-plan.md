@@ -439,17 +439,17 @@ correctness guarantees as the MySQL API.
 
 ## 3.1 Routing and HTTP boundary
 
-- [ ] In `src/index.js`, parse with `new URL(request.url)` and dispatch on exact
+- [x] In `src/index.js`, parse with `new URL(request.url)` and dispatch on exact
   method/path pairs only.
-- [ ] Return JSON with `Content-Type: application/json; charset=utf-8` and
+- [x] Return JSON with `Content-Type: application/json; charset=utf-8` and
   `Cache-Control: no-store`.
-- [ ] Return a stable JSON 404 for unknown paths and 405 for known paths with the
+- [x] Return a stable JSON 404 for unknown paths and 405 for known paths with the
   wrong method.
-- [ ] Limit mutation request bodies to a small documented byte size, for example
+- [x] Limit mutation request bodies to a small documented byte size, for example
   512 KiB, before JSON parsing.
-- [ ] Require JSON content type for POST routes.
-- [ ] Reject malformed JSON, arrays at the top level, and unknown keys.
-- [ ] Set a uniform error shape:
+- [x] Require JSON content type for POST routes.
+- [x] Reject malformed JSON, arrays at the top level, and unknown keys.
+- [x] Set a uniform error shape:
 
   ```json
   {
@@ -460,50 +460,50 @@ correctness guarantees as the MySQL API.
   }
   ```
 
-- [ ] The public message must be owned by the Worker, not copied from D1 errors.
+- [x] The public message must be owned by the Worker, not copied from D1 errors.
 
 ## 3.2 Authentication
 
-- [ ] Require `Authorization: Bearer <token>` on every `/v1` GET and POST route.
+- [x] Require `Authorization: Bearer <token>` on every `/v1` GET and POST route.
   OPTIONS is the only exception.
-- [ ] Read `env.PTL_API_TOKEN_SHA256`; never accept the digest in a normal variable
+- [x] Read `env.PTL_API_TOKEN_SHA256`; never accept the digest in a normal variable
   committed to Wrangler config.
-- [ ] Hash the supplied raw token with Web Crypto SHA-256 and compare decoded bytes
+- [x] Hash the supplied raw token with Web Crypto SHA-256 and compare decoded bytes
   using a constant-work loop. Reject malformed configured digests.
-- [ ] Use one generic 401 response for a missing, malformed, or incorrect token.
-- [ ] Never log the Authorization header, raw token, digest, or request body.
+- [x] Use one generic 401 response for a missing, malformed, or incorrect token.
+- [x] Never log the Authorization header, raw token, digest, or request body.
 
 ## 3.3 CORS for Firefox extension origins
 
-- [ ] Accept `Origin` only when it is a syntactically valid `moz-extension://`
+- [x] Accept `Origin` only when it is a syntactically valid `moz-extension://`
   origin with no credentials, path, query, or fragment.
-- [ ] Echo the validated origin in `Access-Control-Allow-Origin`; never use `*`.
-- [ ] Add `Vary: Origin`.
-- [ ] Handle OPTIONS without bearer auth but only for a valid extension origin,
+- [x] Echo the validated origin in `Access-Control-Allow-Origin`; never use `*`.
+- [x] Add `Vary: Origin`.
+- [x] Handle OPTIONS without bearer auth but only for a valid extension origin,
   requested method, and requested headers.
-- [ ] Allow only `GET`, `POST`, `OPTIONS`, `Authorization`, and `Content-Type`.
-- [ ] Permit requests with no Origin for CLI health checks, but bearer auth still
+- [x] Allow only `GET`, `POST`, `OPTIONS`, `Authorization`, and `Content-Type`.
+- [x] Permit requests with no Origin for CLI health checks, but bearer auth still
   applies. Do not emit a wildcard CORS header for them.
-- [ ] Reject ordinary web origins with `403 ORIGIN_NOT_ALLOWED`.
+- [x] Reject ordinary web origins with `403 ORIGIN_NOT_ALLOWED`.
 
 ## 3.4 Validation
 
-- [ ] Port the behavior—not PHP syntax—of `server/mysql-api/src/Validator.php`.
-- [ ] Validate all 14 canonical fields and reject local-only fields such as
+- [x] Port the behavior—not PHP syntax—of `server/mysql-api/src/Validator.php`.
+- [x] Validate all 14 canonical fields and reject local-only fields such as
   `dirty`, `last_sync_at`, and `sync_error`.
-- [ ] Keep timestamp normalization and supported status/multiplier rules aligned
+- [x] Keep timestamp normalization and supported status/multiplier rules aligned
   with `extension/src/entries.js`.
-- [ ] Reject duplicate IDs within one request.
-- [ ] Set one uniform server batch maximum of 15 entries. This keeps guard,
+- [x] Reject duplicate IDs within one request.
+- [x] Set one uniform server batch maximum of 15 entries. This keeps guard,
   mutation, metadata, and result statements comfortably below the D1 Free limit
   of 50 queries per Worker invocation.
-- [ ] Validate `expectedVersion` as a positive safe integer.
-- [ ] Do not coerce arbitrary strings/numbers into valid values unless the existing
+- [x] Validate `expectedVersion` as a positive safe integer.
+- [x] Do not coerce arbitrary strings/numbers into valid values unless the existing
   API contract explicitly does so.
 
 ## 3.5 Health, token, and snapshot reads
 
-- [ ] Return health shaped as:
+- [x] Return health shaped as:
 
   ```json
   {
@@ -515,12 +515,12 @@ correctness guarantees as the MySQL API.
   }
   ```
 
-- [ ] `/v1/change-token` returns `changeToken` as a decimal string.
-- [ ] `/v1/snapshot` uses one `env.DB.batch()` containing the entries query, config
+- [x] `/v1/change-token` returns `changeToken` as a decimal string.
+- [x] `/v1/snapshot` uses one `env.DB.batch()` containing the entries query, config
   query, and metadata query. Do not issue three independent D1 calls.
-- [ ] Sort entries and config by primary key for deterministic tests/digests.
-- [ ] Return each entry/config record with its positive `version`.
-- [ ] Return nullable optional values as JSON `null`; the extension adapter owns
+- [x] Sort entries and config by primary key for deterministic tests/digests.
+- [x] Return each entry/config record with its positive `version`.
+- [x] Return nullable optional values as JSON `null`; the extension adapter owns
   empty-string normalization.
 
 ## 3.6 Atomic mutation pattern
@@ -528,9 +528,9 @@ correctness guarantees as the MySQL API.
 Cloudflare documents `DB.batch()` as transactional and rollback-on-failure. Use
 that primitive for each mutation request.
 
-- [ ] Before building a mutation batch, do a provider-owned preflight read that
+- [x] Before building a mutation batch, do a provider-owned preflight read that
   produces precise domain errors for already-stale input.
-- [ ] Still put a guard statement inside the mutation batch. The preflight alone
+- [x] Still put a guard statement inside the mutation batch. The preflight alone
   is not a compare-and-swap because another device can write between calls.
 - [ ] A guard should deliberately violate `mutation_guard.value NOT NULL` when its
   expected row/version/canonical-content predicate is false. A matching predicate
@@ -544,10 +544,10 @@ that primitive for each mutation request.
   );
   ```
 
-- [ ] Never interpolate entry data into SQL. Use prepared statements and `.bind()`.
-- [ ] Sort mutation items by ID before building statements. Restore caller order
+- [x] Never interpolate entry data into SQL. Use prepared statements and `.bind()`.
+- [x] Sort mutation items by ID before building statements. Restore caller order
   in responses where required.
-- [ ] Append behavior:
+- [x] Append behavior:
 
   1. Preflight each requested ID.
   2. Existing identical rows are idempotent.
@@ -562,21 +562,21 @@ that primitive for each mutation request.
      is safe because the token is an invalidation marker. It must never cause a
      missed bump or data loss.
 
-- [ ] Update behavior:
+- [x] Update behavior:
 
   1. Preflight that every row exists and matches `expectedVersion`.
   2. Put an in-batch existence/version guard immediately before each update.
   3. Update all canonical fields and increment `remote_version` by exactly one.
   4. Bump `change_seq` once after all updates.
 
-- [ ] Delete behavior:
+- [x] Delete behavior:
 
   1. Preflight that every row exists and matches `expectedVersion`.
   2. Guard every row/version inside the batch.
   3. Delete every row.
   4. Bump `change_seq` once.
 
-- [ ] Config behavior:
+- [x] Config behavior:
 
   1. Missing key without `expectedVersion` inserts at version 1.
   2. Existing key requires the matching `expectedVersion`.
@@ -584,10 +584,10 @@ that primitive for each mutation request.
   4. Changed config increments its remote version and bumps `change_seq` once.
   5. An in-batch guard closes every preflight race.
 
-- [ ] Catch an expected guard constraint failure and return the stable conflict
+- [x] Catch an expected guard constraint failure and return the stable conflict
   code appropriate to the operation. Unexpected D1 failures return a sanitized
   `500 API_ERROR`.
-- [ ] Do not implement manual `BEGIN`/`COMMIT` calls around separate D1 requests.
+- [x] Do not implement manual `BEGIN`/`COMMIT` calls around separate D1 requests.
 
 ## Acceptance checks
 
