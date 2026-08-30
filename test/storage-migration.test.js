@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { canonicalMigrationDataset, canonicalMigrationText, migrationDigest } from "../extension/src/storage-migration.js";
+import { canonicalMigrationDataset, canonicalMigrationText, migrationDigest, assertLocalCompatibleWithRemote } from "../extension/src/storage-migration.js";
+import { registeredRemoteProviderIds } from "../extension/src/remote-provider.js";
 
 const entry = (id, over = {}) => ({
   id,
@@ -22,6 +23,22 @@ const entry = (id, over = {}) => ({
 });
 
 describe("storage migration canonical dataset", () => {
+  it("recognizes every registered source and target direction", () => {
+    assert.deepEqual(registeredRemoteProviderIds(), ["google-sheets", "mysql", "cloudflare-d1"]);
+    assert.deepEqual(registeredRemoteProviderIds().flatMap((source) => registeredRemoteProviderIds()
+      .filter((target) => target !== source).map((target) => `${source}->${target}`)), [
+      "google-sheets->mysql", "google-sheets->cloudflare-d1",
+      "mysql->google-sheets", "mysql->cloudflare-d1",
+      "cloudflare-d1->google-sheets", "cloudflare-d1->mysql"
+    ]);
+  });
+
+  it("uses a provider-neutral compatibility check", () => {
+    const snapshot = { entries: [entry("a")], config: {} };
+    assert.doesNotThrow(() => assertLocalCompatibleWithRemote(snapshot, snapshot, "Cloudflare Worker + D1"));
+    assert.throws(() => assertLocalCompatibleWithRemote(snapshot, { entries: [], config: {} }, "Cloudflare Worker + D1"), /Cloudflare Worker \+ D1/);
+  });
+
   it("sorts entries/config and excludes provider marker and local bookkeeping", () => {
     const dataset = canonicalMigrationDataset({
       entries: [entry("b", { dirty: true }), entry("a")],

@@ -95,8 +95,8 @@ export const ERROR_REGISTRY = {
     detail: "The row write did not have a verified snapshot.", recovery: "Retry sync or refresh Reconcile first."
   },
   [ERROR_CODE.CONFIG_CONFLICT]: {
-    retryable: false, status: "error", title: "Spreadsheet settings conflict",
-    detail: "A shared configuration row is duplicated or invalid.", recovery: "Fix the config tab, then retry sync."
+    retryable: false, status: "error", title: "Remote settings conflict",
+    detail: "A shared remote configuration value is duplicated or invalid.", recovery: "Inspect the remote configuration, then retry sync."
   },
   [ERROR_CODE.RECONCILIATION_BATCH_INVALID]: {
     retryable: true, status: "error", title: "Reconciliation selection is invalid",
@@ -107,24 +107,24 @@ export const ERROR_REGISTRY = {
     detail: "Only part of the selected reconciliation could be completed.", recovery: "Rescan Reconcile before retrying."
   },
   [ERROR_CODE.REMOTE_APPEND_CONFLICT]: {
-    retryable: true, status: "pending", title: "Spreadsheet append is ambiguous",
-    detail: "A row with the same ID has different content.", recovery: "Open Reconcile and verify the conflicting entry."
+    retryable: true, status: "pending", title: "Remote append is ambiguous",
+    detail: "A remote record with the same ID has different content.", recovery: "Open Reconcile and verify the conflicting entry."
   },
   [ERROR_CODE.REMOTE_BACKEND_UNSUPPORTED]: {
     retryable: false, status: "error", title: "Remote storage backend is unavailable",
-    detail: "The selected remote storage backend is not supported by this extension version.", recovery: "Select Google Sheets or update the extension before trying again."
+    detail: "The selected remote storage backend is not supported by this extension version.", recovery: "Select a registered backend or update the extension before trying again."
   },
   [ERROR_CODE.REMOTE_API_INCOMPATIBLE]: {
     retryable: false, status: "error", title: "Remote API is incompatible",
     detail: "The configured remote API does not provide the required Personal Time Logger API contract.", recovery: "Check the API URL and server deployment before retrying."
   },
   [ERROR_CODE.REMOTE_AUTH_REQUIRED]: {
-    retryable: false, status: "not authorized", title: "MySQL API authorization is required",
+    retryable: false, status: "not authorized", title: "Remote API authorization is required",
     detail: "The remote API rejected the configured token.", recovery: "Open Storage settings and save a valid API token."
   },
   [ERROR_CODE.REMOTE_ORIGIN_NOT_ALLOWED]: {
-    retryable: false, status: "API origin not allowed", title: "MySQL API origin is not allowed",
-    detail: "The API rejected this Firefox extension origin for the request.", recovery: "Add the current moz-extension:// origin to the server cors_origins list and allow OPTIONS and POST requests."
+    retryable: false, status: "API origin not allowed", title: "Remote API origin is not allowed",
+    detail: "The API rejected this Firefox extension origin for the request.", recovery: "Check the Worker or API CORS configuration and allow OPTIONS and POST requests."
   },
   [ERROR_CODE.REMOTE_PERMISSION]: {
     retryable: false, status: "permission missing", title: "Remote API permission is missing",
@@ -135,28 +135,28 @@ export const ERROR_REGISTRY = {
     detail: "The remote record changed before this operation could be applied.", recovery: "Sync again or refresh Reconcile before choosing a resolution."
   },
   [ERROR_CODE.API_TIMEOUT]: {
-    retryable: true, status: "pending", title: "Google request timed out",
-    detail: "Google did not finish the request in time.", recovery: "Wait for the retry deadline, then sync again."
+    retryable: true, status: "pending", title: "Remote request timed out",
+    detail: "The remote backend did not finish the request in time.", recovery: "Wait for the retry deadline, then sync again."
   },
   [ERROR_CODE.API_NETWORK]: {
-    retryable: true, status: "pending", title: "Google network request failed",
-    detail: "The request did not reach or complete with Google.", recovery: "Check the connection and retry sync."
+    retryable: true, status: "pending", title: "Remote network request failed",
+    detail: "The request did not reach or complete with the remote backend.", recovery: "Check the connection and retry sync."
   },
   [ERROR_CODE.API_ERROR]: {
-    retryable: true, status: "pending", title: "Google API request failed",
-    detail: "Google could not complete the request.", recovery: "Retry sync; check Options diagnostics if it continues."
+    retryable: true, status: "pending", title: "Remote API request failed",
+    detail: "The remote backend could not complete the request.", recovery: "Retry sync; check Options diagnostics if it continues."
   },
   [ERROR_CODE.RATE_LIMIT]: {
-    retryable: true, status: "pending", title: "Google rate limit reached",
-    detail: "Google is temporarily rejecting requests.", recovery: "Wait for the retry deadline before syncing again."
+    retryable: true, status: "pending", title: "Remote rate limit reached",
+    detail: "The remote backend is temporarily rejecting requests.", recovery: "Wait for the retry deadline before syncing again."
   },
   [ERROR_CODE.OFFLINE]: {
     retryable: true, status: "offline", title: "Device is offline",
-    detail: "Sync cannot reach Google while offline.", recovery: "Reconnect to the internet and retry."
+    detail: "Sync cannot reach a remote backend while offline.", recovery: "Reconnect to the internet and retry."
   },
   [ERROR_CODE.BACKOFF]: {
     retryable: true, status: "pending", title: "Sync is waiting before retrying",
-    detail: "A recent Google failure started a temporary backoff.", recovery: "Wait for the retry deadline before syncing again."
+    detail: "A recent remote failure started a temporary backoff.", recovery: "Wait for the retry deadline before syncing again."
   },
   [ERROR_CODE.BACKUP_INVALID]: {
     retryable: false, status: "error", title: "Backup file is invalid",

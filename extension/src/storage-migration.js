@@ -9,7 +9,7 @@ import {
   setSetting
 } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
-import { getActiveRemoteProvider, getRemoteProvider, REMOTE_PROVIDER_ID } from "./remote-provider.js";
+import { getActiveRemoteProvider, getRemoteProvider, registeredRemoteProviderIds, REMOTE_PROVIDER_ID } from "./remote-provider.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { syncNow } from "./sync.js";
 
@@ -18,7 +18,6 @@ const MIGRATION_LOCK_TTL_MS = 120_000;
 const MIGRATION_BATCH_SIZE = 100;
 const MAX_STABILIZATION_ATTEMPTS = 3;
 const APP_MARKER_KEY = "app";
-const MYSQL_PROVIDER_ID = REMOTE_PROVIDER_ID.MYSQL;
 const MIGRATION_PHASES = new Set([
   "preparing",
   "seeding",
@@ -46,7 +45,7 @@ function migrationId() {
 
 function cleanProviderId(value) {
   const id = String(value || "").trim();
-  if (![REMOTE_PROVIDER_ID.GOOGLE_SHEETS, REMOTE_PROVIDER_ID.MYSQL].includes(id)) {
+  if (!registeredRemoteProviderIds().includes(id)) {
     throw migrationError(ERROR_CODE.REMOTE_BACKEND_UNSUPPORTED, "The migration target backend is unsupported.");
   }
   return id;
@@ -154,12 +153,12 @@ function compareTarget(source, target) {
   return { sourceEntries, targetEntries, sourceConfig, targetConfig };
 }
 
-function assertLocalCompatibleWithRemote(local, remote) {
+export function assertLocalCompatibleWithRemote(local, remote, providerLabel = "the target backend") {
   const localEntries = mapEntries(local);
   const remoteEntries = mapEntries(remote);
   for (const [id, entry] of localEntries) {
     if (!remoteEntries.has(id) || !sameEntry(entry, remoteEntries.get(id))) {
-      throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `MySQL does not contain the same local entry (${id}).`);
+      throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `${providerLabel} does not contain the same local entry (${id}).`);
     }
   }
 
@@ -168,7 +167,7 @@ function assertLocalCompatibleWithRemote(local, remote) {
   for (const [key, value] of localConfig) {
     const remoteValue = remoteConfig.get(key);
     if (!remoteValue || remoteValue.value !== value.value || remoteValue.updated_at !== value.updated_at) {
-      throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `MySQL does not contain the same local configuration (${key}).`);
+      throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `${providerLabel} does not contain the same local configuration (${key}).`);
     }
   }
 }
@@ -286,6 +285,7 @@ async function switchBackend(targetId, state) {
     SETTING_KEY.REMOTE_BACKEND_ESTABLISHED,
     SETTING_KEY.REMOTE_CHANGE_TOKEN,
     SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN,
+    SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN,
     SETTING_KEY.REMOTE_MODIFIED_TIME,
     SETTING_KEY.SYNC_BACKOFF_SECONDS,
     SETTING_KEY.SYNC_BACKOFF_UNTIL,
@@ -296,6 +296,7 @@ async function switchBackend(targetId, state) {
     settings.set(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, true);
     settings.set(SETTING_KEY.REMOTE_CHANGE_TOKEN, "");
     settings.set(SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN, "");
+    settings.set(SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN, "");
     settings.set(SETTING_KEY.REMOTE_MODIFIED_TIME, "");
     settings.set(SETTING_KEY.SYNC_BACKOFF_SECONDS, 0);
     settings.set(SETTING_KEY.SYNC_BACKOFF_UNTIL, 0);
@@ -327,21 +328,23 @@ async function localMigrationSnapshot() {
 }
 
 /**
- * Starts MySQL from this profile's local-first data without contacting Google.
+ * Starts a selected backend from this profile's local-first data without
+ * contacting another remote provider.
  * This is deliberately separate from migrateStorage: the normal migration
  * must read the current remote backend, while a new profile may have no Google
  * account and still need a way to choose MySQL as its first backend.
  */
-export async function activateMysqlFromLocal({ onProgress } = {}) {
+export async function activateProviderFromLocal(targetProviderId, { onProgress } = {}) {
   const active = await getActiveRemoteProvider();
-  if (active.id === MYSQL_PROVIDER_ID) {
-    throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "MySQL is already the active storage backend.");
+  const targetId = cleanProviderId(targetProviderId);
+  if (active.id === targetId) {
+    throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "That storage backend is already active.");
   }
 
   let state = {
     migration_id: migrationId(),
     source_provider: "local",
-    target_provider: MYSQL_PROVIDER_ID,
+    target_provider: targetId,
     phase: "preparing",
     attempt: 1,
     created_at: new Date().toISOString(),
@@ -351,7 +354,7 @@ export async function activateMysqlFromLocal({ onProgress } = {}) {
   onProgress?.(state);
 
   try {
-    const targetProvider = getRemoteProvider(MYSQL_PROVIDER_ID);
+    const targetProvider = getRemoteProvider(targetId);
 
     await withMigrationLease(state.migration_id, async (lease) => {
       const options = { lease };
@@ -378,12 +381,12 @@ export async function activateMysqlFromLocal({ onProgress } = {}) {
       targetSnapshot = await targetProvider.readSnapshot(options);
       validateSnapshot(targetSnapshot, "target");
       if (await migrationDigest(targetSnapshot) !== sourceDigest) {
-        throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, "The MySQL data does not match this device's local data.");
+        throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `The ${targetProvider.label} data does not match this device's local data.`);
       }
       if (await migrationDigest(await localMigrationSnapshot()) !== sourceDigest) {
-        throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "Local data changed during MySQL setup.");
+        throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, `Local data changed during ${targetProvider.label} setup.`);
       }
-      await switchBackend(MYSQL_PROVIDER_ID, state);
+      await switchBackend(targetId, state);
     });
 
     await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
@@ -395,21 +398,22 @@ export async function activateMysqlFromLocal({ onProgress } = {}) {
 }
 
 /**
- * Makes an existing MySQL dataset the active backend without contacting
+ * Makes an existing remote dataset the active backend without contacting
  * Google. Local entries are checked first so an existing local edit cannot be
  * silently discarded; MySQL-only entries are then imported by the normal sync
  * pull after the backend switch.
  */
-export async function activateMysqlFromRemote({ onProgress } = {}) {
+export async function activateProviderFromRemote(targetProviderId, { onProgress } = {}) {
   const active = await getActiveRemoteProvider();
-  if (active.id === MYSQL_PROVIDER_ID) {
-    throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "MySQL is already the active storage backend.");
+  const targetId = cleanProviderId(targetProviderId);
+  if (active.id === targetId) {
+    throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "That storage backend is already active.");
   }
 
   let state = {
     migration_id: migrationId(),
     source_provider: active.id,
-    target_provider: MYSQL_PROVIDER_ID,
+    target_provider: targetId,
     phase: "preparing",
     attempt: 1,
     created_at: new Date().toISOString(),
@@ -419,7 +423,7 @@ export async function activateMysqlFromRemote({ onProgress } = {}) {
   onProgress?.(state);
 
   try {
-    const targetProvider = getRemoteProvider(MYSQL_PROVIDER_ID);
+    const targetProvider = getRemoteProvider(targetId);
     await withMigrationLease(state.migration_id, async (lease) => {
       const options = { lease };
       await prepareTarget(targetProvider, lease, options);
@@ -428,7 +432,7 @@ export async function activateMysqlFromRemote({ onProgress } = {}) {
       validateSnapshot(targetSnapshot, "target");
       const localSnapshot = await localMigrationSnapshot();
       validateSnapshot(localSnapshot, "local");
-      assertLocalCompatibleWithRemote(localSnapshot, targetSnapshot);
+      assertLocalCompatibleWithRemote(localSnapshot, targetSnapshot, targetProvider.label);
       state = progressState(state, {
         phase: "verifying",
         source_digest: await migrationDigest(targetSnapshot),
@@ -438,7 +442,7 @@ export async function activateMysqlFromRemote({ onProgress } = {}) {
       });
       await saveState(state);
       onProgress?.(state);
-      await switchBackend(MYSQL_PROVIDER_ID, state);
+      await switchBackend(targetId, state);
     });
 
     await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
@@ -447,6 +451,14 @@ export async function activateMysqlFromRemote({ onProgress } = {}) {
     await failMigration(state, error);
     throw error;
   }
+}
+
+export async function activateMysqlFromLocal(options = {}) {
+  return activateProviderFromLocal(REMOTE_PROVIDER_ID.MYSQL, options);
+}
+
+export async function activateMysqlFromRemote(options = {}) {
+  return activateProviderFromRemote(REMOTE_PROVIDER_ID.MYSQL, options);
 }
 
 export async function getStorageMigrationState() {

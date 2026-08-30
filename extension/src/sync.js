@@ -21,6 +21,7 @@ const SYNC_LOCK_TTL_MS = 120000;
 const REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.REMOTE_CHANGE_TOKEN;
 const LEGACY_REMOTE_MODIFIED_KEY = SETTING_KEY.REMOTE_MODIFIED_TIME;
 const MYSQL_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN;
+const CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN;
 const MULTIPLIER_KEY = SETTING_KEY.DURATION_MULTIPLIER;
 const MULTIPLIER_UPDATED_KEY = SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT;
 const MULTIPLIER_SYNCED_KEY = SETTING_KEY.DURATION_MULTIPLIER_SYNCED_AT;
@@ -67,7 +68,9 @@ async function assertMigrationMaySync(migrationId = "") {
 }
 
 function changeTokenSettingKey(provider) {
-  return provider?.id === "mysql" ? MYSQL_REMOTE_CHANGE_TOKEN_KEY : REMOTE_CHANGE_TOKEN_KEY;
+  if (provider?.id === "mysql") return MYSQL_REMOTE_CHANGE_TOKEN_KEY;
+  if (provider?.id === "cloudflare-d1") return CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY;
+  return REMOTE_CHANGE_TOKEN_KEY;
 }
 
 function syncRecovery(error) {
@@ -80,12 +83,14 @@ function syncRecovery(error) {
   if ([
     ERROR_CODE.MYSQL_CONFIG_INVALID,
     ERROR_CODE.MYSQL_CONFIG_MISSING,
+    ERROR_CODE.CLOUDFLARE_D1_CONFIG_INVALID,
+    ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING,
     ERROR_CODE.REMOTE_AUTH_REQUIRED,
     ERROR_CODE.REMOTE_ORIGIN_NOT_ALLOWED,
     ERROR_CODE.REMOTE_PERMISSION,
     ERROR_CODE.REMOTE_API_INCOMPATIBLE
   ].includes(error?.code)) {
-    return "Open Options Storage settings and verify the MySQL API URL, token, and host permission.";
+    return "Open Options Storage settings and verify the remote URL, token, and host permission.";
   }
   if (["SHEET_MISSING", "SPREADSHEET_MISSING", "SHEET_SCHEMA_UNSUPPORTED"].includes(error?.code)) {
     return "Open Options to reconnect or replace the spreadsheet.";
@@ -232,12 +237,18 @@ export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const updates = [];
   const appends = [];
+  const localMatches = [];
 
   for (const entry of local.values()) {
     if (!entry.dirty) continue;
     const remote = remoteById.get(entry.id);
     if (remote && !forcedIds.has(entry.id)
       && (isRemoteNewer(remote, entry) || hasEqualTimestampConflict(remote, entry))) continue;
+    if (remote && !forcedIds.has(entry.id) && entryRefs.has(entry.id)
+      && entryFingerprint(remote) === entryFingerprint(entry)) {
+      localMatches.push(entry);
+      continue;
+    }
     if (entryRefs.has(entry.id)) {
       updates.push({ entry, expectedRef: entryRefs.get(entry.id) });
     } else {
@@ -246,7 +257,10 @@ export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
   }
 
   const pushedIds = new Set();
-  if (!updates.length && !appends.length) return pushedIds;
+  if (!updates.length && !appends.length) {
+    await acknowledgePushedEntries(local, localMatches, pushedIds, { lease });
+    return pushedIds;
+  }
 
   await lease?.assert();
   await remoteProvider.updateEntries(updates, { interactiveAuth });
@@ -294,7 +308,11 @@ export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
     if (confirmedAppendIds.has(id) && ref) entryRefs.set(id, ref);
   }
   const confirmedAppends = appends.filter((entry) => confirmedAppendIds.has(entry.id));
-  await acknowledgePushedEntries(local, [...updates.map((update) => update.entry), ...confirmedAppends], pushedIds, { lease });
+  await acknowledgePushedEntries(local, [
+    ...localMatches,
+    ...updates.map((update) => update.entry),
+    ...confirmedAppends
+  ], pushedIds, { lease });
 
   if (appendConflicts.length) {
     throw codedError("REMOTE_APPEND_CONFLICT", `Remote rows conflict with append${appendConflicts.length === 1 ? "" : "s"}: ${appendConflicts.join(", ")}`);
@@ -498,6 +516,7 @@ export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId, pro
     RECONCILIATION_INTENTS_KEY,
     REMOTE_CHANGE_TOKEN_KEY,
     MYSQL_REMOTE_CHANGE_TOKEN_KEY,
+    CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY,
     LEGACY_REMOTE_MODIFIED_KEY,
     ...(spreadsheetId ? [SETTING_KEY.SPREADSHEET_ID] : [])
   ], ({ entries, settings }) => {
@@ -517,6 +536,7 @@ export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId, pro
     settings.set(RECONCILIATION_INTENTS_KEY, []);
     settings.set(REMOTE_CHANGE_TOKEN_KEY, "");
     settings.set(MYSQL_REMOTE_CHANGE_TOKEN_KEY, "");
+    settings.set(CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY, "");
     settings.set(LEGACY_REMOTE_MODIFIED_KEY, "");
     remoteProvider.applyReseedSettings?.(settings, spreadsheetId);
     return applied;
@@ -822,6 +842,7 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
 export async function clearRemoteReadMarker() {
   await setSetting(REMOTE_CHANGE_TOKEN_KEY, "");
   await setSetting(MYSQL_REMOTE_CHANGE_TOKEN_KEY, "");
+  await setSetting(CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY, "");
   await setSetting(LEGACY_REMOTE_MODIFIED_KEY, "");
 }
 

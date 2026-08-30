@@ -759,7 +759,7 @@ Remove two-provider/MySQL-only assumptions so every migration direction is safe.
 
 ## Steps
 
-- [ ] Replace the hard-coded change-token choice in `sync.js` with one audited
+- [x] Replace the hard-coded change-token choice in `sync.js` with one audited
   function or provider property:
 
   ```text
@@ -768,12 +768,12 @@ Remove two-provider/MySQL-only assumptions so every migration direction is safe.
   cloudflare-d1  -> CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN
   ```
 
-- [ ] Clear all provider token keys during backend switch, full reseed, explicit
+- [x] Clear all provider token keys during backend switch, full reseed, explicit
   reset, and relevant test setup. Never let one backend consume another backend's
   token.
-- [ ] Change `storage-migration.js` provider validation to use registered provider
+- [x] Change `storage-migration.js` provider validation to use registered provider
   IDs rather than a literal Google/MySQL array.
-- [ ] Replace MySQL-specific internal names/messages with provider-neutral ones:
+- [x] Replace MySQL-specific internal names/messages with provider-neutral ones:
 
   ```text
   assertLocalCompatibleWithRemote
@@ -781,18 +781,18 @@ Remove two-provider/MySQL-only assumptions so every migration direction is safe.
   activateProviderFromRemote(targetProviderId)
   ```
 
-- [ ] Thin MySQL wrapper exports may remain temporarily if that makes the refactor
+- [x] Thin MySQL wrapper exports may remain temporarily if that makes the refactor
   safer, but new UI code should call provider-neutral functions.
-- [ ] Use `provider.label` in progress and errors instead of ternaries such as
+- [x] Use `provider.label` in progress and errors instead of ternaries such as
   `target === MYSQL ? "MySQL 8.4" : "Google Sheets"`.
-- [ ] Keep migration state resumable with any valid source/target ID.
-- [ ] Keep `MIGRATION_BATCH_SIZE` provider-neutral. Providers may internally
+- [x] Keep migration state resumable with any valid source/target ID.
+- [x] Keep `MIGRATION_BATCH_SIZE` provider-neutral. Providers may internally
   chunk to a smaller transport maximum; do not lower Google/MySQL performance
   merely because D1 has a smaller invocation limit.
-- [ ] Ensure direct-from-local setup and adopt-existing-remote setup work for both
+- [x] Ensure direct-from-local setup and adopt-existing-remote setup work for both
   MySQL and D1.
-- [ ] Replace MySQL-specific error text inside migration digest/verification paths.
-- [ ] Add table-driven tests for every different-provider direction:
+- [x] Replace MySQL-specific error text inside migration digest/verification paths.
+- [x] Add table-driven tests for every different-provider direction:
 
   ```text
   Google -> MySQL
@@ -809,10 +809,10 @@ Remove two-provider/MySQL-only assumptions so every migration direction is safe.
 
 ## Acceptance checks
 
-- [ ] No provider switch occurs before digest verification.
-- [ ] Source data is never deleted.
-- [ ] All six migration directions are covered and pass.
-- [ ] Existing MySQL first-run and migration tests still pass.
+- [x] No provider switch occurs before digest verification.
+- [x] Source data is never deleted.
+- [x] All six migration directions are covered and pass.
+- [x] Existing MySQL first-run and migration tests still pass.
 - [ ] Generic sync/reconcile modules do not import D1/MySQL/Sheets transport
   implementations directly.
 
