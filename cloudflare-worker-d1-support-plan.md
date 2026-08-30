@@ -316,7 +316,7 @@ making D1 pretend to be MySQL.
   - positive remote-version parsing;
   - `/v1` route client methods.
 
-- [ ] Keep provider wording out of the shared module. It should accept values such
+- [x] Keep provider wording out of the shared module. It should accept values such
   as:
 
   ```js
@@ -330,10 +330,10 @@ making D1 pretend to be MySQL.
   }
   ```
 
-- [ ] Never interpolate the URL or token into an error message.
-- [ ] Keep the raw server `error.message` ignored. Map only recognized status and
+- [x] Never interpolate the URL or token into an error message.
+- [x] Keep the raw server `error.message` ignored. Map only recognized status and
   stable server error codes.
-- [ ] Refactor `remote-mysql.js` to use the shared module while preserving:
+- [x] Refactor `remote-mysql.js` to use the shared module while preserving:
 
   - `REMOTE_PROVIDER_ID.MYSQL === "mysql"`;
   - current settings;
@@ -341,16 +341,16 @@ making D1 pretend to be MySQL.
   - current remote-ref shapes or an explicitly tested compatible replacement;
   - every existing test.
 
-- [ ] Add `test/remote-api-client.test.js` for malformed JSON, non-object JSON,
+- [x] Add `test/remote-api-client.test.js` for malformed JSON, non-object JSON,
   timeout, offline, missing permission, permission request, bearer-only auth,
   unsafe URL forms, server-code mapping, nullable fields, and secret-safe errors.
 
 ## Acceptance checks
 
-- [ ] `npm test` passes.
-- [ ] MySQL behavior is unchanged.
-- [ ] `remote-api-client.js` contains no D1 or MySQL database logic.
-- [ ] `remote-mysql.js` contains no copied generic fetch implementation.
+- [x] `npm test` passes.
+- [x] MySQL behavior is unchanged.
+- [x] `remote-api-client.js` contains no D1 or MySQL database logic.
+- [x] `remote-mysql.js` contains no copied generic fetch implementation.
 
 ---
 
