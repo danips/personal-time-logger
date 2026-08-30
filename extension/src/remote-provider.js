@@ -2,16 +2,19 @@ import { getSetting } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { googleSheetsProvider } from "./remote-google-sheets.js";
 import { mysqlProvider } from "./remote-mysql.js";
+import { cloudflareD1Provider } from "./remote-cloudflare-d1.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 export const REMOTE_PROVIDER_ID = Object.freeze({
   GOOGLE_SHEETS: "google-sheets",
-  MYSQL: "mysql"
+  MYSQL: "mysql",
+  CLOUDFLARE_D1: "cloudflare-d1"
 });
 
 const PROVIDERS = new Map([
   [REMOTE_PROVIDER_ID.GOOGLE_SHEETS, googleSheetsProvider],
-  [REMOTE_PROVIDER_ID.MYSQL, mysqlProvider]
+  [REMOTE_PROVIDER_ID.MYSQL, mysqlProvider],
+  [REMOTE_PROVIDER_ID.CLOUDFLARE_D1, cloudflareD1Provider]
 ]);
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 

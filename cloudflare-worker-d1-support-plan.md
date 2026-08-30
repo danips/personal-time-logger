@@ -677,29 +677,29 @@ Connect the proven Worker API to the existing provider boundary.
   CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN
   ```
 
-- [ ] Add stable error codes for missing/invalid D1 configuration if the shared
+- [x] Add stable error codes for missing/invalid D1 configuration if the shared
   generic codes cannot express the correct recovery text. Do not reuse
   `MYSQL_CONFIG_*` for D1.
 - [ ] Make generic API errors/provider recovery messages provider-neutral where
   they currently say only Google or MySQL, especially `API_TIMEOUT`,
   `API_NETWORK`, `API_ERROR`, `RATE_LIMIT`, `OFFLINE`, `BACKOFF`,
   `REMOTE_AUTH_REQUIRED`, and `REMOTE_ORIGIN_NOT_ALLOWED`.
-- [ ] Create `extension/src/remote-cloudflare-d1.js` using the shared API client.
-- [ ] Normalize production URLs to HTTPS, without credentials, query, or fragment.
-- [ ] For version 1, validate that the host is `workers.dev` or a subdomain of it.
+- [x] Create `extension/src/remote-cloudflare-d1.js` using the shared API client.
+- [x] Normalize production URLs to HTTPS, without credentials, query, or fragment.
+- [x] For version 1, validate that the host is `workers.dev` or a subdomain of it.
   Keep URL parsing factored so custom domains can be enabled later.
-- [ ] Request only the exact configured origin at runtime, derived from the base
+- [x] Request only the exact configured origin at runtime, derived from the base
   URL, even though the manifest declares the containing workers.dev wildcard.
-- [ ] Validate D1 health's `service`, API/schema versions, and
+- [x] Validate D1 health's `service`, API/schema versions, and
   `storage === "cloudflare-d1"`.
-- [ ] Use opaque refs distinct from MySQL:
+- [x] Use opaque refs distinct from MySQL:
 
   ```js
   { kind: "cloudflare-d1-row", version: 1 }
   { kind: "cloudflare-d1-config-row", version: 1 }
   ```
 
-- [ ] Implement the full provider contract:
+- [x] Implement the full provider contract:
 
   ```text
   ensureReady
@@ -713,10 +713,10 @@ Connect the proven Worker API to the existing provider boundary.
   ensureAppMarker
   ```
 
-- [ ] Set `duplicateRemoteRecords: false`.
-- [ ] Chunk append/update/delete requests internally at 15 records. Preserve input
+- [x] Set `duplicateRemoteRecords: false`.
+- [x] Chunk append/update/delete requests internally at 15 records. Preserve input
   order for returned append refs.
-- [ ] Treat a later-chunk failure explicitly. Do not report that the full operation
+- [x] Treat a later-chunk failure explicitly. Do not report that the full operation
   succeeded. Earlier successful chunks are safe to retry because append is
   idempotent and sync rereads remote versions.
 - [ ] Add focused recovery tests proving that after a chunk 2 failure:
@@ -727,27 +727,27 @@ Connect the proven Worker API to the existing provider boundary.
   - already-updated canonical matches are reconciled rather than overwritten;
   - remaining dirty entries eventually complete.
 
-- [ ] Register in `remote-provider.js`:
+- [x] Register in `remote-provider.js`:
 
   ```js
   REMOTE_PROVIDER_ID.CLOUDFLARE_D1 = "cloudflare-d1"
   ```
 
-- [ ] Update registered-provider and contract tests to expect all three providers.
-- [ ] Add `https://*.workers.dev/*` to `optional_host_permissions` in the manifest.
+- [x] Update registered-provider and contract tests to expect all three providers.
+- [x] Add `https://*.workers.dev/*` to `optional_host_permissions` in the manifest.
   Do not add `<all_urls>` or a broad `https://*/*` permission.
-- [ ] Ensure the release allow-list and runtime smoke test include the new source
+- [x] Ensure the release allow-list and runtime smoke test include the new source
   module automatically or update their explicit lists.
 
 ## Acceptance checks
 
-- [ ] All three providers satisfy the same generic contract test.
-- [ ] The D1 token is sent only in the Authorization header.
-- [ ] The D1 adapter accepts nullable SQL fields and returns canonical extension
+- [x] All three providers satisfy the same generic contract test.
+- [x] The D1 token is sent only in the Authorization header.
+- [x] The D1 adapter accepts nullable SQL fields and returns canonical extension
   entries.
-- [ ] Unknown/incompatible health responses do not switch providers.
-- [ ] Permission denial is distinguishable from Worker CORS rejection.
-- [ ] Multi-chunk retry tests pass.
+- [x] Unknown/incompatible health responses do not switch providers.
+- [x] Permission denial is distinguishable from Worker CORS rejection.
+- [x] Multi-chunk retry tests pass.
 
 ---
 

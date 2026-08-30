@@ -28,6 +28,7 @@ const db = await import("../extension/src/db.js");
 const providers = await import("../extension/src/remote-provider.js");
 const googleProvider = await import("../extension/src/remote-google-sheets.js");
 const mysql = await import("../extension/src/remote-mysql.js");
+const cloudflare = await import("../extension/src/remote-cloudflare-d1.js");
 
 const fixture = (over = {}) => normalizeEntry({
   id: "provider-entry",
@@ -61,10 +62,12 @@ describe("remote provider selection", () => {
     );
   });
 
-  it("registers the stable MySQL provider ID", () => {
+  it("registers all stable provider IDs", () => {
     assert.equal(providers.REMOTE_PROVIDER_ID.MYSQL, "mysql");
-    assert.deepEqual(providers.registeredRemoteProviderIds(), ["google-sheets", "mysql"]);
+    assert.equal(providers.REMOTE_PROVIDER_ID.CLOUDFLARE_D1, "cloudflare-d1");
+    assert.deepEqual(providers.registeredRemoteProviderIds(), ["google-sheets", "mysql", "cloudflare-d1"]);
     assert.equal(providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.MYSQL).id, "mysql");
+    assert.equal(providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.CLOUDFLARE_D1).id, "cloudflare-d1");
   });
 
   it("exposes duplicate-record capabilities with a safe default", () => {
@@ -72,6 +75,9 @@ describe("remote provider selection", () => {
       duplicateRemoteRecords: true
     });
     assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("mysql")), {
+      duplicateRemoteRecords: false
+    });
+    assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("cloudflare-d1")), {
       duplicateRemoteRecords: false
     });
     assert.deepEqual(providers.getRemoteProviderCapabilities({ id: "future-provider" }), {

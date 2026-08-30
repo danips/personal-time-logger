@@ -14,7 +14,8 @@
   "optional_host_permissions": [
     "https://chatgpt.com/*",
     "https://api.tempo.io/*",
-    "https://time-api.cordoceo.com/*"
+    "https://time-api.cordoceo.com/*",
+    "https://*.workers.dev/*"
   ],
   "background": {
     "scripts": [

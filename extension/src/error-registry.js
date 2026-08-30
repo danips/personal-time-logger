@@ -30,6 +30,14 @@ export const ERROR_REGISTRY = {
     retryable: false, status: "not configured", title: "MySQL API setup is incomplete",
     detail: "A MySQL API URL and token are required before this backend can be tested.", recovery: "Open Storage settings and enter both values."
   },
+  [ERROR_CODE.CLOUDFLARE_D1_CONFIG_INVALID]: {
+    retryable: false, status: "error", title: "Cloudflare Worker URL is invalid",
+    detail: "The Worker URL must be an HTTPS workers.dev URL without credentials, a query, or a fragment.", recovery: "Check Storage settings and save the Worker URL again."
+  },
+  [ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING]: {
+    retryable: false, status: "not configured", title: "Cloudflare D1 setup is incomplete",
+    detail: "A Worker URL and API token are required before this backend can be tested.", recovery: "Open Storage settings and enter both values."
+  },
   [ERROR_CODE.MIGRATION_IN_PROGRESS]: {
     retryable: false, status: "migration active", title: "Storage migration is active",
     detail: "Remote synchronization is paused while the storage migration completes.", recovery: "Wait for the migration to finish, then retry the action."

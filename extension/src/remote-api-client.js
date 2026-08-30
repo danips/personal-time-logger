@@ -228,7 +228,8 @@ export function requireRemoteHealth(data, {
   providerLabel = "remote API",
   validateHealth = () => true
 } = {}) {
-  if (data?.ok !== true || data.apiVersion !== API_VERSION || data.schemaVersion !== SCHEMA_VERSION || !validateHealth(data)) {
+  if (data?.ok !== true || data.service !== "personal-time-logger"
+    || data.apiVersion !== API_VERSION || data.schemaVersion !== SCHEMA_VERSION || !validateHealth(data)) {
     throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The ${labelText(providerLabel)} version is not compatible with this extension.`);
   }
   return data;

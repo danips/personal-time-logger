@@ -55,6 +55,8 @@ const expectedFiles = [
   "src/reconcile-ui-state.js",
   "src/reconcile.js",
   "src/remote-google-sheets.js",
+  "src/remote-api-client.js",
+  "src/remote-cloudflare-d1.js",
   "src/remote-mysql.js",
   "src/remote-provider.js",
   "src/setting-keys.js",
