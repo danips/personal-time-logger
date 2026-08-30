@@ -87,6 +87,24 @@ async function stopWorker() {
   worker = null;
 }
 
+function makeEntry(id, over = {}) {
+  return {
+    id, project: "Project", task: "Task", description: "Description",
+    start_at: "2026-08-30T09:00:00.000Z", end_at: "2026-08-30T10:00:00.000Z", duration_seconds: 3600,
+    status: "ok", created_at: "2026-08-30T09:00:00.000Z", updated_at: "2026-08-30T10:00:00.000Z",
+    deleted_at: null, device_id: "integration-device", revision: 1, multiply: null, ...over
+  };
+}
+
+async function api(path, options = {}) {
+  const headers = { Authorization: `Bearer ${token}`, ...options.headers };
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(options.body);
+  }
+  return fetch(`${worker.baseUrl}${path}`, { ...options, headers });
+}
+
 describe("local Cloudflare Worker + D1 API", { skip: !supported }, () => {
   before(async () => { worker = await startWorker(); });
   after(stopWorker);
@@ -122,5 +140,72 @@ describe("local Cloudflare Worker + D1 API", { skip: !supported }, () => {
       body: JSON.stringify({ key: "duration_multiplier", value: "1.500", updated_at: "2026-08-30T10:00:00.000Z" })
     });
     assert.deepEqual(await config.json(), { key: "duration_multiplier", version: 1 });
+  });
+
+  it("enforces authentication, CORS, validation, idempotency, conflicts, and batch limits", async () => {
+    const missing = await fetch(`${worker.baseUrl}/v1/change-token`);
+    assert.equal(missing.status, 401);
+    const badOrigin = await api("/v1/change-token", { headers: { Origin: "https://example.com" } });
+    assert.equal(badOrigin.status, 403);
+    const unknown = await api("/v1/not-a-route");
+    assert.equal(unknown.status, 404);
+    const malformed = await api("/v1/entries/append", { body: "{" });
+    assert.equal(malformed.status, 400);
+    const unknownField = await api("/v1/entries/append", { body: { entries: [], unexpected: true } });
+    assert.equal(unknownField.status, 400);
+    const sixteen = await api("/v1/entries/append", { body: { entries: Array.from({ length: 16 }, (_, index) => makeEntry(`limit-${index}`)) } });
+    assert.equal(sixteen.status, 400);
+
+    const entries = [makeEntry("contract-a"), makeEntry("contract-b")];
+    const first = await api("/v1/entries/append", { method: "POST", body: { entries } });
+    assert.deepEqual((await first.json()).entries.map(({ id }) => id), entries.map(({ id }) => id));
+    const tokenAfterAppend = (await (await api("/v1/change-token")).json()).changeToken;
+    const repeat = await api("/v1/entries/append", { method: "POST", body: { entries } });
+    assert.deepEqual((await repeat.json()).entries, [{ id: "contract-a", version: 1 }, { id: "contract-b", version: 1 }]);
+    assert.equal((await (await api("/v1/change-token")).json()).changeToken, tokenAfterAppend);
+    const conflict = await api("/v1/entries/append", { method: "POST", body: { entries: [makeEntry("contract-a", { description: "different" })] } });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).error.code, "REMOTE_APPEND_CONFLICT");
+
+    const updated = await api("/v1/entries/update", {
+      method: "POST", body: { updates: [{ entry: makeEntry("contract-a", { description: "updated" }), expectedVersion: 1 }] }
+    });
+    assert.deepEqual(await updated.json(), { entries: [{ id: "contract-a", version: 2 }] });
+    const stale = await api("/v1/entries/update", {
+      method: "POST", body: { updates: [{ entry: makeEntry("contract-a", { description: "stale" }), expectedVersion: 1 }] }
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error.code, "REMOTE_VERSION_STALE");
+
+    const config = await api("/v1/config/update", {
+      method: "POST", body: { key: "integration", value: "one", updated_at: "2026-08-30T10:00:00Z" }
+    });
+    assert.deepEqual(await config.json(), { key: "integration", version: 1 });
+    const noop = await api("/v1/config/update", {
+      method: "POST", body: { key: "integration", value: "one", updated_at: "2026-08-30T10:00:00.000Z", expectedVersion: 1 }
+    });
+    assert.deepEqual(await noop.json(), { key: "integration", version: 1 });
+    const configConflict = await api("/v1/config/update", {
+      method: "POST", body: { key: "integration", value: "two", updated_at: "2026-08-30T10:00:00.000Z", expectedVersion: 9 }
+    });
+    assert.equal(configConflict.status, 409);
+  });
+
+  it("rolls back a mixed stale update and serializes same-version races", async () => {
+    const entries = [makeEntry("rollback-a"), makeEntry("rollback-b"), makeEntry("race")];
+    assert.equal((await (await api("/v1/entries/append", { method: "POST", body: { entries } })).json()).entries.length, 3);
+    const mixed = await api("/v1/entries/update", {
+      method: "POST", body: { updates: [
+        { entry: makeEntry("rollback-a", { description: "must rollback" }), expectedVersion: 1 },
+        { entry: makeEntry("rollback-b", { description: "stale" }), expectedVersion: 99 }
+      ] }
+    });
+    assert.equal(mixed.status, 409);
+    const after = (await (await api("/v1/snapshot")).json()).entries;
+    assert.equal(after.find(({ entry }) => entry.id === "rollback-a").version, 1);
+    const race = await Promise.all([1, 2].map((number) => api("/v1/entries/update", {
+      method: "POST", body: { updates: [{ entry: makeEntry("race", { description: `race-${number}` }), expectedVersion: 1 }] }
+    })));
+    assert.deepEqual(race.map((response) => response.status).sort(), [200, 409]);
   });
 });

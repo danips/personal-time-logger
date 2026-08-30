@@ -609,9 +609,9 @@ Prove the server contract and D1 semantics independently of Firefox.
 
 ## Steps
 
-- [ ] Unit-test pure auth, CORS, route, HTTP, and validator functions with Node's
+- [x] Unit-test pure auth, CORS, route, HTTP, and validator functions with Node's
   built-in test runner.
-- [ ] Build a deterministic local-D1 integration harness. It must:
+- [x] Build a deterministic local-D1 integration harness. It must:
 
   - use a temporary local persistence directory;
   - apply the real migration;
@@ -622,7 +622,7 @@ Prove the server contract and D1 semantics independently of Firefox.
   - stop the Worker in `finally`, including after a failed assertion;
   - never touch a remote Cloudflare account.
 
-- [ ] Cover at least:
+- [x] Cover at least:
 
   ```text
   health compatibility
@@ -648,7 +648,7 @@ Prove the server contract and D1 semantics independently of Firefox.
   consistent snapshot during a competing write
   ```
 
-- [ ] Add a root command such as `npm run test:cloudflare` that runs both Worker
+- [x] Add a root command such as `npm run test:cloudflare` that runs both Worker
   unit and integration tests. Do not silently include a test that requires a real
   login in `npm test`.
 
