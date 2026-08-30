@@ -14,9 +14,10 @@ import {
 } from "../src/sheets.js";
 import { syncNow } from "../src/sync.js";
 import { DEFAULT_MYSQL_API_BASE_URL, mysqlHostPermission, mysqlProvider, normalizeMysqlApiBaseUrl } from "../src/remote-mysql.js";
+import { DEFAULT_CLOUDFLARE_D1_API_BASE_URL, cloudflareD1HostPermission, cloudflareD1Provider, normalizeCloudflareD1ApiBaseUrl } from "../src/remote-cloudflare-d1.js";
 import { platform } from "../src/platform.js";
-import { REMOTE_PROVIDER_ID, decodeRemoteProviderId } from "../src/remote-provider.js";
-import { activateMysqlFromLocal, activateMysqlFromRemote, getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
+import { REMOTE_PROVIDER_ID, decodeRemoteProviderId, getRemoteProvider } from "../src/remote-provider.js";
+import { activateMysqlFromLocal, activateMysqlFromRemote, activateProviderFromLocal, activateProviderFromRemote, getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -46,6 +47,7 @@ const BACKUP_SETTING_KEYS = Object.freeze([
   SETTING_KEY.DURATION_MULTIPLIER,
   SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
   SETTING_KEY.MYSQL_API_BASE_URL,
+  SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL,
   SETTING_KEY.SYNC_INTERVAL_SECONDS,
   SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID,
   SETTING_KEY.TEMPO_TASK_ISSUE_IDS,
@@ -489,7 +491,7 @@ function renderStorage(activeBackend) {
   const active = decodeRemoteProviderId(activeBackend);
   renderActiveBackendLabel(active);
   $("#remoteBackendTarget").value = active;
-  renderMysqlStorageFields(active, $("#remoteBackendTarget").value);
+  renderProviderFields(active, $("#remoteBackendTarget").value);
   renderStorageProviderVisibility(active, $("#remoteBackendTarget").value);
 }
 
@@ -502,11 +504,23 @@ function renderMysqlStorageFields(activeBackend, targetBackend) {
   $("#activateMysqlFromRemote").hidden = !(active !== REMOTE_PROVIDER_ID.MYSQL && target === REMOTE_PROVIDER_ID.MYSQL);
 }
 
+function renderProviderFields(activeBackend, targetBackend) {
+  renderMysqlStorageFields(activeBackend, targetBackend);
+  const active = decodeRemoteProviderId(activeBackend);
+  const target = decodeRemoteProviderId(targetBackend);
+  $("#cloudflareD1StorageFields").hidden = target !== REMOTE_PROVIDER_ID.CLOUDFLARE_D1;
+  $("#testCloudflareD1Connection").hidden = active === REMOTE_PROVIDER_ID.CLOUDFLARE_D1;
+  $("#activateCloudflareD1FromLocal").hidden = !(active !== REMOTE_PROVIDER_ID.CLOUDFLARE_D1 && target === REMOTE_PROVIDER_ID.CLOUDFLARE_D1);
+  $("#activateCloudflareD1FromRemote").hidden = !(active !== REMOTE_PROVIDER_ID.CLOUDFLARE_D1 && target === REMOTE_PROVIDER_ID.CLOUDFLARE_D1);
+}
+
 function renderActiveBackendLabel(activeBackend) {
   const active = decodeRemoteProviderId(activeBackend);
-  $("#activeRemoteBackend").textContent = active === REMOTE_PROVIDER_ID.MYSQL
-    ? "MySQL 8.4"
-    : "Google Sheets";
+  try {
+    $("#activeRemoteBackend").textContent = getRemoteProvider(active).label;
+  } catch {
+    $("#activeRemoteBackend").textContent = "Unknown backend";
+  }
 }
 
 async function refreshActiveBackendLabel() {
@@ -518,7 +532,7 @@ async function refreshActiveBackendLabel() {
 
 async function renderStorageTarget() {
   const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
-  renderMysqlStorageFields(active, $("#remoteBackendTarget").value);
+  renderProviderFields(active, $("#remoteBackendTarget").value);
   renderStorageProviderVisibility(
     active,
     $("#remoteBackendTarget").value
@@ -531,7 +545,7 @@ function renderMigration(activeBackend, migrationState) {
   const button = $("#migrateStorage");
   const running = migrationState && !["complete", "failed"].includes(migrationState.phase);
   button.hidden = !running && target === active;
-  button.textContent = running ? "Resume migration" : `Migrate data and switch to ${target === REMOTE_PROVIDER_ID.MYSQL ? "MySQL 8.4" : "Google Sheets"}`;
+  button.textContent = running ? "Resume migration" : `Migrate data and switch to ${getRemoteProvider(target).label}`;
   if (running) {
     const entries = Number(migrationState.completed_entries || 0);
     const total = Number(migrationState.total_entries || 0);
@@ -582,6 +596,42 @@ async function testMysqlConnection() {
   const health = await mysqlProvider.testConnection({ baseUrl, token, requestPermission: false });
   $("#mysqlConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, MySQL ${health.mysql}.`;
   setStatus("MySQL API connection verified");
+  return false;
+}
+
+async function saveCloudflareD1SettingsValues(rawBaseUrl, rawToken) {
+  const baseUrl = normalizeCloudflareD1ApiBaseUrl(rawBaseUrl);
+  const token = String(rawToken || "").trim();
+  if (!token) throw Object.assign(new Error("Enter the Cloudflare D1 API token."), { code: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING });
+  await mutateSettings([SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, SETTING_KEY.CLOUDFLARE_D1_API_TOKEN], (settings) => {
+    settings.set(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, baseUrl);
+    settings.set(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, token);
+  });
+  return { baseUrl, token };
+}
+
+async function saveCloudflareD1Settings() {
+  const { baseUrl } = await saveCloudflareD1SettingsValues($("#cloudflareD1ApiBaseUrl").value, $("#cloudflareD1ApiToken").value);
+  $("#cloudflareD1ApiBaseUrl").value = baseUrl;
+  setStatus("Cloudflare D1 settings saved on this device");
+  return false;
+}
+
+async function testCloudflareD1Connection() {
+  const baseUrl = normalizeCloudflareD1ApiBaseUrl($("#cloudflareD1ApiBaseUrl").value);
+  const token = $("#cloudflareD1ApiToken").value.trim();
+  if (!token) throw Object.assign(new Error("Enter the Cloudflare D1 API token."), { code: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING });
+  const permissionRequest = platform.requestOptionalHostPermission(cloudflareD1HostPermission(baseUrl));
+  $("#cloudflareD1ConnectionStatus").textContent = "Requesting the exact Worker host permission...";
+  const permissionGranted = await Promise.race([
+    permissionRequest,
+    new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Firefox did not answer the host permission request."), { code: ERROR_CODE.REMOTE_PERMISSION })), 10_000))
+  ]);
+  if (!permissionGranted) throw Object.assign(new Error("Firefox did not grant the Worker host permission."), { code: ERROR_CODE.REMOTE_PERMISSION });
+  $("#cloudflareD1ConnectionStatus").textContent = "Calling the Worker health endpoint...";
+  const health = await cloudflareD1Provider.testConnection({ baseUrl, token, requestPermission: false });
+  $("#cloudflareD1ConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, storage ${health.storage}.`;
+  setStatus("Cloudflare D1 connection verified");
   return false;
 }
 
@@ -659,6 +709,21 @@ async function activateMysqlFromRemoteClicked() {
   return true;
 }
 
+async function activateCloudflareD1Clicked(source) {
+  const active = decodeRemoteProviderId(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
+  if (active === REMOTE_PROVIDER_ID.CLOUDFLARE_D1) throw Object.assign(new Error("Cloudflare D1 is already the active backend."), { code: ERROR_CODE.MIGRATION_SOURCE_UNSAFE });
+  const action = source === "remote" ? "adopt the existing D1 data" : "start D1 from this profile's local data";
+  if (globalThis.confirm && !globalThis.confirm(`This will ${action} after full verification. The token stays in this Firefox profile. Continue?`)) return false;
+  $("#migrationStatus").textContent = source === "remote" ? "Adopting existing D1 data..." : "Starting D1 from local data...";
+  await (source === "remote" ? activateProviderFromRemote : activateProviderFromLocal)(REMOTE_PROVIDER_ID.CLOUDFLARE_D1, {
+    onProgress(state) {
+      $("#migrationStatus").textContent = `Cloudflare D1 setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
+    }
+  });
+  setStatus("Cloudflare D1 is now the active storage backend");
+  return true;
+}
+
 function renderFirstRun(established) {
   $("#firstRunSetup").hidden = established;
   $("#settingsLayout").hidden = !established;
@@ -677,9 +742,11 @@ function renderFirstRun(established) {
 
 function selectFirstRunProvider(providerId) {
   const google = providerId === REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+  const mysql = providerId === REMOTE_PROVIDER_ID.MYSQL;
   $("#setupProviderChoices").hidden = true;
   $("#setupGoogle").hidden = !google;
-  $("#setupMysql").hidden = google;
+  $("#setupMysql").hidden = !mysql;
+  $("#setupCloudflareD1").hidden = providerId !== REMOTE_PROVIDER_ID.CLOUDFLARE_D1;
 }
 
 async function setupGoogleClicked() {
@@ -713,6 +780,15 @@ async function setupMysqlClicked(source) {
     }
   });
   setStatus("MySQL is ready");
+  return true;
+}
+
+async function setupCloudflareD1Clicked(source) {
+  await saveCloudflareD1SettingsValues($("#setupCloudflareD1ApiBaseUrl").value, $("#setupCloudflareD1ApiToken").value);
+  $("#cloudflareD1ApiBaseUrl").value = $("#setupCloudflareD1ApiBaseUrl").value.trim();
+  $("#cloudflareD1ApiToken").value = $("#setupCloudflareD1ApiToken").value.trim();
+  await activateCloudflareD1Clicked(source);
+  setStatus("Cloudflare Worker + D1 is ready");
   return true;
 }
 
@@ -767,6 +843,10 @@ async function refresh() {
   $("#mysqlApiToken").value = await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
   $("#setupMysqlApiBaseUrl").value = $("#mysqlApiBaseUrl").value;
   $("#setupMysqlApiToken").value = $("#mysqlApiToken").value;
+  $("#cloudflareD1ApiBaseUrl").value = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, DEFAULT_CLOUDFLARE_D1_API_BASE_URL);
+  $("#cloudflareD1ApiToken").value = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, "");
+  $("#setupCloudflareD1ApiBaseUrl").value = $("#cloudflareD1ApiBaseUrl").value;
+  $("#setupCloudflareD1ApiToken").value = $("#cloudflareD1ApiToken").value;
   renderSpreadsheet(await getSpreadsheetId());
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
@@ -944,11 +1024,16 @@ function bindEvents() {
   ));
   $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget, { refreshOnError: false }));
   $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget, { refreshOnError: false }));
+  $("#saveCloudflareD1Settings").addEventListener("click", (event) => runOptionsAction("save-cloudflare-d1-settings", saveCloudflareD1Settings, event.currentTarget, { refreshOnError: false }));
+  $("#testCloudflareD1Connection").addEventListener("click", (event) => runOptionsAction("test-cloudflare-d1-connection", testCloudflareD1Connection, event.currentTarget, { refreshOnError: false }));
   $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromLocal").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-local", activateMysqlFromLocalClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromRemote").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-remote", activateMysqlFromRemoteClicked, event.currentTarget, { refreshOnError: false }));
+  $("#activateCloudflareD1FromLocal").addEventListener("click", (event) => runOptionsAction("activate-cloudflare-d1-from-local", () => activateCloudflareD1Clicked("local"), event.currentTarget, { refreshOnError: false }));
+  $("#activateCloudflareD1FromRemote").addEventListener("click", (event) => runOptionsAction("activate-cloudflare-d1-from-remote", () => activateCloudflareD1Clicked("remote"), event.currentTarget, { refreshOnError: false }));
   $("#chooseGoogleSetup").addEventListener("click", () => selectFirstRunProvider(REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
   $("#chooseMysqlSetup").addEventListener("click", () => selectFirstRunProvider(REMOTE_PROVIDER_ID.MYSQL));
+  $("#chooseCloudflareD1Setup").addEventListener("click", () => selectFirstRunProvider(REMOTE_PROVIDER_ID.CLOUDFLARE_D1));
   $("#setupGoogleBack").addEventListener("click", () => {
     setSetupDeviceAuthPanel(null);
     $("#setupProviderChoices").hidden = false;
@@ -961,6 +1046,12 @@ function bindEvents() {
   $("#setupGoogleButton").addEventListener("click", (event) => runOptionsAction("setup-google", setupGoogleClicked, event.currentTarget, { refreshOnError: false }));
   $("#setupMysqlExistingButton").addEventListener("click", (event) => runOptionsAction("setup-mysql-existing", () => setupMysqlClicked("remote"), event.currentTarget, { refreshOnError: false }));
   $("#setupMysqlLocalButton").addEventListener("click", (event) => runOptionsAction("setup-mysql-local", () => setupMysqlClicked("local"), event.currentTarget, { refreshOnError: false }));
+  $("#setupCloudflareD1Back").addEventListener("click", () => {
+    $("#setupProviderChoices").hidden = false;
+    $("#setupCloudflareD1").hidden = true;
+  });
+  $("#setupCloudflareD1ExistingButton").addEventListener("click", (event) => runOptionsAction("setup-cloudflare-d1-existing", () => setupCloudflareD1Clicked("remote"), event.currentTarget, { refreshOnError: false }));
+  $("#setupCloudflareD1LocalButton").addEventListener("click", (event) => runOptionsAction("setup-cloudflare-d1-local", () => setupCloudflareD1Clicked("local"), event.currentTarget, { refreshOnError: false }));
 
   window.addEventListener("focus", () => {
     void refreshActiveBackendLabel().catch(() => {});

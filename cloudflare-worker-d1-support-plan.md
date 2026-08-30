@@ -813,7 +813,7 @@ Remove two-provider/MySQL-only assumptions so every migration direction is safe.
 - [x] Source data is never deleted.
 - [x] All six migration directions are covered and pass.
 - [x] Existing MySQL first-run and migration tests still pass.
-- [ ] Generic sync/reconcile modules do not import D1/MySQL/Sheets transport
+- [x] Generic sync/reconcile modules do not import D1/MySQL/Sheets transport
   implementations directly.
 
 ---
@@ -827,9 +827,9 @@ guide and safely activate D1.
 
 ## Steps
 
-- [ ] Add `Cloudflare Worker + D1` to the first-run provider choices.
-- [ ] Add it to the Storage preparation target select.
-- [ ] Add a D1 settings panel with:
+- [x] Add `Cloudflare Worker + D1` to the first-run provider choices.
+- [x] Add it to the Storage preparation target select.
+- [x] Add a D1 settings panel with:
 
   ```text
   Worker URL        type=url
@@ -840,11 +840,11 @@ guide and safely activate D1.
   Use existing D1 data
   ```
 
-- [ ] State next to the token field that it stays only in this browser profile.
-- [ ] Link to `server/cloudflare-d1/README.md` only in repository documentation;
+- [x] State next to the token field that it stays only in this browser profile.
+- [x] Link to `server/cloudflare-d1/README.md` only in repository documentation;
   the shipped extension UI should link to a stable hosted setup guide if one
   exists. Do not place a local filesystem path in the extension UI.
-- [ ] Follow the existing safe host-permission flow:
+- [x] Follow the existing safe host-permission flow:
 
   1. normalize URL;
   2. request the exact Worker origin from a direct user click;
@@ -852,17 +852,17 @@ guide and safely activate D1.
   4. call health without allowing the provider to trigger a second prompt;
   5. save only after validation succeeds, or clearly distinguish Save from Test.
 
-- [ ] Test connection status should show service/API/schema/storage only. Never
+- [x] Test connection status should show service/API/schema/storage only. Never
   echo the URL, token, database ID, Cloudflare account ID, or raw response.
-- [ ] Replace MySQL-only rendering functions with provider-aware rendering. Avoid
+- [x] Replace MySQL-only rendering functions with provider-aware rendering. Avoid
   adding a third chain of scattered ternaries.
-- [ ] Make `renderActiveBackendLabel` call the registered provider label.
-- [ ] `storageUiState` must still show Google account/spreadsheet panels only when
+- [x] Make `renderActiveBackendLabel` call the registered provider label.
+- [x] `storageUiState` must still show Google account/spreadsheet panels only when
   Google is active or the selected migration target.
-- [ ] MySQL fields are visible only when MySQL is selected; D1 fields only when D1
+- [x] MySQL fields are visible only when MySQL is selected; D1 fields only when D1
   is selected.
-- [ ] Migration button text and progress use the target provider label.
-- [ ] Extend backup behavior:
+- [x] Migration button text and progress use the target provider label.
+- [x] Extend backup behavior:
 
   - include the D1 base URL only if non-secret provider URLs are intentionally
     backed up today;
@@ -870,20 +870,20 @@ guide and safely activate D1.
   - importing a backup must never silently switch the active backend or claim it
     is established without a verified connection/migration.
 
-- [ ] Add tests for the full active-provider × selected-target visibility matrix.
-- [ ] Add DOM/static tests for first-run controls, Storage controls, password input,
+- [x] Add tests for the full active-provider × selected-target visibility matrix.
+- [x] Add DOM/static tests for first-run controls, Storage controls, password input,
   event bindings, and manifest permission.
-- [ ] Update accessibility labels, status live regions, keyboard behavior, and
+- [x] Update accessibility labels, status live regions, keyboard behavior, and
   responsive layout using existing Options patterns.
 
 ## Acceptance checks
 
-- [ ] A new profile can choose D1 without touching Google or MySQL.
-- [ ] A current Google/MySQL profile can prepare D1 without changing active sync.
-- [ ] Merely selecting D1 never switches the active provider.
-- [ ] Canceling host permission changes no settings/backend state.
-- [ ] Test failure changes no active backend.
-- [ ] Tokens do not appear in backup export tests or diagnostics.
+- [x] A new profile can choose D1 without touching Google or MySQL.
+- [x] A current Google/MySQL profile can prepare D1 without changing active sync.
+- [x] Merely selecting D1 never switches the active provider.
+- [x] Canceling host permission changes no settings/backend state.
+- [x] Test failure changes no active backend.
+- [x] Tokens do not appear in backup export tests or diagnostics.
 
 ---
 

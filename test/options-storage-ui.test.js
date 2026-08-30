@@ -9,7 +9,10 @@ describe("storage UI state", () => {
       ["google-sheets", "google-sheets", true],
       ["google-sheets", "mysql", true],
       ["mysql", "mysql", false],
-      ["mysql", "google-sheets", true]
+      ["mysql", "google-sheets", true],
+      ["cloudflare-d1", "cloudflare-d1", false],
+      ["mysql", "cloudflare-d1", false],
+      ["google-sheets", "cloudflare-d1", true]
     ];
 
     for (const [activeProviderId, targetProviderId, visible] of cases) {

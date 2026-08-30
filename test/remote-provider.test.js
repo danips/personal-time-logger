@@ -28,7 +28,6 @@ const db = await import("../extension/src/db.js");
 const providers = await import("../extension/src/remote-provider.js");
 const googleProvider = await import("../extension/src/remote-google-sheets.js");
 const mysql = await import("../extension/src/remote-mysql.js");
-const cloudflare = await import("../extension/src/remote-cloudflare-d1.js");
 
 const fixture = (over = {}) => normalizeEntry({
   id: "provider-entry",
@@ -285,6 +284,12 @@ describe("provider boundary", () => {
     assert.match(options, /id="firstRunSetup"/);
     assert.match(options, /id="chooseGoogleSetup"/);
     assert.match(options, /id="chooseMysqlSetup"/);
+    assert.match(options, /id="chooseCloudflareD1Setup"/);
+    assert.match(options, /id="cloudflareD1ApiBaseUrl"/);
+    assert.match(options, /id="cloudflareD1ApiToken" type="password"/);
+    assert.match(options, /id="testCloudflareD1Connection"/);
+    assert.match(optionsCode, /activateCloudflareD1Clicked/);
+    assert.match(optionsCode, /CLOUDFLARE_D1_API_TOKEN/);
     assert.match(options, /id="settingsLayout"/);
     assert.match(optionsCode, /REMOTE_BACKEND_TARGET|remoteBackendTarget/);
     assert.match(optionsCode, /activateMysqlFromLocal/);
@@ -292,5 +297,7 @@ describe("provider boundary", () => {
     assert.match(optionsCode, /REMOTE_BACKEND_ESTABLISHED/);
     assert.match(options, /not switched until verified migration succeeds/i);
     assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
+    assert.ok(manifest.optional_host_permissions.includes("https://*.workers.dev/*"));
+    assert.doesNotMatch(optionsCode, /CLOUDFLARE_D1_API_TOKEN[^\n]*BACKUP/);
   });
 });

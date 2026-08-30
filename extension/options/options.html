@@ -26,6 +26,10 @@
             <strong>Start with MySQL</strong>
             <span>Connect to an existing MySQL dataset or start from local data.</span>
           </button>
+          <button id="chooseCloudflareD1Setup" class="setup-choice" type="button">
+            <strong>Start with Cloudflare Worker + D1</strong>
+            <span>Connect to your own Cloudflare Worker and D1 database.</span>
+          </button>
         </div>
         <div id="setupGoogle" class="setup-provider" hidden>
           <h3>Set up Google Sheets</h3>
@@ -46,6 +50,13 @@
           <label for="setupMysqlApiToken">API token<input id="setupMysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
           <p class="note">The token stays in this Firefox profile and is sent only to the configured API origin.</p>
           <div class="actions"><button id="setupMysqlBack" type="button">Back</button><button id="setupMysqlExistingButton" type="button">Use existing MySQL data</button><button id="setupMysqlLocalButton" type="button">Start from local data</button></div>
+        </div>
+        <div id="setupCloudflareD1" class="setup-provider" hidden>
+          <h3>Set up Cloudflare Worker + D1</h3>
+          <label for="setupCloudflareD1ApiBaseUrl">Worker URL<input id="setupCloudflareD1ApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://your-worker.your-subdomain.workers.dev"></label>
+          <label for="setupCloudflareD1ApiToken">API token<input id="setupCloudflareD1ApiToken" type="password" autocomplete="off" spellcheck="false"></label>
+          <p class="note">The token stays only in this Firefox profile and is sent as a bearer token to your Worker.</p>
+          <div class="actions"><button id="setupCloudflareD1Back" type="button">Back</button><button id="setupCloudflareD1ExistingButton" type="button">Use existing D1 data</button><button id="setupCloudflareD1LocalButton" type="button">Start from local data</button></div>
         </div>
       </section>
 
@@ -128,6 +139,7 @@
               <select id="remoteBackendTarget">
                 <option value="google-sheets">Google Sheets</option>
                 <option value="mysql">MySQL 8.4</option>
+                <option value="cloudflare-d1">Cloudflare Worker + D1</option>
               </select>
             </label>
             <p class="note">Choosing a backend here only prepares and tests it. Existing data is not switched until verified migration succeeds.</p>
@@ -142,6 +154,13 @@
               <p class="note">Use MySQL directly when you do not want a Google account. This initializes MySQL from this profile's local data only; Google Sheets is not read.</p>
               <p class="note">Use existing MySQL data when the database already contains your time entries. It imports those records into this profile and does not read Google Sheets.</p>
               <p id="mysqlConnectionStatus" class="status" role="status" aria-live="polite"></p>
+            </div>
+            <div id="cloudflareD1StorageFields" hidden>
+              <label for="cloudflareD1ApiBaseUrl">Worker URL<input id="cloudflareD1ApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://your-worker.your-subdomain.workers.dev"></label>
+              <label for="cloudflareD1ApiToken">API token<input id="cloudflareD1ApiToken" type="password" autocomplete="off" spellcheck="false"></label>
+              <p class="note">The token stays only in this Firefox profile. It is never placed in Firefox Sync, backups, diagnostics, URLs, or logs.</p>
+              <div class="actions"><button id="testCloudflareD1Connection" type="button">Test connection</button><button id="saveCloudflareD1Settings" type="button">Save D1 settings</button><button id="activateCloudflareD1FromLocal" type="button">Use D1 directly</button><button id="activateCloudflareD1FromRemote" type="button">Use existing D1 data</button></div>
+              <p id="cloudflareD1ConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
           </section>
 
