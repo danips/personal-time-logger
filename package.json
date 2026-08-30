@@ -2,7 +2,7 @@
   "name": "personal-time-logger",
   "private": true,
   "type": "module",
-  "description": "Local-first time tracking with Google Sheets sync. Packaging and tests only; the extension itself has no dependencies.",
+  "description": "Local-first time tracking with Google Sheets, MySQL, or Cloudflare Worker + D1 sync. Packaging and tests only; the extension itself has no dependencies.",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=8.0.0"

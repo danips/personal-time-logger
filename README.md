@@ -349,7 +349,7 @@ For a Firefox WebDriver behavior smoke test, install Firefox, `geckodriver`, and
 npm run test:browser
 ```
 
-Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies its calendar rendering, exercises provider-aware Options visibility, saves Options, and checks the cross-context lock. It never contacts live Google or MySQL APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
+Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies its calendar rendering, exercises provider-aware Options visibility, saves Options, and checks the cross-context lock. It never contacts live Google, MySQL, or Cloudflare APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
 
 GitHub Actions runs the Node checks and Firefox behavior smoke on every push and pull request. The release workflow also requires the Firefox smoke before signing, so either test path can block a release.
 

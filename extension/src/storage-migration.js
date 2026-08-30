@@ -400,7 +400,7 @@ export async function activateProviderFromLocal(targetProviderId, { onProgress }
 /**
  * Makes an existing remote dataset the active backend without contacting
  * Google. Local entries are checked first so an existing local edit cannot be
- * silently discarded; MySQL-only entries are then imported by the normal sync
+ * silently discarded; target-only entries are then imported by the normal sync
  * pull after the backend switch.
  */
 export async function activateProviderFromRemote(targetProviderId, { onProgress } = {}) {
