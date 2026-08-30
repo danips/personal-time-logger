@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-const migration = readFileSync(new URL("../migrations/0001_initial.sql", import.meta.url), "utf8");
-const config = readFileSync(new URL("../wrangler.example.jsonc", import.meta.url), "utf8");
+const migration = readFileSync(new globalThis.URL("../migrations/0001_initial.sql", import.meta.url), "utf8");
+const config = readFileSync(new globalThis.URL("../wrangler.example.jsonc", import.meta.url), "utf8");
 
 describe("Cloudflare D1 scaffold", () => {
   it("contains a placeholder-only Worker configuration and DB binding", () => {
