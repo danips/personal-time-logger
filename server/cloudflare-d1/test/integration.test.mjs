@@ -1,3 +1,5 @@
+/* global URL, fetch, process, setTimeout */
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

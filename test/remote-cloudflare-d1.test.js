@@ -6,7 +6,6 @@ import {
   CHUNK_SIZE,
   cloudflareD1HostPermission,
   cloudflareD1Provider,
-  createCloudflareD1ApiClient,
   normalizeCloudflareD1ApiBaseUrl
 } from "../extension/src/remote-cloudflare-d1.js";
 
