@@ -1,0 +1,15 @@
+{
+  "name": "personal-time-logger-cloudflare-d1",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "test": "node --test test/unit.test.js",
+    "test:integration": "node test/integration.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+  },
+  "devDependencies": { "wrangler": "4.31.0" }
+}

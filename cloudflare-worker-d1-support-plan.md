@@ -363,9 +363,9 @@ Wrangler.
 
 ## Steps
 
-- [ ] Create `server/cloudflare-d1/package.json` with Node 20+ and a pinned
+- [x] Create `server/cloudflare-d1/package.json` with Node 20+ and a pinned
   Wrangler development dependency. Commit its lockfile.
-- [ ] Add scripts with unambiguous local/remote names, for example:
+- [x] Add scripts with unambiguous local/remote names, for example:
 
   ```json
   {
@@ -380,7 +380,7 @@ Wrangler.
 
   Adjust the exact Wrangler database argument only after validating it locally.
 
-- [ ] Add `wrangler.example.jsonc`, not a real account-bound config. It must show:
+- [x] Add `wrangler.example.jsonc`, not a real account-bound config. It must show:
 
   - a module Worker entry point;
   - a current compatibility date;
@@ -391,7 +391,7 @@ Wrangler.
 
 - [ ] Ignore the user's copied account-specific `wrangler.jsonc` only if it could
   contain account-specific values. Do not ignore the example.
-- [ ] Create `migrations/0001_initial.sql` with:
+- [x] Create `migrations/0001_initial.sql` with:
 
   ```text
   time_entries
@@ -400,7 +400,7 @@ Wrangler.
   mutation_guard
   ```
 
-- [ ] Use SQLite/D1 types and constraints deliberately:
+- [x] Use SQLite/D1 types and constraints deliberately:
 
   - IDs/text fields: `TEXT NOT NULL` with length checks matching the API validator;
   - optional `end_at`, `deleted_at`, `multiply`: nullable;
@@ -414,7 +414,7 @@ Wrangler.
   - `mutation_guard` must contain a `NOT NULL` constrained value. It exists only
     to make a failed compare-and-swap statement abort the surrounding D1 batch.
 
-- [ ] Make migration 0001 safe for a fresh database. Do not silently rewrite an
+- [x] Make migration 0001 safe for a fresh database. Do not silently rewrite an
   incompatible existing schema.
 - [ ] Apply the migration locally twice and confirm Wrangler reports it as already
   applied rather than recreating data.
@@ -423,9 +423,9 @@ Wrangler.
 
 - [ ] A fresh local D1 database can be created and migrated from documented
   commands.
-- [ ] No real Cloudflare account ID, database ID, URL, token, or digest is tracked.
-- [ ] `app_meta` has exactly one initialized row.
-- [ ] The schema can represent every canonical extension field without lossy
+- [x] No real Cloudflare account ID, database ID, URL, token, or digest is tracked.
+- [x] `app_meta` has exactly one initialized row.
+- [x] The schema can represent every canonical extension field without lossy
   conversions.
 
 ---
