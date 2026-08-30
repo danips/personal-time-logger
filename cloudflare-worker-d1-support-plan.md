@@ -231,7 +231,7 @@ refactoring.
 
 ## Steps
 
-- [ ] Run:
+- [x] Run:
 
   ```bash
   git status --short
@@ -241,7 +241,7 @@ refactoring.
   git diff --check
   ```
 
-- [ ] Read completely:
+- [x] Read completely:
 
   ```text
   docs/architecture.md
@@ -264,7 +264,7 @@ refactoring.
   test/reconciliation-provider-ui.test.js
   ```
 
-- [ ] Add contract fixtures/tests before refactoring. The frozen contract is:
+- [x] Add contract fixtures/tests before refactoring. The frozen contract is:
 
   ```text
   GET  /v1/health
@@ -276,18 +276,18 @@ refactoring.
   POST /v1/config/update
   ```
 
-- [ ] Freeze the success and error JSON shapes currently consumed by
+- [x] Freeze the success and error JSON shapes currently consumed by
   `remote-mysql.js`.
-- [ ] Freeze the provider interface required by `test/remote-provider.test.js`.
-- [ ] Add a short API contract table to `docs/architecture.md` or a new
+- [x] Freeze the provider interface required by `test/remote-provider.test.js`.
+- [x] Add a short API contract table to `docs/architecture.md` or a new
   `docs/remote-api-v1.md`. Make that document provider-neutral; MySQL and D1 both
   implement it.
 
 ## Acceptance checks
 
-- [ ] Existing tests still pass before functional changes.
-- [ ] There is one written provider-neutral API v1 contract.
-- [ ] No production behavior changed in this phase.
+- [x] Existing tests still pass before functional changes.
+- [x] There is one written provider-neutral API v1 contract.
+- [x] No production behavior changed in this phase.
 
 ---
 

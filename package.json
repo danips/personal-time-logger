@@ -8,7 +8,7 @@
     "npm": ">=8.0.0"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test test",
     "test:browser": "node scripts/browser-runtime-smoke.mjs",
     "lint:js": "eslint .",
     "lint:extension": "node scripts/prepare-firefox-release.mjs --base-url https://example.invalid/personal-time-logger --output web-ext-artifacts/lint-source && web-ext lint --source-dir web-ext-artifacts/lint-source --self-hosted",

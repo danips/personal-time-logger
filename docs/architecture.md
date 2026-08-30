@@ -12,7 +12,8 @@ Background alarm ─────────────────────
                                          │          ├── browser APIs    └── entries + settings
 ChatGPT usage service ─────────────────┘          └── remote providers
                                                         ├── Google Sheets / Drive APIs
-                                                        └── MySQL HTTPS API
+                                                        ├── MySQL HTTPS API
+                                                        └── Cloudflare Worker + D1 HTTPS API
 ```
 
 ## Context boundaries
@@ -83,8 +84,10 @@ result afterward.
 `extension/src/remote-provider.js` selects the active provider from
 `REMOTE_BACKEND`. `remote-google-sheets.js` adapts Sheets row references and
 fingerprints; `remote-mysql.js` adapts API version references and normalizes the
-API's nullable optional fields. Generic sync and reconciliation code uses only
-the provider contract and serializable provider metadata. Provider capabilities
+API's nullable optional fields, and `remote-cloudflare-d1.js` adapts
+Worker/D1 version references. Generic sync and reconciliation code uses only
+the provider contract and serializable provider metadata. The provider-neutral
+API is documented in `docs/remote-api-v1.md`. Provider capabilities
 currently control whether duplicate physical-record repair is presented.
 
 ## Sync, reconciliation, and fencing
