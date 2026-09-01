@@ -4,7 +4,7 @@
   font-size: 14px;
   --time-col: 64px;
   --weekday-col: minmax(112px, 1fr);
-  --weekend-col: minmax(95px, 0.35fr);
+  --weekend-col: minmax(100px, 0.35fr);
   --slot-height: 12px;
   --hour-height: calc(var(--slot-height) * 4);
   --day-height: calc(var(--hour-height) * 24);
