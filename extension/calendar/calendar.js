@@ -11,6 +11,7 @@ import {
   TEMPO_HOST_PERMISSION,
   TEMPO_UPLOAD_MESSAGE
 } from "../src/tempo.js";
+import { tempoDaySelectionState, weekDayKeys } from "../src/tempo-day-selection.js";
 import { ERROR_CODE } from "../src/error-codes.js";
 import { onEntriesChanged } from "../src/events.js";
 import { requestBackgroundSync } from "../src/sync-request.js";
@@ -74,8 +75,12 @@ mountEntryEditor(document.getElementById("calendarEntryEditor"), {
 });
 
 const DRAG_THRESHOLD_PX = 5;
+const NO_DAYS_SELECTED_MESSAGE = "Check at least one day to send to Tempo";
 
 let weekStart = startOfWeek(new Date());
+// Which days the next Tempo send covers. Deliberately per-send state rather than
+// a stored setting, so every week opens with its whole range selected.
+let selectedDayKeys = new Set(weekDayKeys(weekStart, DAY_COUNT));
 let renderedEntries = [];
 let gesture = null;
 let initialScrollDone = false;
@@ -160,19 +165,55 @@ function renderHeader(dailyTotals = []) {
   weekTotal.textContent = formatTotalHours(dailyTotals.reduce((sum, seconds) => sum + (Number(seconds) || 0), 0));
   weekTotal.title = "Total logged for the displayed week";
 
+  const dayKeys = weekDayKeys(weekStart, DAY_COUNT);
   for (let index = 0; index < DAY_COUNT; index += 1) {
     const date = addDays(weekStart, index);
     const element = needsBuild ? document.createElement("div") : header.children[index + 1];
     if (needsBuild) {
+      const sendToggle = document.createElement("input");
       const dateLabel = document.createElement("strong");
       const total = document.createElement("em");
-      element.append(dateLabel, total);
+      sendToggle.type = "checkbox";
+      sendToggle.className = "day-send-toggle";
+      // The toggle shares the totals line, so the date keeps the full column
+      // width and the control sits beside the hours it would send.
+      element.append(dateLabel, sendToggle, total);
       header.append(element);
     }
+    // Header cells are reused across renders, so the checkbox is re-pointed at
+    // the day it now shows instead of being rebuilt with the week.
+    const label = calendarHeaderDate(date);
+    const sendToggle = element.querySelector(".day-send-toggle");
+    const toggleLabel = `Include ${label} in the next Tempo send`;
+    sendToggle.dataset.dayKey = dayKeys[index];
+    sendToggle.checked = selectedDayKeys.has(dayKeys[index]);
+    sendToggle.title = toggleLabel;
+    sendToggle.setAttribute("aria-label", toggleLabel);
     element.className = `day-heading${isSameLocalDate(date, today) ? " today" : ""}`;
-    element.querySelector("strong").textContent = calendarHeaderDate(date);
+    element.querySelector("strong").textContent = label;
     element.querySelector("em").textContent = formatTotalHours(dailyTotals[index] || 0);
   }
+  applyTempoSendState();
+}
+
+function currentDaySelection() {
+  return tempoDaySelectionState(selectedDayKeys, weekDayKeys(weekStart, DAY_COUNT));
+}
+
+function applyTempoSendState() {
+  const selection = currentDaySelection();
+  const button = $("#sendTempoButton");
+  button.disabled = selection.noneSelected;
+  button.title = selection.noneSelected
+    ? NO_DAYS_SELECTED_MESSAGE
+    : `Send ${selection.scopeLabel} to Tempo`;
+}
+
+function toggleSendDay(dayKey, included) {
+  if (!dayKey) return;
+  if (included) selectedDayKeys.add(dayKey);
+  else selectedDayKeys.delete(dayKey);
+  applyTempoSendState();
 }
 
 function renderTimeAxis(grid) {
@@ -904,6 +945,7 @@ async function changeWeek(nextStart) {
   closeEditor();
   setResizeUndo(null);
   weekStart = startOfWeek(nextStart);
+  selectedDayKeys = new Set(weekDayKeys(weekStart, DAY_COUNT));
   initialScrollDone = false;
   setStatus("Ready", "synced");
 }
@@ -926,6 +968,14 @@ function calendarError(code, message) {
 }
 
 async function sendDisplayedWeekToTempo() {
+  const selection = currentDaySelection();
+  // Checked before the permission prompt so an empty selection cannot make the
+  // browser ask for Tempo access on behalf of a send with nothing in it.
+  if (selection.noneSelected) {
+    setStatus(NO_DAYS_SELECTED_MESSAGE);
+    return;
+  }
+
   let permissionGranted;
   try {
     permissionGranted = await platform.requestOptionalHostPermission(TEMPO_HOST_PERMISSION);
@@ -951,7 +1001,8 @@ async function sendDisplayedWeekToTempo() {
     periodStart: weekStart,
     periodEnd: weekEnd,
     authorAccountId,
-    taskIssueIds
+    taskIssueIds,
+    includedDays: selection.includedDays
   });
 
   for (const task of prepared.missingTasks) {
@@ -971,14 +1022,15 @@ async function sendDisplayedWeekToTempo() {
       periodStart: weekStart,
       periodEnd: weekEnd,
       authorAccountId,
-      taskIssueIds
+      taskIssueIds,
+      includedDays: selection.includedDays
     });
   }
 
   if (!prepared.totalWorklogs) {
     setStatus(prepared.skippedRunning
       ? "No completed worklogs to send; running timers were skipped"
-      : "No worklogs to send for the displayed week");
+      : `No worklogs to send for ${selection.scopeLabel}`);
     return;
   }
 
@@ -986,7 +1038,7 @@ async function sendDisplayedWeekToTempo() {
     ? ` ${prepared.skippedRunning} running timer${prepared.skippedRunning === 1 ? " will" : "s will"} be skipped.`
     : "";
   const confirmed = window.confirm(
-    `Send ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} from the displayed week to Tempo?${skipped}\n\nSending the same week again creates duplicates in Tempo.`
+    `Send ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} from ${selection.scopeLabel} to Tempo?${skipped}\n\nSending the same ${selection.repeatScopeLabel} again creates duplicates in Tempo.`
   );
   if (!confirmed) {
     setStatus("Tempo send cancelled; no worklogs were sent");
@@ -1019,6 +1071,12 @@ function bindEvents() {
   $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
   $("#sendTempoButton").addEventListener("click", (event) => runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget }));
+  // Delegated so the toggles survive the header rebuild that follows a week change.
+  $("#dayHeader").addEventListener("change", (event) => {
+    const toggle = event.target;
+    if (!toggle?.classList?.contains("day-send-toggle")) return;
+    toggleSendDay(toggle.dataset.dayKey, toggle.checked);
+  });
   $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, {
     button: event.currentTarget,
     expectedRevision: lastResizeUndo?.revision,

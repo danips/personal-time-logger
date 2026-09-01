@@ -6,12 +6,14 @@ import { describe, it } from "node:test";
 
 import { normalizeEntry } from "../extension/src/entries.js";
 import {
+  normalizeTempoDayKeys,
   normalizeTempoIssueId,
   normalizeTempoTaskIssueIds,
   prepareTempoWeek,
   sendTempoWorklogs,
   tempoXhrRequest
 } from "../extension/src/tempo.js";
+import { localDateKey } from "../extension/src/time.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,6 +27,8 @@ const fixture = (overrides = {}) => normalizeEntry({
   duration_seconds: 3600,
   ...overrides
 });
+
+const dayKeyOf = (isoTimestamp) => localDateKey(new Date(isoTimestamp));
 
 const week = {
   periodStart: "2026-07-27T00:00:00.000Z",
@@ -81,6 +85,84 @@ describe("Tempo week preparation", () => {
     assert.deepEqual(prepared.missingTasks, ["Unknown"]);
     assert.equal(prepared.skippedRunning, 1);
     assert.equal(prepared.totalWorklogs, 0);
+  });
+
+  it("normalizes day keys from any iterable and drops unusable members", () => {
+    assert.deepEqual(normalizeTempoDayKeys([" 2026-07-27 ", "", "2026-07-27"]), new Set(["2026-07-27"]));
+    assert.deepEqual(normalizeTempoDayKeys(new Set(["2026-07-28"])), new Set(["2026-07-28"]));
+    assert.deepEqual(normalizeTempoDayKeys("2026-07-27"), new Set());
+    assert.deepEqual(normalizeTempoDayKeys(null), new Set());
+    assert.deepEqual(normalizeTempoDayKeys(42), new Set());
+  });
+
+  it("sends only the selected days of the period", () => {
+    const prepared = prepareTempoWeek([
+      fixture({ id: "monday" }),
+      fixture({
+        id: "tuesday",
+        start_at: "2026-07-28T09:00:00.000Z",
+        end_at: "2026-07-28T11:00:00.000Z",
+        duration_seconds: 7200
+      })
+    ], { ...week, includedDays: [dayKeyOf("2026-07-28T09:00:00.000Z")] });
+
+    assert.equal(prepared.totalWorklogs, 1);
+    assert.equal(prepared.skippedExcludedDays, 1);
+    assert.deepEqual(prepared.groups[0].worklogs, [{
+      authorAccountId: "account-123",
+      description: "Built the feature",
+      startDate: dayKeyOf("2026-07-28T09:00:00.000Z"),
+      timeSpentSeconds: 7200
+    }]);
+  });
+
+  // The calendar prompts for every missing Task mapping, so a day nobody selected
+  // must drop out first or unselecting a day still interrogates the user about it.
+  it("excludes unselected days before collecting missing Task mappings", () => {
+    const prepared = prepareTempoWeek([
+      fixture({ id: "mapped" }),
+      fixture({
+        id: "unmapped",
+        task: "Unknown",
+        start_at: "2026-07-28T09:00:00.000Z",
+        end_at: "2026-07-28T10:00:00.000Z"
+      })
+    ], { ...week, includedDays: [dayKeyOf("2026-07-27T09:00:00.000Z")] });
+
+    assert.deepEqual(prepared.missingTasks, []);
+    assert.equal(prepared.skippedExcludedDays, 1);
+    assert.equal(prepared.totalWorklogs, 1);
+  });
+
+  it("only warns about running timers on days the send covers", () => {
+    const running = fixture({
+      id: "running",
+      start_at: "2026-07-28T09:00:00.000Z",
+      end_at: "",
+      duration_seconds: 0
+    });
+
+    assert.equal(prepareTempoWeek([running], week).skippedRunning, 1);
+    assert.equal(prepareTempoWeek([running], {
+      ...week,
+      includedDays: [dayKeyOf(running.start_at)]
+    }).skippedRunning, 1);
+    assert.equal(prepareTempoWeek([running], {
+      ...week,
+      includedDays: [dayKeyOf("2026-07-27T09:00:00.000Z")]
+    }).skippedRunning, 0);
+  });
+
+  // An empty selection must never be read as "no filter", or clearing every
+  // checkbox would send the whole week instead of nothing.
+  it("separates an omitted selection from an empty one", () => {
+    const entries = [fixture()];
+
+    assert.equal(prepareTempoWeek(entries, week).totalWorklogs, 1);
+    assert.equal(prepareTempoWeek(entries, { ...week, includedDays: undefined }).totalWorklogs, 1);
+    assert.equal(prepareTempoWeek(entries, { ...week, includedDays: null }).totalWorklogs, 1);
+    assert.equal(prepareTempoWeek(entries, { ...week, includedDays: [] }).totalWorklogs, 0);
+    assert.equal(prepareTempoWeek(entries, { ...week, includedDays: new Set() }).skippedExcludedDays, 1);
   });
 });
 

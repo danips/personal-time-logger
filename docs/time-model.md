@@ -39,6 +39,11 @@ within the displayed week. Time is apportioned across the week boundary instead
 of assigning the whole entry to either week. Running entries are excluded because
 Tempo requires a fixed positive duration.
 
+The header day checkboxes narrow a send to chosen local civil dates. A worklog is
+included when the local date of its clipped allocation start is selected, so an
+entry is never split by the selection: it belongs wholly to the day the week
+allocation starts on, which is the same date Tempo receives.
+
 ## Second-audit decisions
 
 ### D1 — Remote optimistic concurrency

@@ -33,30 +33,61 @@ export function normalizeTempoTaskIssueIds(value) {
   return normalized;
 }
 
-/** Converts completed displayed-week allocations into Tempo bulk payloads. */
+/** Accepts any iterable of local civil-date keys, ignoring unusable members. */
+export function normalizeTempoDayKeys(value) {
+  if (!value || typeof value === "string" || typeof value[Symbol.iterator] !== "function") return new Set();
+  return new Set([...value].map((key) => String(key).trim()).filter(Boolean));
+}
+
+function dayIncluded(days, value) {
+  if (!days) return true;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? false : days.has(localDateKey(date));
+}
+
+/**
+ * Converts completed displayed-week allocations into Tempo bulk payloads.
+ * `includedDays` narrows the send to specific local civil dates: omitting it
+ * sends every day in the period, while an empty iterable sends none, so an
+ * empty calendar day selection can never fall back to the whole week.
+ */
 export function prepareTempoWeek(entries, {
   periodStart,
   periodEnd,
   authorAccountId,
   taskIssueIds,
+  includedDays,
   now = new Date()
 } = {}) {
   const author = String(authorAccountId ?? "").trim();
   const mappings = normalizeTempoTaskIssueIds(taskIssueIds);
+  const days = includedDays === undefined || includedDays === null
+    ? null
+    : normalizeTempoDayKeys(includedDays);
   const grouped = new Map();
   const missingTasks = new Set();
   let skippedRunning = 0;
   let skippedZeroDuration = 0;
+  let skippedExcludedDays = 0;
 
   for (const entry of entries) {
     if (!entry || entry.deleted_at) continue;
     if (!entry.end_at) {
-      skippedRunning += 1;
+      // A running timer on an unselected day is out of scope, so counting it
+      // would warn about a skip this send was never going to make.
+      if (dayIncluded(days, entry.start_at)) skippedRunning += 1;
       continue;
     }
 
     const allocation = allocateEntry(entry, periodStart, periodEnd, { now });
     if (!allocation) continue;
+    const startDate = localDateKey(allocation.start);
+    // Excluded days drop out before the mapping check so the calendar never
+    // prompts for a Jira issue ID belonging to a day nobody asked to send.
+    if (days && !days.has(startDate)) {
+      skippedExcludedDays += 1;
+      continue;
+    }
     const timeSpentSeconds = Math.ceil(Number(allocation.effectiveSeconds) || 0);
     if (timeSpentSeconds < 1) {
       skippedZeroDuration += 1;
@@ -74,7 +105,7 @@ export function prepareTempoWeek(entries, {
     grouped.get(issueId).push({
       authorAccountId: author,
       description: String(entry.description ?? ""),
-      startDate: localDateKey(allocation.start),
+      startDate,
       timeSpentSeconds
     });
   }
@@ -85,6 +116,7 @@ export function prepareTempoWeek(entries, {
     missingTasks: [...missingTasks],
     skippedRunning,
     skippedZeroDuration,
+    skippedExcludedDays,
     totalWorklogs: groups.reduce((total, group) => total + group.worklogs.length, 0)
   };
 }
