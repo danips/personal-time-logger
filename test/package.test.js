@@ -62,6 +62,7 @@ const expectedFiles = [
   "src/storage-migration.js",
   "src/sync-request.js",
   "src/sync.js",
+  "src/tempo-day-selection.js",
   "src/tempo.js",
   "src/themes.css",
   "src/themes.js",
