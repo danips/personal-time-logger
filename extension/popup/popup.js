@@ -838,6 +838,27 @@ async function syncAndCheckForUpdate() {
   await platform.sendRuntimeMessage({ type: UPDATE_CHECK_MESSAGE });
 }
 
+async function installUpdate() {
+  $installUpdate.disabled = true;
+  $installUpdate.textContent = "Installing update…";
+  // The background context reloads as part of the install, so the popup may
+  // not get another render cycle after the persisted marker is cleared by the
+  // new background context. Hide the stale notice while that happens.
+  $updateNotice.classList.add("hidden");
+
+  try {
+    const response = await platform.sendRuntimeMessage({ type: UPDATE_INSTALL_MESSAGE });
+    if (!response?.ok) throw new Error("Update could not be installed");
+    // onInstalled clears this in the background, but clear it here as well so
+    // an already-open popup cannot keep displaying the old marker.
+    await setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, "").catch(() => {});
+  } catch {
+    $updateNotice.classList.remove("hidden");
+    $installUpdate.disabled = false;
+    $installUpdate.textContent = "Update could not be installed — try again";
+  }
+}
+
 function runPopupAction(key, action, { button = null, expectedRevision } = {}) {
   return runAction(key, action, {
     expectedRevision,
@@ -1014,14 +1035,7 @@ function bindEvents() {
   $activePanel.addEventListener("click", editActiveTimer);
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", syncAndCheckForUpdate, { button: event.currentTarget }));
-  $installUpdate.addEventListener("click", () => {
-    $installUpdate.disabled = true;
-    $installUpdate.textContent = "Installing update…";
-    void platform.sendRuntimeMessage({ type: UPDATE_INSTALL_MESSAGE }).catch(() => {
-      $installUpdate.disabled = false;
-      $installUpdate.textContent = "Update could not be installed — try again";
-    });
-  });
+  $installUpdate.addEventListener("click", () => void installUpdate());
   $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
     render().catch((error) => {
