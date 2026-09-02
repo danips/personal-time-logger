@@ -211,6 +211,48 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
   await waitForPage(baseUrl, sessionId, ["#calendarGrid", "#statusLine"]);
+  const tempoScope = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const toggles = [...document.querySelectorAll(".day-send-toggle")];
+      const sendButton = document.querySelector("#sendTempoButton");
+      const menu = document.querySelector("#tempoSendMenu");
+      const initial = {
+        togglesHidden: toggles.every((toggle) => toggle.hidden),
+        label: sendButton?.textContent
+      };
+      document.querySelector("#tempoSendMenuButton")?.click();
+      const menuOpened = menu?.hidden === false;
+      document.querySelector("#chooseTempoDaysOption")?.click();
+      const choosing = {
+        togglesVisible: toggles.every((toggle) => !toggle.hidden),
+        startsEmpty: toggles.every((toggle) => !toggle.checked),
+        sendDisabled: sendButton?.disabled
+      };
+      const first = toggles[0];
+      if (first) {
+        first.checked = true;
+        first.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return {
+        initial,
+        menuOpened,
+        choosing,
+        selectedLabel: sendButton?.textContent,
+        selectedSendDisabled: sendButton?.disabled
+      };
+    `,
+    args: []
+  });
+  if (!tempoScope.initial.togglesHidden
+    || tempoScope.initial.label !== "Send week to Tempo"
+    || !tempoScope.menuOpened
+    || !tempoScope.choosing.togglesVisible
+    || !tempoScope.choosing.startsEmpty
+    || !tempoScope.choosing.sendDisabled
+    || tempoScope.selectedLabel !== "Send 1 day to Tempo"
+    || tempoScope.selectedSendDisabled) {
+    throw new Error(`Tempo scope controls did not move cleanly into day selection: ${JSON.stringify(tempoScope)}`);
+  }
   const selectedWeek = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
     script: `
       const done = arguments[arguments.length - 1];

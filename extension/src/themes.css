@@ -259,7 +259,8 @@ html[data-theme] .active-panel.is-running:hover {
 html[data-theme] .new-timer-toggle,
 html[data-theme] .window-size-button,
 html[data-theme] .undo-resize-button,
-html[data-theme] #sendTempoButton {
+html[data-theme] #sendTempoButton,
+html[data-theme] .tempo-send-menu-button {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: var(--accent-soft);
   color: var(--accent-strong);

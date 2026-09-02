@@ -37,7 +37,16 @@
           </label>
           <button id="nextWeek" class="icon-button" type="button" title="Next week" aria-label="Next week"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
           <button id="todayButton" type="button">Today</button>
-          <button id="sendTempoButton" type="button" title="Send the displayed week to Tempo">Send to Tempo</button>
+          <div class="tempo-send-control">
+            <button id="sendTempoButton" type="button" title="Send the displayed week to Tempo">Send week to Tempo</button>
+            <button id="tempoSendMenuButton" class="tempo-send-menu-button" type="button" title="Choose what to send" aria-label="Choose what to send to Tempo" aria-haspopup="menu" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
+            </button>
+            <div id="tempoSendMenu" class="tempo-send-menu" role="menu" hidden>
+              <button id="sendTempoWeekOption" type="button" role="menuitem">Send whole week</button>
+              <button id="chooseTempoDaysOption" type="button" role="menuitem">Choose individual days…</button>
+            </div>
+          </div>
         </div>
       </header>
 

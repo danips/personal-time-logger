@@ -81,6 +81,7 @@ let weekStart = startOfWeek(new Date());
 // Which days the next Tempo send covers. Deliberately per-send state rather than
 // a stored setting, so every week opens with its whole range selected.
 let selectedDayKeys = new Set(weekDayKeys(weekStart, DAY_COUNT));
+let tempoDaySelectionActive = false;
 let renderedEntries = [];
 let gesture = null;
 let initialScrollDone = false;
@@ -187,6 +188,7 @@ function renderHeader(dailyTotals = []) {
     const toggleLabel = `Include ${label} in the next Tempo send`;
     sendToggle.dataset.dayKey = dayKeys[index];
     sendToggle.checked = selectedDayKeys.has(dayKeys[index]);
+    sendToggle.hidden = !tempoDaySelectionActive;
     sendToggle.title = toggleLabel;
     sendToggle.setAttribute("aria-label", toggleLabel);
     element.className = `day-heading${isSameLocalDate(date, today) ? " today" : ""}`;
@@ -203,10 +205,33 @@ function currentDaySelection() {
 function applyTempoSendState() {
   const selection = currentDaySelection();
   const button = $("#sendTempoButton");
-  button.disabled = selection.noneSelected;
-  button.title = selection.noneSelected
+  button.disabled = tempoDaySelectionActive && selection.noneSelected;
+  button.textContent = tempoDaySelectionActive
+    ? (selection.noneSelected
+      ? "Select days to send"
+      : `Send ${selection.selectedCount} day${selection.selectedCount === 1 ? "" : "s"} to Tempo`)
+    : "Send week to Tempo";
+  button.title = tempoDaySelectionActive && selection.noneSelected
     ? NO_DAYS_SELECTED_MESSAGE
     : `Send ${selection.scopeLabel} to Tempo`;
+}
+
+function setTempoSendMenuOpen(open) {
+  const menu = $("#tempoSendMenu");
+  const button = $("#tempoSendMenuButton");
+  menu.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+}
+
+function setTempoDaySelectionActive(active) {
+  tempoDaySelectionActive = Boolean(active);
+  selectedDayKeys = new Set(tempoDaySelectionActive ? [] : weekDayKeys(weekStart, DAY_COUNT));
+  document.querySelectorAll(".day-send-toggle").forEach((toggle) => {
+    toggle.checked = selectedDayKeys.has(toggle.dataset.dayKey);
+    toggle.hidden = !tempoDaySelectionActive;
+  });
+  setTempoSendMenuOpen(false);
+  applyTempoSendState();
 }
 
 function toggleSendDay(dayKey, included) {
@@ -946,6 +971,8 @@ async function changeWeek(nextStart) {
   setResizeUndo(null);
   weekStart = startOfWeek(nextStart);
   selectedDayKeys = new Set(weekDayKeys(weekStart, DAY_COUNT));
+  tempoDaySelectionActive = false;
+  setTempoSendMenuOpen(false);
   initialScrollDone = false;
   setStatus("Ready", "synced");
 }
@@ -1060,6 +1087,12 @@ async function sendDisplayedWeekToTempo() {
   }
   const result = response.result;
   setStatus(`Sent ${result.sentWorklogs} worklog${result.sentWorklogs === 1 ? "" : "s"} to Tempo`);
+  setTempoDaySelectionActive(false);
+}
+
+function sendWholeWeekToTempo(button) {
+  setTempoDaySelectionActive(false);
+  return runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button });
 }
 
 function bindEvents() {
@@ -1070,7 +1103,20 @@ function bindEvents() {
   $("#prevWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, -DAY_COUNT)), { button: event.currentTarget }));
   $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
-  $("#sendTempoButton").addEventListener("click", (event) => runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget }));
+  $("#sendTempoButton").addEventListener("click", (event) => {
+    setTempoSendMenuOpen(false);
+    runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget });
+  });
+  $("#tempoSendMenuButton").addEventListener("click", () => {
+    setTempoSendMenuOpen($("#tempoSendMenu").hidden);
+  });
+  $("#sendTempoWeekOption").addEventListener("click", (event) => {
+    sendWholeWeekToTempo(event.currentTarget);
+  });
+  $("#chooseTempoDaysOption").addEventListener("click", () => {
+    setTempoDaySelectionActive(true);
+    $(".day-send-toggle")?.focus();
+  });
   // Delegated so the toggles survive the header rebuild that follows a week change.
   $("#dayHeader").addEventListener("change", (event) => {
     const toggle = event.target;
@@ -1097,6 +1143,12 @@ function bindEvents() {
     if (parsed) runCalendarAction("change-week", () => changeWeek(parsed), { button: event.currentTarget });
   });
   document.addEventListener("pointerdown", handleOutsidePointerDown);
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest?.(".tempo-send-control")) setTempoSendMenuOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setTempoSendMenuOpen(false);
+  });
   window.addEventListener("resize", handleViewportResize);
 }
 

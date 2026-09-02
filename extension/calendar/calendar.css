@@ -150,6 +150,56 @@ h1 {
   gap: 8px;
 }
 
+.tempo-send-control {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.tempo-send-control #sendTempoButton {
+  border-radius: 6px 0 0 6px;
+}
+
+.tempo-send-menu-button {
+  width: 32px;
+  padding: 0;
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.tempo-send-menu-button svg {
+  width: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.tempo-send-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 210px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.tempo-send-menu[hidden] {
+  display: none;
+}
+
+.tempo-send-menu button {
+  border: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
 .icon-button {
   width: 36px;
   padding: 0;
@@ -275,6 +325,10 @@ textarea {
   background: revert;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+.day-send-toggle[hidden] {
+  display: none;
 }
 
 .corner-header span,
@@ -835,10 +889,14 @@ textarea:focus-visible,
   color: var(--accent);
 }
 
-#sendTempoButton {
+#sendTempoButton,
+.tempo-send-menu-button {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
   background: var(--accent-soft);
   color: var(--accent-strong);
+}
+
+#sendTempoButton {
   font-weight: 650;
 }
 
