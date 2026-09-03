@@ -12,6 +12,7 @@ import {
 const root = process.cwd();
 const extensionRoot = join(root, "extension");
 const EXPECTED_THEMES = ["cinder-glow", "moss-circuit", "blue-archive", "violet-orbit", "amethyst-stack", "sienna-paper", "harbor-terminal"];
+const semanticTokens = ["--page", "--surface", "--text", "--accent"];
 
 describe("selectable dark themes", () => {
   it("provides the requested named palettes", () => {
@@ -51,6 +52,14 @@ describe("selectable dark themes", () => {
     assert.match(css, /--surface-raised:/);
     assert.match(css, /outline:\s*3px solid var\(--accent-strong\)/);
   });
+
+  for (const relativePath of ["popup/popup.css", "calendar/calendar.css", "options/options.css"]) {
+    it(`provides the semantic theme contract for ${relativePath}`, () => {
+      const css = readFileSync(join(extensionRoot, relativePath), "utf8");
+      assert.match(css, /color-scheme:\s*light dark/);
+      for (const token of semanticTokens) assert.match(css, new RegExp(`${token}:`));
+    });
+  }
 
   for (const page of [
     "popup/popup.html",

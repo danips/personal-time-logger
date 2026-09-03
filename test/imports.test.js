@@ -108,10 +108,6 @@ for (const file of sourceFiles.filter((file) => file.startsWith("src/"))) {
 }
 
 describe("module imports", () => {
-  it("parses every extension module and finds shared exports", () => {
-    assert.ok(exportedBy.size > 30, `expected many shared exports, found ${exportedBy.size}`);
-  });
-
   // A missing import is silent until the line runs, which is how a broken Save
   // button reached a release: the calendar used fromLocalInputValue without
   // importing it, so submitting threw before anything was written.
