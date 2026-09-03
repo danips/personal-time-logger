@@ -89,20 +89,29 @@ export function toLocalInputValue(iso) {
 export function fromLocalInputValue(value) {
   const text = String(value || "");
   if (!text) return { kind: "empty" };
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(text)) {
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) {
     return { kind: "invalid", reason: "format" };
   }
-  const date = new Date(text);
+  const [, year, month, dateOfMonth, hours, minutes, seconds = "0"] = match;
+  const normalized = `${year}-${month.padStart(2, "0")}-${dateOfMonth.padStart(2, "0")}`
+    + `T${hours.padStart(2, "0")}:${minutes.padStart(2, "0")}:${seconds.padStart(2, "0")}`;
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return { kind: "invalid", reason: "format" };
-  const [day, time] = text.split("T");
-  const [year, month, dateOfMonth] = day.split("-").map(Number);
-  const [hours, minutes, seconds = 0] = time.split(":").map(Number);
-  if (date.getFullYear() !== year || date.getMonth() + 1 !== month || date.getDate() !== dateOfMonth
-    || date.getHours() !== hours || date.getMinutes() !== minutes || date.getSeconds() !== seconds) {
+  const numericYear = Number(year);
+  const numericMonth = Number(month);
+  const numericDateOfMonth = Number(dateOfMonth);
+  const numericHours = Number(hours);
+  const numericMinutes = Number(minutes);
+  const numericSeconds = Number(seconds);
+  if (date.getFullYear() !== numericYear || date.getMonth() + 1 !== numericMonth
+    || date.getDate() !== numericDateOfMonth || date.getHours() !== numericHours
+    || date.getMinutes() !== numericMinutes || date.getSeconds() !== numericSeconds) {
     return { kind: "invalid", reason: "nonexistent" };
   }
   const localText = (candidate) => toLocalInputValue(candidate.toISOString());
-  if (localText(new Date(date.getTime() - 3600_000)) === text || localText(new Date(date.getTime() + 3600_000)) === text) {
+  if (localText(new Date(date.getTime() - 3600_000)) === normalized
+    || localText(new Date(date.getTime() + 3600_000)) === normalized) {
     return { kind: "invalid", reason: "ambiguous" };
   }
   return { kind: "instant", iso: date.toISOString() };

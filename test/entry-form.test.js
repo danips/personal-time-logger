@@ -22,6 +22,15 @@ describe("entry form decoder", () => {
     assert.equal(payload.end_at, "");
   });
 
+  it("normalizes single-digit date and time components before saving", () => {
+    const payload = readEntryForm(fields({
+      start: { value: "2026-7-7T9:5:4" },
+      end: { value: "2026-7-7T10:6:5" }
+    }));
+    assert.equal(payload.start_at, new Date(2026, 6, 7, 9, 5, 4).toISOString());
+    assert.equal(payload.end_at, new Date(2026, 6, 7, 10, 6, 5).toISOString());
+  });
+
   it("rejects invalid required or nonblank optional times", () => {
     assert.throws(
       () => readEntryForm(fields({ start: { value: "" } })),

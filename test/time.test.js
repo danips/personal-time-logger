@@ -102,6 +102,15 @@ describe("local input values", () => {
     assert.deepEqual(fromLocalInputValue(inputValue), { kind: "instant", iso });
   });
 
+  it("accepts single-digit local date and time components", () => {
+    const iso = new Date(2026, 6, 7, 9, 5, 4).toISOString();
+    assert.deepEqual(fromLocalInputValue("2026-7-7T9:5:4"), { kind: "instant", iso });
+    assert.deepEqual(fromLocalInputValue("2026-7-7T9:5"), {
+      kind: "instant",
+      iso: new Date(2026, 6, 7, 9, 5).toISOString()
+    });
+  });
+
   it("tags empty and unparseable values separately", () => {
     assert.equal(toLocalInputValue(""), "");
     assert.equal(toLocalInputValue("nonsense"), "");
