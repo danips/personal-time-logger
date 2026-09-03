@@ -131,7 +131,7 @@ h1 {
   font-size: 14px;
 }
 
-.undo-resize-button {
+.undo-calendar-button {
   min-height: 26px;
   padding: 0 8px;
   border-color: var(--accent);
@@ -140,7 +140,7 @@ h1 {
   font-weight: 700;
 }
 
-.undo-resize-button[hidden] {
+.undo-calendar-button[hidden] {
   display: none;
 }
 
@@ -973,7 +973,7 @@ textarea {
   box-shadow: var(--shadow-md);
 }
 
-.undo-resize-button {
+.undo-calendar-button {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: var(--accent-soft);
 }

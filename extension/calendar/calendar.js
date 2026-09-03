@@ -92,7 +92,9 @@ let editingEntryRevision = null;
 let editingMultiplyValue = "";
 let unsubscribeEntryEvents = null;
 let eventsBound = false;
-let lastResizeUndo = null;
+// The latest completed calendar time change stays undoable until it is used or
+// another calendar edit replaces it. There is deliberately no expiry timer.
+let lastCalendarUndo = null;
 let renderGeneration = 0;
 let clampEditorToViewport = () => {};
 
@@ -122,9 +124,11 @@ function runCalendarAction(key, action, { button = null, expectedRevision, after
   });
 }
 
-function setResizeUndo(action) {
-  lastResizeUndo = action;
-  $("#undoResizeButton").hidden = !action;
+function setCalendarUndo(action) {
+  lastCalendarUndo = action;
+  const button = $("#undoCalendarButton");
+  button.hidden = !action;
+  button.textContent = action ? `Undo ${action.kind}` : "Undo";
 }
 
 function shortDay(date) {
@@ -763,6 +767,7 @@ async function endResize() {
   const changes = resizeEntryChanges(state.edge, state.target.date);
   const undo = {
     id: state.entry.id,
+    kind: "resize",
     start_at: state.entry.start_at,
     end_at: state.entry.end_at,
     revision: null
@@ -770,7 +775,7 @@ async function endResize() {
 
   const updated = await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
   undo.revision = updated.revision;
-  setResizeUndo(undo);
+  setCalendarUndo(undo);
   setStatus("Entry resized");
   queueSync();
 }
@@ -808,26 +813,34 @@ async function endDrag() {
   const newStart = addMinutes(addDays(weekStart, state.target.dayIndex), state.target.minute);
   const changes = moveEntryChanges(state.entry, { start_at: newStart.toISOString() }, state.durationMs);
 
-  setResizeUndo(null);
-  await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
+  const undo = {
+    id: state.entry.id,
+    kind: "move",
+    start_at: state.entry.start_at,
+    end_at: state.entry.end_at,
+    revision: null
+  };
+  const updated = await updateEntry(state.entry.id, changes, { expectedRevision: state.entry.revision });
+  undo.revision = updated.revision;
+  setCalendarUndo(undo);
   setStatus("Entry moved");
   queueSync();
 }
 
-async function undoResize() {
-  if (!lastResizeUndo) return;
-  const undo = lastResizeUndo;
-  setResizeUndo(null);
+async function undoCalendarChange() {
+  if (!lastCalendarUndo) return;
+  const undo = lastCalendarUndo;
+  setCalendarUndo(null);
 
   try {
     await updateEntry(undo.id, {
       start_at: undo.start_at,
       end_at: undo.end_at
     }, { expectedRevision: undo.revision });
-    setStatus("Resize undone");
+    setStatus(`${undo.kind[0].toUpperCase()}${undo.kind.slice(1)} undone`);
     queueSync();
   } catch (error) {
-    setResizeUndo(undo);
+    setCalendarUndo(undo);
     throw error;
   }
 }
@@ -852,7 +865,7 @@ async function mergeSelectedEntry() {
   const sourceId = $("#calendarMergeTarget").value;
   if (!selectedEntryId || !sourceId) return;
 
-  setResizeUndo(null);
+  setCalendarUndo(null);
   const target = getEntryById(selectedEntryId);
   const source = getEntryById(sourceId);
   if (!target || !source) throw new Error("Entry changed in another window; refreshed");
@@ -870,7 +883,7 @@ async function mergeSelectedEntry() {
 async function duplicateSelectedEntry() {
   if (!selectedEntryId) return;
 
-  setResizeUndo(null);
+  setCalendarUndo(null);
   const entry = getEntryById(selectedEntryId);
   if (!entry) throw new Error("Entry changed in another window; refreshed");
   const duplicate = await duplicateEntry(selectedEntryId, { expectedRevision: entry.revision });
@@ -920,7 +933,7 @@ function openSelectedEntryEditor() {
 async function deleteCalendarEntry() {
   if (!editingEntryId) return;
   if (!confirm("Delete this time log entry?")) return;
-  setResizeUndo(null);
+  setCalendarUndo(null);
   await softDeleteEntry(editingEntryId, { expectedRevision: editingEntryRevision });
   closeEditor();
   selectedEntryId = "";
@@ -932,7 +945,7 @@ async function saveCalendarEdit(event) {
   event.preventDefault();
   if (!editingEntryId) return;
 
-  setResizeUndo(null);
+  setCalendarUndo(null);
   await updateEntry(
     editingEntryId,
     readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
@@ -968,7 +981,7 @@ function handleOutsidePointerDown(event) {
 
 async function changeWeek(nextStart) {
   closeEditor();
-  setResizeUndo(null);
+  setCalendarUndo(null);
   weekStart = startOfWeek(nextStart);
   selectedDayKeys = new Set(weekDayKeys(weekStart, DAY_COUNT));
   tempoDaySelectionActive = false;
@@ -1123,9 +1136,9 @@ function bindEvents() {
     if (!toggle?.classList?.contains("day-send-toggle")) return;
     toggleSendDay(toggle.dataset.dayKey, toggle.checked);
   });
-  $("#undoResizeButton").addEventListener("click", (event) => runCalendarAction(`undo-resize:${lastResizeUndo?.id || ""}`, undoResize, {
+  $("#undoCalendarButton").addEventListener("click", (event) => runCalendarAction(`undo-calendar:${lastCalendarUndo?.id || ""}`, undoCalendarChange, {
     button: event.currentTarget,
-    expectedRevision: lastResizeUndo?.revision,
+    expectedRevision: lastCalendarUndo?.revision,
     afterRender: refreshSelectedEntryEditor
   }));
   $("#duplicateEntryButton").addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));
