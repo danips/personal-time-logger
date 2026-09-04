@@ -97,12 +97,6 @@ h1 {
   color: var(--muted);
 }
 
-.calendar-status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .calendar-heading-row {
   display: flex;
   align-items: center;

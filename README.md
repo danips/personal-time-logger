@@ -241,7 +241,7 @@ The normal **Send week to Tempo** action sends the whole displayed week without 
 
 Drag a time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`. Completed entries keep their original duration when moved. Active timers keep running and only their `start_at` value changes.
 
-Select a completed time log, then drag its top or bottom edge to change its start or end time. Resize handles are only available on the selected log. Resizing snaps to one-minute intervals and keeps a minimum duration of one minute. Use **Undo resize** beside the calendar status immediately afterward to restore the previous times.
+Select a completed time log, then drag its top or bottom edge to change its start or end time. Resize handles are only available on the selected log. Resizing snaps to one-minute intervals and keeps a minimum duration of one minute. Use **Undo resize** in the calendar toolbar immediately afterward to restore the previous times.
 
 Click a time log in the calendar to select it and open its edit panel. Click the selected time log again to clear the selection. If another completed log in the week has the exact same project, task, and description, the merge panel lets you combine them into one entry with the total duration of both logs. The same merge action is available from the popup edit panel for recent entries.
 
