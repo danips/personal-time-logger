@@ -58,7 +58,7 @@ section { margin-top: 22px; }
 .summary-card-detail { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .panel { padding: 18px; border-radius: 12px; }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
+table { width: 100%; min-width: 720px; border-collapse: collapse; }
 th, td { padding: 10px 9px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; }
 th { color: var(--muted); font-size: 11px; letter-spacing: 0.03em; text-transform: uppercase; }
 th:first-child, td:first-child { width: 45%; text-align: left; }

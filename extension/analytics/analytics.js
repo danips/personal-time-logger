@@ -174,6 +174,7 @@ function renderDescriptions() {
       element("td", "", row.description),
       element("td", "", String(row.sessionCount)),
       element("td", "", duration(row.currentSeconds)),
+      element("td", "", duration(row.averageSeconds)),
       shareCell(row.share),
       element("td", "", duration(row.previousSeconds)),
       element("td", "", delta(row.delta))

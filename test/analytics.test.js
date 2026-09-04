@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
@@ -76,6 +77,20 @@ describe("clipped analytics sessions and totals", () => {
       longestActualSessionSeconds: 0
     });
   });
+
+  it("allocates one multiplied entry independently across comparison and primary periods", () => {
+    const spanning = entry("spanning", "2026-08-31T23:00:00Z", "2026-09-01T01:00:00Z", {
+      duration_seconds: 14_400
+    });
+    const report = buildAnalyticsReport([spanning], { primary, comparison, now });
+
+    assert.equal(report.primary.sessionCount, 1);
+    assert.equal(report.comparison.sessionCount, 1);
+    assert.equal(report.primary.totalEffectiveSeconds, 7200);
+    assert.equal(report.comparison.totalEffectiveSeconds, 7200);
+    assert.equal(sessionsForPeriod([spanning], primary, { now })[0].actualSeconds, 3600);
+    assert.equal(sessionsForPeriod([spanning], comparison, { now })[0].actualSeconds, 3600);
+  });
 });
 
 describe("comparison and hierarchy", () => {
@@ -97,6 +112,23 @@ describe("comparison and hierarchy", () => {
     assert.equal(projects[2].tasks[0].label, "No task");
     assert.equal(projects[0].delta.kind, "new");
   });
+
+  it("retains comparison-only project and task rows with deterministic sorting", () => {
+    const report = buildAnalyticsReport([
+      entry("old-beta", "2026-08-26T09:00:00Z", "2026-08-26T10:00:00Z", { project: "Old Beta", task: "Previous task" }),
+      entry("old-alpha", "2026-08-27T09:00:00Z", "2026-08-27T10:00:00Z", { project: "Old Alpha", task: "Previous task" })
+    ], { primary, comparison, now });
+
+    assert.deepEqual(report.projects.map(({ label }) => label), ["Old Alpha", "Old Beta"]);
+    const project = report.projects[0];
+    assert.equal(project.currentSeconds, 0);
+    assert.equal(project.previousSeconds, 3600);
+    assert.equal(project.share, 0);
+    assert.deepEqual(project.delta, { kind: "percent", percent: -100 });
+    assert.equal(project.tasks[0].currentSeconds, 0);
+    assert.equal(project.tasks[0].previousSeconds, 3600);
+    assert.deepEqual(project.tasks[0].delta, { kind: "percent", percent: -100 });
+  });
 });
 
 describe("description frequency", () => {
@@ -113,7 +145,28 @@ describe("description frequency", () => {
     assert.equal(rows[0].description, "CODE REVIEW");
     assert.equal(rows[0].sessionCount, 3);
     assert.equal(rows[0].currentSeconds, 14_400);
+    assert.equal(rows[0].averageSeconds, 4800);
     assert.equal(rows[1].description, "Code review!");
+  });
+
+  it("uses the strictly most frequent exact trimmed spelling as representative", () => {
+    const sessions = sessionsForPeriod([
+      entry("a", "2026-09-02T09:00:00Z", "2026-09-02T10:00:00Z", { description: "Code Review" }),
+      entry("b", "2026-09-02T10:00:00Z", "2026-09-02T11:00:00Z", { description: "  Code Review  " }),
+      entry("c", "2026-09-02T11:00:00Z", "2026-09-02T12:00:00Z", { description: "code review" }),
+      entry("d", "2026-09-02T12:00:00Z", "2026-09-02T13:00:00Z", { description: " CODE   REVIEW " })
+    ], primary, { now });
+
+    const [row] = aggregateDescriptions(sessions, [], 14_400);
+    assert.equal(row.description, "Code Review");
+    assert.equal(row.sessionCount, 4);
+  });
+
+  it("keeps the calculated average represented in the description table", () => {
+    const html = readFileSync(new URL("../extension/analytics/analytics.html", import.meta.url), "utf8");
+    const javascript = readFileSync(new URL("../extension/analytics/analytics.js", import.meta.url), "utf8");
+    assert.match(html, /<th scope="col">Average<\/th>/);
+    assert.match(javascript, /duration\(row\.averageSeconds\)/);
   });
 });
 
@@ -143,6 +196,28 @@ describe("fragmentation", () => {
     assert.equal(metrics.switchEligibleTransitions, 1);
     assert.equal(metrics.buckets["30to60"], 1);
     assert.equal(metrics.buckets["1to2"], 1);
+  });
+
+  it("counts an eligible same-project and same-task transition without a switch", () => {
+    const sessions = sessionsForPeriod([
+      entry("a", "2026-09-02T09:00:00Z", "2026-09-02T10:00:00Z"),
+      entry("b", "2026-09-02T10:20:00Z", "2026-09-02T11:00:00Z")
+    ], primary, { now });
+    const metrics = fragmentationMetrics(sessions);
+    assert.equal(metrics.switchEligibleTransitions, 1);
+    assert.equal(metrics.projectSwitches, 0);
+    assert.equal(metrics.taskSwitches, 0);
+  });
+
+  it("does not count a project or task change after a long overnight gap", () => {
+    const sessions = sessionsForPeriod([
+      entry("a", "2026-09-02T17:00:00Z", "2026-09-02T18:00:00Z"),
+      entry("b", "2026-09-03T09:00:00Z", "2026-09-03T10:00:00Z", { project: "Beta", task: "Test" })
+    ], primary, { now });
+    const metrics = fragmentationMetrics(sessions);
+    assert.equal(metrics.switchEligibleTransitions, 0);
+    assert.equal(metrics.projectSwitches, 0);
+    assert.equal(metrics.taskSwitches, 0);
   });
 });
 
@@ -174,6 +249,22 @@ describe("deterministic anomalies", () => {
     ], primary, { now });
     const overlaps = detectAnomalies(sessions, { now }).filter(({ type }) => type === "overlap");
     assert.deepEqual(overlaps.map(({ entryId, relatedEntryId }) => [entryId, relatedEntryId]), [["b", "c"], ["a", "b"]]);
+  });
+
+  it("handles multiple stale active entries and reports their overlap once", () => {
+    const activeNow = new Date("2026-09-07T18:00:00Z");
+    const running = [
+      entry("active-a", "2026-09-07T08:00:00Z", ""),
+      entry("active-b", "2026-09-07T09:00:00Z", "")
+    ];
+    const report = buildAnalyticsReport(running, { primary, comparison, now: activeNow });
+    const stale = report.anomalies.filter(({ type }) => type === "stale_active");
+    const overlaps = report.anomalies.filter(({ type }) => type === "overlap");
+
+    assert.equal(report.primary.sessionCount, 2);
+    assert.deepEqual(stale.map(({ entryId }) => entryId), ["active-b", "active-a"]);
+    assert.deepEqual(overlaps.map(({ entryId, relatedEntryId }) => [entryId, relatedEntryId]), [["active-a", "active-b"]]);
+    assert.deepEqual(report.anomalies.map(({ type }) => type), ["stale_active", "stale_active", "overlap"]);
   });
 });
 

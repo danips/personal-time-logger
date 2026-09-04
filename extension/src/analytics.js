@@ -145,9 +145,9 @@ export function aggregateProjects(currentSessions, previousSessions, totalEffect
 function descriptionMap(sessions) {
   const descriptions = new Map();
   for (const session of sessions) {
-    const display = text(session.entry.description).replace(/\s+/g, " ");
-    if (!display) continue;
-    const key = display.toLowerCase();
+    const spelling = text(session.entry.description);
+    if (!spelling) continue;
+    const key = spelling.replace(/\s+/g, " ").toLowerCase();
     let row = descriptions.get(key);
     if (!row) {
       row = { seconds: 0, sessions: 0, spellings: new Map() };
@@ -155,7 +155,7 @@ function descriptionMap(sessions) {
     }
     row.seconds += session.effectiveSeconds;
     row.sessions += 1;
-    row.spellings.set(display, (row.spellings.get(display) || 0) + 1);
+    row.spellings.set(spelling, (row.spellings.get(spelling) || 0) + 1);
   }
   return descriptions;
 }
