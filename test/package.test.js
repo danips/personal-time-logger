@@ -11,6 +11,9 @@ const execFileAsync = promisify(execFile);
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const artifactsDirectory = join(root, "web-ext-artifacts");
 const expectedFiles = [
+  "analytics/analytics.css",
+  "analytics/analytics.html",
+  "analytics/analytics.js",
   "background/background.js",
   "calendar/calendar.css",
   "calendar/calendar.html",
@@ -28,6 +31,8 @@ const expectedFiles = [
   "reconcile/reconcile.html",
   "reconcile/reconcile.js",
   "src/action-runner.js",
+  "src/analytics-period.js",
+  "src/analytics.js",
   "src/auth-session-store.js",
   "src/auth.js",
   "src/background-schedule.js",

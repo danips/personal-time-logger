@@ -38,7 +38,7 @@ manifest.browser_specific_settings.gecko.update_url = `${baseUrl}/updates.json`;
 await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
-const extensionDirectories = ["background", "calendar", "icons", "options", "popup", "reconcile", "src", "usage"];
+const extensionDirectories = ["analytics", "background", "calendar", "icons", "options", "popup", "reconcile", "src", "usage"];
 const extensionPaths = ["manifest.json", ...extensionDirectories].map((entry) => path.join("extension", entry));
 const { stdout } = await execFileAsync("git", ["ls-files", "--", ...extensionPaths], { cwd: projectRoot });
 const trackedFiles = stdout.split("\n").filter(Boolean);

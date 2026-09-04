@@ -197,6 +197,46 @@ async function exercisePopupTimer(baseUrl, sessionId) {
   await waitForCondition(baseUrl, sessionId, "Popup entry save", "return document.querySelector('#editPanel')?.classList.contains('hidden');");
 }
 
+async function exerciseAnalytics(baseUrl, sessionId, origin) {
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/analytics/analytics.html` });
+  await waitForPage(baseUrl, sessionId, ["#periodPreset", "#summaryCards", "#projectRows", "#descriptionRows"]);
+  await waitForCondition(baseUrl, sessionId, "Analytics smoke entry render", `
+    return document.querySelector("#summaryCards")?.textContent.includes("Total effective time")
+      && document.querySelector("#projectRows")?.textContent.includes("Browser smoke")
+      && document.querySelector("#descriptionRows")?.textContent.includes("Edited by Firefox smoke");
+  `, `
+    return {
+      status: document.querySelector("#statusLine")?.textContent,
+      projects: document.querySelector("#projectRows")?.textContent,
+      descriptions: document.querySelector("#descriptionRows")?.textContent
+    };
+  `);
+
+  const themeAndRerender = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `
+      const before = document.querySelector("#primaryRange")?.textContent;
+      const preset = document.querySelector("#periodPreset");
+      preset.value = "last_30_days";
+      preset.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        before,
+        theme: document.documentElement.dataset.theme,
+        contrast: document.documentElement.dataset.contrast
+      };
+    `,
+    args: []
+  });
+  if (themeAndRerender.theme !== "blue-archive" || themeAndRerender.contrast !== "high") {
+    throw new Error(`Analytics did not apply the selected theme: ${JSON.stringify(themeAndRerender)}`);
+  }
+  await waitForCondition(baseUrl, sessionId, "Analytics period rerender", `
+    return document.documentElement.dataset.pageRuntime === "ready"
+      && document.querySelector("#statusLine")?.dataset.status === "ready"
+      && document.querySelector("#primaryRange")?.textContent !== ${JSON.stringify(themeAndRerender.before)}
+      && document.querySelector("#pageFatalPanel")?.hidden !== false;
+  `);
+}
+
 async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
   const optionsReady = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
     script: `
@@ -668,6 +708,7 @@ try {
   const pages = [
     ["popup/popup.html", ["#recentEntries", "#syncStatus"]],
     ["calendar/calendar.html", ["#calendarGrid", "#statusLine"]],
+    ["analytics/analytics.html", ["#periodPreset", "#summaryCards"]],
     ["reconcile/reconcile.html", ["#summary", "#syncButton"]],
     ["options/options.html", ["#diagnosticsSummary", "#saveSettings"]],
     ["usage/usage.html", ["#usageSnapshot", "#refreshUsage", "#pageStatus"]]
@@ -682,6 +723,7 @@ try {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await exercisePopupTimer(baseUrl, sessionId);
+  await exerciseAnalytics(baseUrl, sessionId, origin);
   await exerciseCalendarAndOptions(baseUrl, sessionId, origin);
   await exerciseProviderAwareSettings(baseUrl, sessionId, origin);
   await exercisePopupHistoryPagination(baseUrl, sessionId, origin);
@@ -699,7 +741,7 @@ try {
   await webdriver(baseUrl, "DELETE", `/session/${sessionId}/window`);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/window`, { handle: windows.original });
 
-  console.log("Browser runtime smoke passed: page readiness, popup timer lifecycle/edit, calendar render, provider-aware settings, options save, and cross-context lock.");
+  console.log("Browser runtime smoke passed: page readiness, popup timer lifecycle/edit, analytics, calendar render, provider-aware settings, options save, and cross-context lock.");
 } finally {
   if (sessionId) await webdriver(baseUrl, "DELETE", `/session/${sessionId}`).catch(() => {});
   if (driver && !driver.killed) driver.kill("SIGTERM");
