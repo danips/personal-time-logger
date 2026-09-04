@@ -8,7 +8,7 @@
     "npm": ">=8.0.0"
   },
   "scripts": {
-    "test": "node --experimental-global-webcrypto --test test",
+    "test": "node --experimental-global-webcrypto --test test/*.test.js",
     "test:cloudflare": "NODE_OPTIONS=--experimental-global-webcrypto node --test server/cloudflare-d1/test/unit.test.js server/cloudflare-d1/test/scaffold.test.js && node server/cloudflare-d1/test/integration.test.mjs",
     "test:browser": "node scripts/browser-runtime-smoke.mjs",
     "lint:js": "eslint .",
