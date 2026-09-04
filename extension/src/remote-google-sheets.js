@@ -166,10 +166,6 @@ export const googleSheetsProvider = Object.freeze({
   }
 });
 
-export function googleEntryRef(rowIndex, fingerprint = "") {
-  return entryRef(rowIndex, fingerprint);
-}
-
 function snapshotEntryFingerprint(entry) {
   return [
     entry.id,

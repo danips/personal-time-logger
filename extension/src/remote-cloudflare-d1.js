@@ -139,8 +139,4 @@ export const cloudflareD1Provider = Object.freeze({
   }
 });
 
-export async function testCloudflareD1Connection(options = {}) {
-  return cloudflareD1Provider.testConnection(options);
-}
-
 export { CHUNK_SIZE };

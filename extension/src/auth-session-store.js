@@ -1,4 +1,4 @@
-import { getSetting, mutateSettings } from "./db.js";
+import { mutateSettings } from "./db.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 export const TOKEN_KEY = SETTING_KEY.GOOGLE_TOKEN_DATA;
@@ -52,8 +52,4 @@ export async function clearAuthSession({ expectedGeneration, expectedRefreshToke
 
 export async function invalidateAuthSession() {
   return clearAuthSession();
-}
-
-export async function getAuthTokenData() {
-  return getSetting(TOKEN_KEY);
 }

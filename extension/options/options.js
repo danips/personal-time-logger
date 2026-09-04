@@ -17,7 +17,7 @@ import { DEFAULT_MYSQL_API_BASE_URL, mysqlHostPermission, mysqlProvider, normali
 import { DEFAULT_CLOUDFLARE_D1_API_BASE_URL, cloudflareD1HostPermission, cloudflareD1Provider, normalizeCloudflareD1ApiBaseUrl } from "../src/remote-cloudflare-d1.js";
 import { platform } from "../src/platform.js";
 import { REMOTE_PROVIDER_ID, decodeRemoteProviderId, getRemoteProvider } from "../src/remote-provider.js";
-import { activateMysqlFromLocal, activateMysqlFromRemote, activateProviderFromLocal, activateProviderFromRemote, getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
+import { activateProviderFromLocal, activateProviderFromRemote, getStorageMigrationState, migrateStorage } from "../src/storage-migration.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { $, formatError } from "../src/ui-helpers.js";
@@ -673,7 +673,7 @@ async function activateMysqlFromLocalClicked() {
   if (globalThis.confirm && !globalThis.confirm("This will not read Google Sheets. It will use only this Firefox profile's local data and initialize MySQL. Existing MySQL records that do not match local data will block the switch. Continue?")) return false;
   $("#migrationStatus").textContent = "Starting MySQL from local data...";
   try {
-    await activateMysqlFromLocal({
+    await activateProviderFromLocal(REMOTE_PROVIDER_ID.MYSQL, {
       onProgress(state) {
         $("#migrationStatus").textContent = `MySQL setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
       }
@@ -697,7 +697,7 @@ async function activateMysqlFromRemoteClicked() {
   if (globalThis.confirm && !globalThis.confirm("This will not read Google Sheets. It will make the existing MySQL data the active data for this Firefox profile and import it locally. Any conflicting local entries will block the switch. Continue?")) return false;
   $("#migrationStatus").textContent = "Adopting existing MySQL data...";
   try {
-    await activateMysqlFromRemote({
+    await activateProviderFromRemote(REMOTE_PROVIDER_ID.MYSQL, {
       onProgress(state) {
         $("#migrationStatus").textContent = `MySQL adoption ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
       }
@@ -779,8 +779,8 @@ async function setupMysqlClicked(source) {
   $("#migrationStatus").textContent = source === "remote"
     ? "Adopting existing MySQL data..."
     : "Starting MySQL from local data...";
-  const activate = source === "remote" ? activateMysqlFromRemote : activateMysqlFromLocal;
-  await activate({
+  const activate = source === "remote" ? activateProviderFromRemote : activateProviderFromLocal;
+  await activate(REMOTE_PROVIDER_ID.MYSQL, {
     onProgress(state) {
       $("#migrationStatus").textContent = `MySQL setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
     }

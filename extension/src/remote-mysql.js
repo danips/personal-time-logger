@@ -1,8 +1,6 @@
 import { getSetting } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import {
-  API_VERSION,
-  SCHEMA_VERSION,
   createRemoteApiClient,
   normalizeRemoteApiBaseUrl,
   parseRemoteSnapshot,
@@ -121,9 +119,3 @@ export const mysqlProvider = Object.freeze({
     return false;
   }
 });
-
-export async function testMysqlConnection(options = {}) {
-  return mysqlProvider.testConnection(options);
-}
-
-export { API_VERSION, SCHEMA_VERSION };

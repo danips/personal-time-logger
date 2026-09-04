@@ -57,10 +57,6 @@ function entryValues(value) {
     ? null : value[column]);
 }
 
-function realGuard(db, sql, ...values) {
-  return statement(db, sql, ...values);
-}
-
 function appendInsert(db, value) {
   return statement(db, `INSERT OR IGNORE INTO time_entries (${ENTRY_COLUMNS.join(", ")}) VALUES (${ENTRY_COLUMNS.map(() => "?").join(", ")})`, ...entryValues(value));
 }
@@ -112,7 +108,7 @@ export async function append(db, body) {
 
   const sorted = ordered(values);
   const statements = sorted.map((value) => appendInsert(db, value));
-  statements.push(...sorted.map((value) => realGuard(db,
+  statements.push(...sorted.map((value) => statement(db,
     `INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE id = ? AND project IS ? AND task IS ? AND description IS ? AND start_at IS ? AND end_at IS ? AND duration_seconds IS ? AND status IS ? AND created_at IS ? AND updated_at IS ? AND deleted_at IS ? AND device_id IS ? AND revision IS ? AND multiply IS ?)`,
     ...entryValues(value))));
   statements.push(statement(db, "UPDATE app_meta SET change_seq = change_seq + 1 WHERE id = 1"));
@@ -144,7 +140,7 @@ export async function update(db, body) {
   const statements = [];
   for (const updateValue of sorted) {
     const value = updateValue.entry;
-    statements.push(realGuard(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE id = ? AND remote_version = ?)", value.id, updateValue.expectedVersion));
+    statements.push(statement(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE id = ? AND remote_version = ?)", value.id, updateValue.expectedVersion));
     statements.push(statement(db, `UPDATE time_entries SET ${ENTRY_COLUMNS.filter((column) => column !== "id").map((column) => `${column} = ?`).join(", ")}, remote_version = remote_version + 1 WHERE id = ? AND remote_version = ?`, ...entryValues(value).slice(1), value.id, updateValue.expectedVersion));
   }
   if (updates.length) statements.push(statement(db, "UPDATE app_meta SET change_seq = change_seq + 1 WHERE id = 1"));
@@ -172,7 +168,7 @@ export async function remove(db, body) {
   if (!values.length) return { deleted: [] };
   const statements = [];
   for (const value of ordered(values)) {
-    statements.push(realGuard(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE id = ? AND remote_version = ?)", value.id, value.expectedVersion));
+    statements.push(statement(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE id = ? AND remote_version = ?)", value.id, value.expectedVersion));
     statements.push(statement(db, "DELETE FROM time_entries WHERE id = ? AND remote_version = ?", value.id, value.expectedVersion));
   }
   if (values.length) statements.push(statement(db, "UPDATE app_meta SET change_seq = change_seq + 1 WHERE id = 1"));
@@ -195,7 +191,7 @@ export async function updateConfig(db, body) {
   if (!existing) {
     if (expectedVersion !== null) throw new ApiError(409, ERROR.CONFIG_CONFLICT, "The remote config key does not exist.");
     const statements = [
-      realGuard(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE EXISTS (SELECT 1 FROM config WHERE `key` = ?)", key),
+      statement(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE EXISTS (SELECT 1 FROM config WHERE `key` = ?)", key),
       statement(db, "INSERT INTO config (`key`, `value`, updated_at, remote_version) VALUES (?, ?, ?, 1)", key, value, updatedAt),
       statement(db, "UPDATE app_meta SET change_seq = change_seq + 1 WHERE id = 1")
     ];
@@ -210,7 +206,7 @@ export async function updateConfig(db, body) {
   if (String(existing.value) === value && normalizeTimestamp(String(existing.updated_at), "updated_at") === updatedAt) return { key, version: expectedVersion };
   try {
     await db.batch([
-      realGuard(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM config WHERE `key` = ? AND remote_version = ?)", key, expectedVersion),
+      statement(db, "INSERT INTO mutation_guard(value) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM config WHERE `key` = ? AND remote_version = ?)", key, expectedVersion),
       statement(db, "UPDATE config SET `value` = ?, updated_at = ?, remote_version = remote_version + 1 WHERE `key` = ? AND remote_version = ?", value, updatedAt, key, expectedVersion),
       statement(db, "UPDATE app_meta SET change_seq = change_seq + 1 WHERE id = 1")
     ]);

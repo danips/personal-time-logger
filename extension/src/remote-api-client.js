@@ -1,4 +1,3 @@
-import { getSetting } from "./db.js";
 import { decodePersistedEntry } from "./entries.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { platform } from "./platform.js";
@@ -233,18 +232,4 @@ export function requireRemoteHealth(data, {
     throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The ${labelText(providerLabel)} version is not compatible with this extension.`);
   }
   return data;
-}
-
-export function createConfiguredRemoteClient(options, {
-  baseUrlKey,
-  tokenKey,
-  defaultBaseUrl = "",
-  ...clientOptions
-} = {}) {
-  return getSetting(baseUrlKey, defaultBaseUrl).then(async (baseUrl) => createRemoteApiClient({
-    ...clientOptions,
-    ...options,
-    baseUrl,
-    token: options?.token ?? await getSetting(tokenKey, "")
-  }));
 }

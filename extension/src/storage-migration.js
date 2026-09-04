@@ -9,7 +9,7 @@ import {
   setSetting
 } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
-import { getActiveRemoteProvider, getRemoteProvider, registeredRemoteProviderIds, REMOTE_PROVIDER_ID } from "./remote-provider.js";
+import { getActiveRemoteProvider, getRemoteProvider, registeredRemoteProviderIds } from "./remote-provider.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { syncNow } from "./sync.js";
 
@@ -453,14 +453,6 @@ export async function activateProviderFromRemote(targetProviderId, { onProgress 
   }
 }
 
-export async function activateMysqlFromLocal(options = {}) {
-  return activateProviderFromLocal(REMOTE_PROVIDER_ID.MYSQL, options);
-}
-
-export async function activateMysqlFromRemote(options = {}) {
-  return activateProviderFromRemote(REMOTE_PROVIDER_ID.MYSQL, options);
-}
-
 export async function getStorageMigrationState() {
   return readState();
 }
@@ -558,8 +550,4 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
   const error = migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "The source kept changing during migration.");
   await failMigration(state, error);
   throw error;
-}
-
-export async function clearStorageMigrationState() {
-  await setSetting(SETTING_KEY.STORAGE_MIGRATION_STATE, null);
 }
