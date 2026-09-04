@@ -64,6 +64,7 @@ describe("selectable dark themes", () => {
   for (const page of [
     "popup/popup.html",
     "calendar/calendar.html",
+    "analytics/analytics.html",
     "options/options.html",
     "usage/usage.html",
     "reconcile/reconcile.html"

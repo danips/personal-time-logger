@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionRoot = join(root, "extension");
-const MODULE_DIRECTORIES = ["src", "popup", "calendar", "options", "reconcile", "background", "usage", "content"];
+const MODULE_DIRECTORIES = ["src", "popup", "calendar", "analytics", "options", "reconcile", "background", "usage", "content"];
 
 function jsFiles(directory) {
   if (!existsSync(join(extensionRoot, directory))) return [];

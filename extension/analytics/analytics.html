@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" data-theme="moss-circuit" data-contrast="standard">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Time Logger Analytics</title>
+    <link rel="stylesheet" href="analytics.css">
+    <link rel="stylesheet" href="../src/themes.css">
+    <script type="module" src="../src/themes.js"></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand-row">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg>
+          </span>
+          <div>
+            <p class="eyebrow">Time Logger</p>
+            <div class="heading-row">
+              <h1>Analytics</h1>
+              <p id="statusLine" class="status" data-status="pending" aria-live="polite">Loading…</p>
+            </div>
+          </div>
+        </div>
+        <div class="period-controls">
+          <label>
+            Period
+            <select id="periodPreset">
+              <option value="this_week">This week</option>
+              <option value="last_week">Last week</option>
+              <option value="this_month">This month</option>
+              <option value="last_month">Last month</option>
+              <option value="last_30_days">Last 30 days</option>
+              <option value="this_year">This year</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <div id="customPeriod" class="custom-period" hidden>
+            <label>Start <input id="customStart" type="date"></label>
+            <label>End <input id="customEnd" type="date"></label>
+            <button id="applyCustom" type="button">Apply</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="range-strip" aria-label="Report ranges">
+        <p><span>Current</span> <strong id="primaryRange"></strong></p>
+        <p><span>Compared with</span> <strong id="comparisonRange"></strong></p>
+      </section>
+      <p id="periodError" class="period-error" role="alert" hidden></p>
+
+      <section aria-labelledby="summaryHeading">
+        <div class="section-heading"><div><p class="eyebrow">Overview</p><h2 id="summaryHeading">Summary</h2></div></div>
+        <div id="summaryCards" class="summary-grid"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="projectsHeading">
+        <div class="section-heading">
+          <div><p class="eyebrow">Effective time</p><h2 id="projectsHeading">Projects and tasks</h2></div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th scope="col">Project / Task</th><th scope="col">Current</th><th scope="col">Share</th><th scope="col">Previous</th><th scope="col">Change</th></tr></thead>
+            <tbody id="projectRows"></tbody>
+          </table>
+        </div>
+        <p id="projectsEmpty" class="empty-state" hidden>No project or task time in either period.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="fragmentationHeading">
+        <div class="section-heading"><div><p class="eyebrow">Actual elapsed time</p><h2 id="fragmentationHeading">Sessions and context switching</h2></div></div>
+        <div id="fragmentationMetrics" class="compact-metrics"></div>
+        <div id="sessionBuckets" class="bucket-list" aria-label="Session length distribution"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="anomaliesHeading">
+        <div class="section-heading">
+          <div><p class="eyebrow">Data quality</p><h2 id="anomaliesHeading">Anomalies</h2></div>
+          <span id="anomalyCount" class="count-badge">0</span>
+        </div>
+        <div id="anomalyRows" class="anomaly-list"></div>
+        <p id="anomaliesEmpty" class="empty-state" hidden>No anomalies detected for this period.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="descriptionsHeading">
+        <div class="section-heading">
+          <div><p class="eyebrow">Effective time</p><h2 id="descriptionsHeading">Frequent descriptions</h2></div>
+          <button id="toggleDescriptions" class="subtle-button" type="button" hidden>Show all</button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th scope="col">Description</th><th scope="col">Sessions</th><th scope="col">Time</th><th scope="col">Share</th><th scope="col">Previous</th><th scope="col">Change</th></tr></thead>
+            <tbody id="descriptionRows"></tbody>
+          </table>
+        </div>
+        <p id="descriptionsEmpty" class="empty-state" hidden>No non-empty descriptions in either period.</p>
+      </section>
+    </main>
+    <script type="module" src="analytics.js"></script>
+  </body>
+</html>

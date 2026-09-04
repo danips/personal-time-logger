@@ -1042,6 +1042,7 @@ function bindEvents() {
       setSyncStatus("error", formatError(error));
     });
   });
+  $("#openAnalytics").addEventListener("click", () => platform.openExtensionPage("analytics/analytics.html").catch((error) => setSyncStatus("error", formatError(error))));
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setSyncStatus("error", formatError(error))));
   $windowSizePresets.addEventListener("click", (event) => {
     const button = event.target.closest("[data-window-width]");
