@@ -6,14 +6,14 @@ share JavaScript memory. Every state transition that can be reached from more
 than one context therefore belongs in `extension/src/`, not in a page module.
 
 ```text
-Popup / Calendar / Options / Reconcile ─┐
-Usage page ─────────────────────────────┼── extension/src/ domain modules ── IndexedDB
-Background alarm ───────────────────────┤          │                  │
-                                         │          ├── browser APIs    └── entries + settings
-ChatGPT usage service ─────────────────┘          └── remote providers
-                                                        ├── Google Sheets / Drive APIs
-                                                        ├── MySQL HTTPS API
-                                                        └── Cloudflare Worker + D1 HTTPS API
+Extension pages (Popup, Calendar, Analytics, Options, Reconcile, Usage) ─┐
+Background alarm ───────────────────────────────────────────────────────┼── extension/src/ domain modules ── IndexedDB
+ChatGPT usage service ──────────────────────────────────────────────────┘          │                  │
+                                                                                  ├── browser APIs    └── entries + settings
+                                                                                  └── remote providers
+                                                                                      ├── Google Sheets / Drive APIs
+                                                                                      ├── MySQL HTTPS API
+                                                                                      └── Cloudflare Worker + D1 HTTPS API
 ```
 
 ## Context boundaries
@@ -23,6 +23,7 @@ ChatGPT usage service ─────────────────┘    
 | Background | `extension/background/background.js` | Alarm heartbeat, installation recovery, and non-interactive sync. | Does not own entries; it calls `extension/src/sync.js`. |
 | Popup | `extension/popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `extension/src/entries.js` and refreshes on entry events. |
 | Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; a fixed runtime message delegates Tempo transport to the background context through `extension/src/tempo.js`. |
+| Analytics | `extension/analytics/analytics.js` | Period reports, automatic comparisons, project/task and description breakdowns, fragmentation, and anomaly display. | Queries the bounded union of current and comparison intervals once; pure period and aggregation logic lives in `extension/src/analytics-period.js` and `extension/src/analytics.js`. |
 | Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; active backend and preparation target stay separate; OAuth client settings use synchronized browser storage, while tokens remain local. |
 | Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
 | Usage | `extension/usage/usage.js` | Displays the current Firefox ChatGPT session's 5-hour and weekly limits. | It can run standalone or mounted in Options and delegates the fixed session-authenticated request to `extension/src/chatgpt-usage-service.js`. |
@@ -74,6 +75,14 @@ allocated time. `extension/src/time-allocation.js` apportions effective duration
 proportionally across the actual interval at day/week/upload boundaries.
 `docs/time-model.md` records the product decisions for allocation, merging,
 conflicts, and multiplier validation.
+
+Analytics keeps reporting and physical-session semantics separate. Effective
+duration drives totals, shares, descriptions, and period comparisons. Actual
+elapsed duration drives session statistics, context switches, overlap checks,
+and long/short/stale anomalies. The page reads only the union of its selected
+and comparison ranges through `getEntriesIntersecting()` and refreshes after
+entry-change events. All aggregation stays local; Analytics adds no provider
+calls, remote schema, permissions, telemetry, or derived-data storage.
 
 `extension/src/sheets.js` owns Google Sheets and Drive I/O. It requires the exact
 `time_entries` and `config` schemas on populated tabs; only empty or missing

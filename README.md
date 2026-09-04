@@ -1,6 +1,6 @@
 # Personal Time Logger Extension
 
-Current release: `0.1.54` (`v0.1.54`).
+Current release: `0.1.70` (`v0.1.70`).
 
 A Firefox extension for local-first time tracking with Google Sheets, MySQL, or a user-owned Cloudflare Worker + D1 backend. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
@@ -11,6 +11,7 @@ A Firefox extension for local-first time tracking with Google Sheets, MySQL, or 
 - Start, active-timer Stop, and header Sync controls in the popup. Starting a timer stops the running one.
 - Recent entries grouped by week and day, with totals, repeated entries collapsed into expandable groups, and **Load more** for earlier weeks.
 - Weekly calendar view with movable and resizable time logs and direct displayed-week Tempo upload.
+- Local Analytics dashboard with automatic period comparison, project/task totals, session fragmentation, deterministic data-quality anomalies, and frequent descriptions.
 - Options page with left-side navigation for provider-aware storage, Google, ChatGPT usage, reconciliation, Tempo, and diagnostics settings.
 - Multiple-active-timer warning.
 - The Options page includes provider-aware storage controls, Google auth, sync interval, duration multiplier, calendar start hour, device ID, reconciliation, and experimental ChatGPT usage controls. Google-specific sections are shown while Google Sheets is active or selected as a migration target.
@@ -175,7 +176,7 @@ Sync reads first and only inspects the layout when a read fails. A missing tab, 
 6. Click a recent entry row to edit it. Deleting asks for confirmation.
 7. Use the play button on a recent entry to start a new timer with the same details.
 8. Use **Load more** to reach earlier weeks in the recent list.
-9. Use the calendar button to open the weekly calendar view, and the ⇄ button to open Reconcile.
+9. Use the Analytics button to open reports, the calendar button to open the weekly calendar view, and the ⇄ button to open Reconcile.
 10. Use **Send week to Tempo** in the calendar to create the displayed week's completed worklogs directly in Tempo. Open the adjacent menu and choose **Choose individual days** when you only want to send part of the week.
 11. Use the merge controls in a recent entry edit panel or selected calendar entry to append another matching completed log's elapsed time to the selected entry.
 
@@ -246,6 +247,12 @@ Select a completed time log, then drag its top or bottom edge to change its star
 Click a time log in the calendar to select it and open its edit panel. Click the selected time log again to clear the selection. If another completed log in the week has the exact same project, task, and description, the merge panel lets you combine them into one entry with the total duration of both logs. The same merge action is available from the popup edit panel for recent entries.
 
 Use the edit panel that opens with a selected time log to change its project, task, description, multiply flag, start and end times, or review status. Saving recalculates the duration and syncs the updated entry. Entries are also reachable from the keyboard: focus a time log and press Enter or Space to open it.
+
+## Analytics Dashboard
+
+The Analytics button in the popup opens a local report for **This week**, **Last week**, **This month**, **Last month**, **Last 30 days**, **This year**, or an inclusive custom date range. Every selection is automatically compared with the matching previous period; in-progress calendar periods compare only the same elapsed portion so the result stays fair.
+
+The dashboard shows effective-time totals and project/task and description breakdowns. It separately uses actual elapsed time for session lengths, short-session buckets, project/task switches, overlaps, long sessions, and stale active timers, so a duration multiplier never makes a physical session look longer or more fragmented. Anomalies are deterministic and informational; Analytics does not change entries. Reports read only the local IndexedDB interval covering the selected and comparison periods and do not contact a remote provider.
 
 Dates and times follow your browser's locale throughout.
 
@@ -349,7 +356,7 @@ For a Firefox WebDriver behavior smoke test, install Firefox, `geckodriver`, and
 npm run test:browser
 ```
 
-Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies its calendar rendering, exercises provider-aware Options visibility, saves Options, and checks the cross-context lock. It never contacts live Google, MySQL, or Cloudflare APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
+Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies Analytics and calendar rendering, exercises provider-aware Options visibility, saves Options, and checks the cross-context lock. It never contacts live Google, MySQL, or Cloudflare APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
 
 GitHub Actions runs the Node checks and Firefox behavior smoke on every push and pull request. The release workflow also requires the Firefox smoke before signing, so either test path can block a release.
 
@@ -364,6 +371,7 @@ docs/
 server/mysql-api/
 extension/
   manifest.json
+  analytics/
   background/
   calendar/
   content/
@@ -386,6 +394,6 @@ OAuth client credentials are stored in Firefox synchronized extension storage th
 - Add project/task autocomplete from recent entries.
 - Add a keyboard shortcut to start and stop the timer.
 - Show elapsed time as badge text on the toolbar icon.
-- Add a summary report of time by project and task for a chosen period.
+- Let an Analytics anomaly open its entry directly in an editor.
 - Add entry search across all history.
 - Add local backup and restore of the entry database.

@@ -1,3 +1,10 @@
+# Personal Time Logger 0.1.70
+
+- Add a local Analytics dashboard with fair automatic period comparisons and custom date ranges.
+- Report effective time by project, task, and description while keeping session and context-switch metrics based on actual elapsed time.
+- Highlight deterministic data-quality anomalies, including overlaps, missing fields, review flags, short/long sessions, and stale active timers.
+- Add popup navigation plus release-package and Firefox smoke coverage for Analytics.
+
 # Personal Time Logger 0.1.54
 
 - Allow validated Firefox extension origins without maintaining a per-device CORS allowlist.
