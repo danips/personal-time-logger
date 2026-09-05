@@ -404,6 +404,20 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
 }
 
 async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
+  const customMysqlPermission = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
+    script: `
+      const done = arguments[arguments.length - 1];
+      import(browser.runtime.getURL("src/remote-mysql.js")).then((mysql) => done({
+        declared: browser.runtime.getManifest().optional_host_permissions.includes("https://*/*"),
+        requested: mysql.mysqlHostPermission("https://self-hosted.example/api")
+      })).catch(() => done({}));
+    `,
+    args: []
+  });
+  if (!customMysqlPermission.declared || customMysqlPermission.requested !== "https://self-hosted.example/*") {
+    throw new Error(`Custom MySQL host permission is not requestable: ${JSON.stringify(customMysqlPermission)}`);
+  }
+
   const setBackend = async (backend) => {
     const result = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
       script: `

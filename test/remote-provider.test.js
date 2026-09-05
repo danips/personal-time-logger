@@ -297,7 +297,9 @@ describe("provider boundary", () => {
     assert.match(optionsCode, /REMOTE_BACKEND_ESTABLISHED/);
     assert.match(options, /not switched until verified migration succeeds/i);
     assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
+    assert.ok(manifest.optional_host_permissions.includes("https://*/*"));
     assert.ok(manifest.optional_host_permissions.includes("https://*.workers.dev/*"));
+    assert.equal(mysql.mysqlHostPermission("https://self-hosted.example/api"), "https://self-hosted.example/*");
     assert.doesNotMatch(optionsCode, /CLOUDFLARE_D1_API_TOKEN[^\n]*BACKUP/);
   });
 });

@@ -12,6 +12,7 @@
     "https://oauth2.googleapis.com/*"
   ],
   "optional_host_permissions": [
+    "https://*/*",
     "https://chatgpt.com/*",
     "https://api.tempo.io/*",
     "https://time-api.cordoceo.com/*",

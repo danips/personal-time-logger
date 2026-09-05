@@ -128,7 +128,7 @@ MySQL uses API version fencing.
 
 ## Trust and release boundaries
 
-- Google Sheets/Drive and OAuth are required only for Google operation; the configured MySQL API origin and Cloudflare `workers.dev` origin are optional host permissions for their respective operations. Cloudflare's raw bearer token remains local to the Firefox profile, while the Worker secret is only its SHA-256 digest.
+- Google Sheets/Drive and OAuth are required only for Google operation. HTTPS origins are declared as optional so Firefox can grant a self-hosted API domain, while runtime requests still ask only for the exact configured MySQL or Cloudflare origin. Cloudflare's raw bearer token remains local to the Firefox profile, while the Worker secret is only its SHA-256 digest.
 - `chatgpt.com` is optional and isolated to the usage feature. Its page-world
   bridge is intentionally narrow because page scripts are untrusted extension
   inputs.
