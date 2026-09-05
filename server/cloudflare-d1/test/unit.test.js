@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import worker from "../src/index.js";
@@ -6,6 +7,8 @@ import { constantTimeEqual, decodeHex } from "../src/auth.js";
 import { extensionOrigin } from "../src/cors.js";
 import { ApiError } from "../src/errors.js";
 import { entry, normalizeTimestamp } from "../src/validator.js";
+
+const contract = JSON.parse(readFileSync(new globalThis.URL("../../../test/fixtures/entry-contract.json", import.meta.url), "utf8"));
 
 const token = "synthetic-worker-token";
 async function digestHex(value) {
@@ -51,6 +54,13 @@ describe("Cloudflare D1 Worker pure boundaries", () => {
     assert.equal(normalizeTimestamp("2026-08-30T12:00:00+01:00", "updated_at"), "2026-08-30T11:00:00.000Z");
     assert.throws(() => normalizeTimestamp("2026-02-31T12:00:00Z", "updated_at"), ApiError);
     assert.throws(() => entry({ id: "x", dirty: true }), (error) => error.code === "INVALID_REQUEST" || error.code === "ENTRY_INVALID");
+  });
+
+  it("enforces the shared remote entry contract", () => {
+    assert.equal(entry(contract.base).start_at, "2026-08-24T09:00:00.000Z");
+    for (const overrides of contract.invalidOverrides) {
+      assert.throws(() => entry({ ...contract.base, ...overrides }), ApiError);
+    }
   });
 
   it("authenticates health, handles CORS, and rejects unsupported methods", async () => {

@@ -49,4 +49,14 @@ assertThrows(static fn () => Validator::entry([...$entry, 'status' => 'running']
 assertThrows(static fn () => Validator::entry([...$entry, 'multiply' => '99']), 'ENTRY_INVALID');
 assertThrows(static fn () => Validator::entry([...$entry, 'id' => ['injection']]), 'ENTRY_INVALID');
 
+$contract = json_decode(
+    file_get_contents(dirname(__DIR__, 3) . '/test/fixtures/entry-contract.json'),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+assertSameValue('2026-08-24T09:00:00.000Z', Validator::entry($contract['base'])['start_at'], 'Shared timestamp should normalize to UTC.');
+foreach ($contract['invalidOverrides'] as $overrides) {
+    assertThrows(static fn () => Validator::entry([...$contract['base'], ...$overrides]), 'ENTRY_INVALID');
+}
+
 echo "validator tests passed\n";

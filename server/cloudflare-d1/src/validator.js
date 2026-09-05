@@ -65,7 +65,7 @@ export function entry(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid("entry must be an object.");
   for (const field of ENTRY_FIELDS) if (!Object.hasOwn(value, field)) invalid(`entry is missing ${field}.`);
   for (const field of Object.keys(value)) if (!ENTRY_FIELDS.includes(field)) invalid(`entry field ${field} is not supported.`);
-  return {
+  const decoded = {
     id: text(value.id, "id", 64, false),
     project: text(value.project, "project", 65535),
     task: text(value.task, "task", 65535),
@@ -82,6 +82,8 @@ export function entry(value) {
     revision: integer(value.revision, "revision", 1),
     multiply: multiply(value.multiply)
   };
+  if (decoded.end_at && decoded.end_at < decoded.start_at) invalid("end_at must not precede start_at.");
+  return decoded;
 }
 
 export function id(value) { return text(value, "id", 64, false); }

@@ -32,6 +32,8 @@ const EDITABLE_FIELDS = new Set([
   "multiply",
   "deleted_at"
 ]);
+const textEncoder = new TextEncoder();
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function entryModelError(message) {
   const error = new TypeError(message);
@@ -41,6 +43,36 @@ function entryModelError(message) {
 
 function validTimestamp(value) {
   return typeof value === "string" && value && Number.isFinite(new Date(value).getTime());
+}
+
+function persistedText(value, field, maxBytes, allowEmpty = true) {
+  if (typeof value !== "string") throw entryModelError(`${field} must be text.`);
+  if (!allowEmpty && !value.trim()) throw entryModelError(`${field} must not be empty.`);
+  if (textEncoder.encode(value).byteLength > maxBytes) throw entryModelError(`${field} is too long.`);
+  return value;
+}
+
+function persistedTimestamp(value, field) {
+  if (typeof value !== "string" || !TIMESTAMP.test(value)) {
+    throw entryModelError(`${field} must be an ISO-8601 timestamp.`);
+  }
+  const [, year, month, day, hour, minute, second] = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(value);
+  const daysInMonth = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+  if (Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > daysInMonth
+    || Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) {
+    throw entryModelError(`${field} must be a valid timestamp.`);
+  }
+  const normalized = new Date(value);
+  if (!Number.isFinite(normalized.getTime())) throw entryModelError(`${field} must be a valid timestamp.`);
+  return normalized.toISOString();
+}
+
+function persistedInteger(value, field, minimum) {
+  const number = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  if (!Number.isSafeInteger(number) || number < minimum) {
+    throw entryModelError(`${field} must be a safe integer of at least ${minimum}.`);
+  }
+  return number;
 }
 
 function assertAllowedFields(values, allowed, kind) {
@@ -117,27 +149,27 @@ export function decodePersistedEntry(entry) {
   for (const field of ["id", "project", "task", "description", "start_at", "end_at", "duration_seconds", "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"]) {
     if (!Object.hasOwn(entry, field)) throw entryModelError(`Persisted entry is missing ${field}.`);
   }
-  if (typeof entry.id !== "string" || !entry.id.trim()) throw entryModelError("id must be a non-empty string.");
-  for (const field of ["project", "task", "description", "device_id"]) {
-    if (typeof entry[field] !== "string") throw entryModelError(`${field} must be text.`);
-  }
-  for (const field of ["start_at", "created_at", "updated_at"]) {
-    if (!validTimestamp(entry[field])) throw entryModelError(`${field} must be a valid timestamp.`);
-  }
-  for (const field of ["end_at", "deleted_at"]) {
-    if (entry[field] !== "" && !validTimestamp(entry[field])) throw entryModelError(`${field} must be empty or a valid timestamp.`);
-  }
-  if (!Number.isFinite(Number(entry.duration_seconds)) || Number(entry.duration_seconds) < 0) {
-    throw entryModelError("duration_seconds must be a non-negative number.");
-  }
-  if (!Number.isInteger(Number(entry.revision)) || Number(entry.revision) < 1) {
-    throw entryModelError("revision must be a positive integer.");
-  }
+  const decoded = {
+    ...entry,
+    id: persistedText(entry.id, "id", 64, false),
+    project: persistedText(entry.project, "project", 65535),
+    task: persistedText(entry.task, "task", 65535),
+    description: persistedText(entry.description, "description", 65535),
+    start_at: persistedTimestamp(entry.start_at, "start_at"),
+    end_at: entry.end_at === "" ? "" : persistedTimestamp(entry.end_at, "end_at"),
+    duration_seconds: persistedInteger(entry.duration_seconds, "duration_seconds", 0),
+    created_at: persistedTimestamp(entry.created_at, "created_at"),
+    updated_at: persistedTimestamp(entry.updated_at, "updated_at"),
+    deleted_at: entry.deleted_at === "" ? "" : persistedTimestamp(entry.deleted_at, "deleted_at"),
+    device_id: persistedText(entry.device_id, "device_id", 128, false),
+    revision: persistedInteger(entry.revision, "revision", 1)
+  };
+  if (decoded.end_at && decoded.end_at < decoded.start_at) throw entryModelError("end_at must not precede start_at.");
   if (entry.status !== "ok" && entry.status !== "needs_review") throw entryModelError("status must be ok or needs_review.");
   if (entry.multiply !== "" && !normalizeMultiplierText(entry.multiply)) {
     throw entryModelError("multiply must be empty or a valid numeric multiplier.");
   }
-  return normalizeEntry(entry);
+  return normalizeEntry(decoded);
 }
 
 export async function getDeviceId() {

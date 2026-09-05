@@ -13,6 +13,7 @@ const fixture = (over = {}) => normalizeEntry({
   duration_seconds: 3600,
   created_at: "2026-07-27T09:00:00.000Z",
   updated_at: "2026-07-27T10:00:00.000Z",
+  device_id: "device",
   revision: 1,
   ...over
 });

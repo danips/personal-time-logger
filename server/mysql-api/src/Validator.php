@@ -25,7 +25,7 @@ final class Validator
             if (!in_array($field, self::ENTRY_FIELDS, true)) self::invalid("entry field {$field} is not supported.");
         }
 
-        return [
+        $entry = [
             'id' => self::text($value['id'], 'id', 64, false),
             'project' => self::text($value['project'], 'project', 65535),
             'task' => self::text($value['task'], 'task', 65535),
@@ -37,10 +37,14 @@ final class Validator
             'created_at' => self::timestamp($value['created_at'], 'created_at'),
             'updated_at' => self::timestamp($value['updated_at'], 'updated_at'),
             'deleted_at' => self::optionalTimestamp($value['deleted_at'], 'deleted_at'),
-            'device_id' => self::text($value['device_id'], 'device_id', 128),
+            'device_id' => self::text($value['device_id'], 'device_id', 128, false),
             'revision' => self::integer($value['revision'], 'revision', 1),
             'multiply' => self::multiply($value['multiply']),
         ];
+        if ($entry['end_at'] !== null && $entry['end_at'] < $entry['start_at']) {
+            self::invalid('end_at must not precede start_at.');
+        }
+        return $entry;
     }
 
     public static function id(mixed $value): string
@@ -79,10 +83,19 @@ final class Validator
     private static function integer(mixed $value, string $field, int $minimum): int
     {
         if (is_int($value)) $integer = $value;
-        elseif (is_string($value) && preg_match('/\A\d+\z/', $value)) $integer = (int) $value;
-        elseif (is_float($value) && is_finite($value) && floor($value) === $value) $integer = (int) $value;
+        elseif (is_string($value) && preg_match('/\A\d+\z/', $value)) {
+            $digits = ltrim($value, '0') ?: '0';
+            $maximum = '9007199254740991';
+            if (strlen($digits) > strlen($maximum)
+                || (strlen($digits) === strlen($maximum) && strcmp($digits, $maximum) > 0)) {
+                self::invalid("{$field} is out of range.");
+            }
+            $integer = (int) $digits;
+        }
+        elseif (is_float($value) && is_finite($value) && floor($value) === $value
+            && $value <= 9007199254740991) $integer = (int) $value;
         else self::invalid("{$field} must be an integer.");
-        if ($integer < $minimum) self::invalid("{$field} is out of range.");
+        if ($integer < $minimum || $integer > 9007199254740991) self::invalid("{$field} is out of range.");
         return $integer;
     }
 

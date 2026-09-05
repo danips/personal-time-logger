@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
@@ -15,6 +16,8 @@ import {
   rowToEntry
 } from "../extension/src/entries.js";
 
+const contract = JSON.parse(readFileSync(new URL("./fixtures/entry-contract.json", import.meta.url), "utf8"));
+
 const fixture = (over = {}) => normalizeEntry({
   id: "entry-1",
   project: "Project",
@@ -25,6 +28,7 @@ const fixture = (over = {}) => normalizeEntry({
   duration_seconds: 3600,
   created_at: "2026-07-27T09:00:00.000Z",
   updated_at: "2026-07-27T10:00:00.000Z",
+  device_id: "device",
   revision: 1,
   ...over
 });
@@ -142,6 +146,15 @@ describe("row serialization", () => {
     assert.throws(() => decodePersistedEntry({ id: "incomplete" }), { code: "ENTRY_INVALID" });
     assert.throws(() => rowToEntry(["entry-only"]), { code: "ENTRY_INVALID" });
     assert.throws(() => decodePersistedEntry({ ...fixture(), revision: 0 }), { code: "ENTRY_INVALID" });
+  });
+
+  it("enforces the shared remote entry contract", () => {
+    assert.equal(decodePersistedEntry(contract.base).start_at, "2026-08-24T09:00:00.000Z");
+    for (const overrides of contract.invalidOverrides) {
+      assert.throws(() => decodePersistedEntry({ ...contract.base, ...overrides }), { code: "ENTRY_INVALID" });
+    }
+    assert.throws(() => decodePersistedEntry({ ...contract.base, project: "é".repeat(32768) }), { code: "ENTRY_INVALID" });
+    assert.throws(() => decodePersistedEntry({ ...contract.base, start_at: "2026-02-31T12:00:00Z" }), { code: "ENTRY_INVALID" });
   });
 });
 
