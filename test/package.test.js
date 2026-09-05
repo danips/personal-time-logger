@@ -36,6 +36,7 @@ const expectedFiles = [
   "src/auth-session-store.js",
   "src/auth.js",
   "src/background-schedule.js",
+  "src/bounded-json.js",
   "src/calendar-gesture-state.js",
   "src/calendar-layout.js",
   "src/chatgpt-usage-service.js",

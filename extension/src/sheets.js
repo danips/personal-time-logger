@@ -1,5 +1,6 @@
 import { getSetting, mutateSettings, setSetting } from "./db.js";
 import { getAccessToken } from "./auth.js";
+import { readBoundedJson } from "./bounded-json.js";
 import { SHEET_HEADERS, entryToRow, rowToEntry } from "./entries.js";
 import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
@@ -25,6 +26,7 @@ const APP_MARKER_VALUE = "personal-time-logger";
 // files cannot turn setup into a long serial crawl.
 const MAX_CANDIDATES = 25;
 const API_TIMEOUT_MS = 30_000;
+const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 const DRIVE_GATE_RETRY_MS = 60_000;
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 
@@ -192,15 +194,9 @@ async function apiFetchUnsafe(path, options = {}, { interactiveAuth = false, bas
           ...(options.headers || {})
         }
       });
-      const text = await response.text();
-      data = text ? (() => {
-        try {
-          return JSON.parse(text);
-        } catch {
-          if (response.ok) throw codedError("API_ERROR", "Google API returned malformed JSON");
-          return { error: { message: text } };
-        }
-      })() : {};
+      data = await readBoundedJson(response, MAX_RESPONSE_BYTES, (reason) => (
+        codedError("API_ERROR", `Google API ${reason}`)
+      ));
     } catch (error) {
       if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google API request timed out");
       if (error && error.code) throw error;

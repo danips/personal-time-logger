@@ -1,4 +1,5 @@
 import { getSetting, mutateSetting, mutateSettings, removeSetting, setSetting } from "./db.js";
+import { readBoundedJson } from "./bounded-json.js";
 import { normalizeUsageResponse, UsageError } from "./codex-usage.js";
 import { platform } from "./platform.js";
 import { SETTING_KEY } from "./setting-keys.js";
@@ -66,44 +67,11 @@ function retryAfterSeconds(response) {
   return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
 }
 
-async function readBoundedJson(response) {
-  const declaredLength = Number(response.headers.get("Content-Length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
-    throw usageError("schema_changed", "ChatGPT usage response is too large");
-  }
-
-  let text = "";
-  if (response.body?.getReader) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let bytesRead = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        bytesRead += value.byteLength;
-        if (bytesRead > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
-          throw usageError("schema_changed", "ChatGPT usage response is too large");
-        }
-        text += decoder.decode(value, { stream: true });
-      }
-      text += decoder.decode();
-    } finally {
-      reader.releaseLock();
-    }
-  } else {
-    text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
-      throw usageError("schema_changed", "ChatGPT usage response is too large");
-    }
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw usageError("schema_changed", "ChatGPT returned malformed JSON");
-  }
-}
+const readChatGptJson = (response) => readBoundedJson(
+  response,
+  MAX_RESPONSE_BYTES,
+  (reason) => usageError("schema_changed", `ChatGPT ${reason}`)
+);
 
 function decodeJwtPayload(token) {
   const payload = token.split(".")[1];
@@ -143,7 +111,7 @@ async function fetchWithTimeout(fetchImpl, url, options) {
 
 async function responseErrorCode(response) {
   try {
-    const body = await readBoundedJson(response);
+    const body = await readChatGptJson(response);
     return typeof body?.detail?.code === "string" ? body.detail.code : null;
   } catch {
     return null;
@@ -184,7 +152,7 @@ export async function requestCurrentChatGptUsage(overrides = {}) {
     redirect: "follow"
   });
   await throwForResponse(sessionResponse);
-  const session = await readBoundedJson(sessionResponse);
+  const session = await readChatGptJson(sessionResponse);
   const accessToken = findAccessToken(session);
   if (!accessToken) throw usageError("sign_in_required", "Sign in to ChatGPT in Firefox");
 
@@ -207,7 +175,7 @@ export async function requestCurrentChatGptUsage(overrides = {}) {
     headers
   });
   await throwForResponse(usageResponse);
-  const body = await readBoundedJson(usageResponse);
+  const body = await readChatGptJson(usageResponse);
   return normalizeUsageResponse(body, { collectedAt: new Date(deps.now()).toISOString() });
 }
 

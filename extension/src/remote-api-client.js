@@ -1,10 +1,12 @@
 import { decodePersistedEntry } from "./entries.js";
+import { readBoundedJson } from "./bounded-json.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { platform } from "./platform.js";
 
 export const API_VERSION = 1;
 export const SCHEMA_VERSION = 1;
 export const API_TIMEOUT_MS = 30_000;
+const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 export const PERSISTED_ENTRY_FIELDS = Object.freeze([
   "id", "project", "task", "description", "start_at", "end_at", "duration_seconds",
   "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"
@@ -125,12 +127,9 @@ export function createRemoteApiClient({
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) })
       });
-      const text = await response.text();
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch (error) {
-        throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API returned malformed JSON.", error);
-      }
+      data = await readBoundedJson(response, MAX_RESPONSE_BYTES, (reason) => (
+        codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The remote API ${reason}.`)
+      ));
     } catch (error) {
       if (error?.code) throw error;
       if (controller.signal.aborted) throw codedError(ERROR_CODE.API_TIMEOUT, `The ${labelText(providerLabel)} request timed out.`);

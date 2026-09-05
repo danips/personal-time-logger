@@ -1,4 +1,5 @@
 import { claimLock, releaseLock } from "./db.js";
+import { readBoundedJson } from "./bounded-json.js";
 import { getConfig } from "./config-loader.js";
 import {
   beginAuthSession,
@@ -15,6 +16,7 @@ const TOKEN_REFRESH_LOCK_KEY = "token_refresh_lock";
 const TOKEN_REFRESH_LOCK_TTL_MS = 30_000;
 const TOKEN_REFRESH_POLL_MS = 50;
 const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_OAUTH_RESPONSE_BYTES = 256 * 1024;
 const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
 let refreshInFlight = null;
@@ -59,7 +61,9 @@ async function formRequest(url, params) {
       body: new URLSearchParams(params).toString(),
       signal: controller.signal
     });
-    const data = await response.json().catch(() => ({}));
+    const data = await readBoundedJson(response, MAX_OAUTH_RESPONSE_BYTES, (reason) => (
+      codedError("API_ERROR", `Google OAuth ${reason}`)
+    ));
     return { response, data };
   } catch (error) {
     if (controller.signal.aborted) throw codedError("API_TIMEOUT", "Google OAuth request timed out");
