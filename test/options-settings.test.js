@@ -2,14 +2,49 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  BACKUP_SETTING_KEYS,
   INVALID_MULTIPLIER_MESSAGE,
   INVALID_WORKDAY_START_HOUR_MESSAGE,
+  normalizeBackupSettings,
   normalizeOptionsSettings,
   normalizeWorkdayStartHour,
   planOptionsSettingsSave
 } from "../extension/src/options-settings.js";
 
 describe("Options settings save plan", () => {
+  it("normalizes portable backup settings and excludes credentials, endpoints, and consent", () => {
+    assert.deepEqual(normalizeBackupSettings({
+      duration_multiplier: "1,25",
+      sync_interval_seconds: 60,
+      tempo_author_account_id: " account ",
+      tempo_task_issue_ids: { Task: "00123" },
+      window_resize_presets: [{ width: "1280", height: 720, isWindow: "true" }],
+      workday_start_hour: "9",
+      mysql_api_base_url: "https://attacker.invalid",
+      chatgpt_usage_session_token_consent: true
+    }), {
+      duration_multiplier: "1.250",
+      sync_interval_seconds: 60,
+      tempo_author_account_id: "account",
+      tempo_task_issue_ids: { Task: "123" },
+      window_resize_presets: [{ width: 1280, height: 720, isWindow: true }],
+      workday_start_hour: 9
+    });
+    assert.equal(BACKUP_SETTING_KEYS.includes("mysql_api_base_url"), false);
+    assert.equal(BACKUP_SETTING_KEYS.includes("cloudflare_d1_api_base_url"), false);
+    assert.equal(BACKUP_SETTING_KEYS.includes("chatgpt_usage_session_token_consent"), false);
+  });
+
+  it("rejects malformed backup settings before import", () => {
+    for (const settings of [
+      { duration_multiplier: "invalid" },
+      { sync_interval_seconds: "soon" },
+      { tempo_task_issue_ids: { Task: "not-an-id" } },
+      { window_resize_presets: [{ width: 0, height: 720, isWindow: false }] },
+      { workday_start_hour: 24 }
+    ]) assert.throws(() => normalizeBackupSettings(settings), TypeError);
+  });
+
   it("accepts a calendar start hour", () => {
     assert.deepEqual(normalizeWorkdayStartHour("09"), {
       valid: true,

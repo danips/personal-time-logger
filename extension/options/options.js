@@ -27,7 +27,9 @@ import { bindThemeControls, readThemePreferences, saveThemePreferences, THEME_OP
 import { initReconcilePage } from "../reconcile/reconcile.js";
 import { initUsagePage } from "../usage/usage.js";
 import {
+  BACKUP_SETTING_KEYS,
   DEFAULT_WORKDAY_START_HOUR,
+  normalizeBackupSettings,
   normalizeOptionsSettings,
   normalizeWorkdayStartHour,
   planOptionsSettingsSave
@@ -42,19 +44,6 @@ let syncSectionNavigation = () => {};
 
 const BACKUP_FORMAT = "personal-time-logger-backup";
 const BACKUP_SCHEMA_VERSION = 1;
-const BACKUP_SETTING_KEYS = Object.freeze([
-  SETTING_KEY.CHATGPT_USAGE_SESSION_TOKEN_CONSENT,
-  SETTING_KEY.DURATION_MULTIPLIER,
-  SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
-  SETTING_KEY.MYSQL_API_BASE_URL,
-  SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL,
-  SETTING_KEY.SYNC_INTERVAL_SECONDS,
-  SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID,
-  SETTING_KEY.TEMPO_TASK_ISSUE_IDS,
-  SETTING_KEY.WINDOW_RESIZE_PRESETS,
-  SETTING_KEY.WORKDAY_START_HOUR
-]);
-
 function backupError(code) {
   return Object.assign(new Error("The backup operation could not complete."), { code });
 }
@@ -87,9 +76,12 @@ function parseBackup(text) {
     ids.add(decoded.id);
     return { ...decoded, dirty: false, last_sync_at: "", sync_error: "" };
   });
-  const settings = Object.fromEntries(BACKUP_SETTING_KEYS
-    .filter((key) => Object.hasOwn(value.settings, key))
-    .map((key) => [key, value.settings[key]]));
+  let settings;
+  try {
+    settings = normalizeBackupSettings(value.settings);
+  } catch {
+    throw backupError(ERROR_CODE.BACKUP_INVALID);
+  }
   const appearance = value.appearance && typeof value.appearance === "object" && !Array.isArray(value.appearance)
     ? value.appearance
     : null;
@@ -138,10 +130,13 @@ async function importBackupClicked(file) {
   setStatus("Synchronizing before restoring backup...");
   await ensureBackupSync();
   const summary = { added: 0, settingsChanged: 0, conflicts: [] };
-  await mutateAllLocalState(BACKUP_SETTING_KEYS, ({ entries, settings }) => {
+  await mutateAllLocalState([...BACKUP_SETTING_KEYS, SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT], ({ entries, settings }) => {
     for (const [key, value] of Object.entries(backup.settings)) {
       if (JSON.stringify(settings.get(key)) !== JSON.stringify(value)) {
         settings.set(key, value);
+        if (key === SETTING_KEY.DURATION_MULTIPLIER) {
+          settings.set(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, nowIso());
+        }
         summary.settingsChanged += 1;
       }
     }
