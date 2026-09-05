@@ -445,9 +445,11 @@ export async function purgeDeletedEntries(local, remoteEntries, entryRefs, dupli
   blockedIds = new Set(),
   interactiveAuth = false,
   lease,
-  provider
+  provider,
+  pushedIds = new Set()
 } = {}) {
   const remoteProvider = providerOrDefault(provider);
+  const observedIds = new Set(remoteEntries.map((entry) => entry.id));
   const expiredRows = remoteEntries
     .filter((entry) => !blockedIds.has(entry.id) && isExpiredDeletion(entry.deleted_at) && entryRefs.has(entry.id))
     .map((entry) => ({
@@ -461,12 +463,16 @@ export async function purgeDeletedEntries(local, remoteEntries, entryRefs, dupli
 
   // The provider owns ordering and optimistic-concurrency details for deletion.
   let failedIds = new Set();
+  const deletedRemoteIds = new Set();
   if (expiredRows.length) {
     try {
       await lease?.assert();
       await remoteProvider.deleteEntries(expiredRows, { interactiveAuth });
       await lease?.assert();
-      for (const { id } of expiredRows) entryRefs.delete(id);
+      for (const { id } of expiredRows) {
+        entryRefs.delete(id);
+        deletedRemoteIds.add(id);
+      }
     } catch (error) {
       // Keep the local copies so the rows are retried on the next sync.
       failedIds = new Set(expiredRows.map((row) => row.id));
@@ -482,6 +488,8 @@ export async function purgeDeletedEntries(local, remoteEntries, entryRefs, dupli
 
   const candidates = [...local.values()].filter((entry) => (
     isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id) && !failedIds.has(entry.id)
+      && !pushedIds.has(entry.id)
+      && (deletedRemoteIds.has(entry.id) || !observedIds.has(entry.id))
   ));
   if (!candidates.length) return 0;
   const expectedById = new Map(candidates.map((entry) => [entry.id, entryFingerprint(entry)]));
@@ -796,7 +804,8 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
       interactiveAuth,
       blockedIds: quarantinedIds,
       lease,
-      provider
+      provider,
+      pushedIds
     });
     phase = "config";
     const configPushed = await syncConfig(snapshot.config, snapshot.configRefs, { interactiveAuth, lease, provider });

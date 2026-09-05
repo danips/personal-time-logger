@@ -67,6 +67,31 @@ describe("sync maintenance transactions", () => {
     assert.deepEqual(await db.getEntry(tombstone.id), tombstone);
   });
 
+  it("retains an expired tombstone pushed from a stale live snapshot", async () => {
+    const id = "newly-pushed-tombstone";
+    const remote = entry({ id });
+    const tombstone = entry({
+      id,
+      deleted_at: "2020-01-01T00:00:00.000Z",
+      dirty: true,
+      revision: 2,
+      updated_at: "2026-08-09T09:00:00.000Z"
+    });
+    await seedEntry(db, tombstone);
+    const local = localState([tombstone]);
+    const refs = new Map([[id, { version: 1 }]]);
+    const provider = {
+      async updateEntries() {},
+      async appendEntries() { return []; },
+      async deleteEntries() { throw new Error("stale live rows must not be deleted"); }
+    };
+
+    const pushedIds = await pushDirtyEntries(local, [remote], refs, { provider });
+    assert.deepEqual([...pushedIds], [id]);
+    assert.equal(await purgeDeletedEntries(local, [remote], refs, [], { provider, pushedIds }), 0);
+    assert.equal((await db.getEntry(id)).deleted_at, tombstone.deleted_at);
+  });
+
   it("does not purge a tombstone restored after the sync snapshot", async () => {
     const snapshot = entry({ id: "restored-tombstone", deleted_at: "2020-01-01T00:00:00.000Z" });
     const restored = entry({ id: snapshot.id, task: "Restored", revision: 2, dirty: true });
