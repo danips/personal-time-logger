@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 async function listSourceFiles(directory, relative = "") {
   const files = [];
   for (const entry of await readdir(path.join(directory, relative), { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
     const name = relative ? `${relative}/${entry.name}` : entry.name;
     if (entry.isDirectory()) files.push(...await listSourceFiles(directory, name));
     else if (entry.isFile()) files.push(name);

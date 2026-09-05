@@ -75,6 +75,7 @@ async function fixture({
   };
   await writeFile(join(source, "manifest.json"), JSON.stringify(sourceManifest));
   await writeFile(join(source, "background.js"), "reviewed extension bytes");
+  await writeFile(join(source, ".amo-upload-uuid"), "signer state");
   await writeFile(xpi, storedZip([
     ["manifest.json", JSON.stringify({
       ...sourceManifest,
