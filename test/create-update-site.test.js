@@ -62,6 +62,7 @@ function storedZip(entries) {
 async function fixture({
   signedVersion = "1.2.3",
   signedId = "personal-time-logger@example.local",
+  signedName = "Personal Time Logger",
   signedBackground = "reviewed extension bytes"
 } = {}) {
   await mkdir(artifactsDirectory, { recursive: true });
@@ -70,18 +71,21 @@ async function fixture({
   const xpi = join(directory, "signed.xpi");
   await mkdir(source);
   const sourceManifest = {
+    name: "Personal Time Logger",
     version: "1.2.3",
     browser_specific_settings: { gecko: { id: "personal-time-logger@example.local", strict_min_version: "128.0" } }
   };
   await writeFile(join(source, "manifest.json"), JSON.stringify(sourceManifest));
   await writeFile(join(source, "background.js"), "reviewed extension bytes");
   await writeFile(join(source, ".amo-upload-uuid"), "signer state");
+  const signedManifest = {
+    ...sourceManifest,
+    name: signedName,
+    version: signedVersion,
+    browser_specific_settings: { gecko: { ...sourceManifest.browser_specific_settings.gecko, id: signedId } }
+  };
   await writeFile(xpi, storedZip([
-    ["manifest.json", JSON.stringify({
-      ...sourceManifest,
-      version: signedVersion,
-      browser_specific_settings: { gecko: { ...sourceManifest.browser_specific_settings.gecko, id: signedId } }
-    })],
+    ["manifest.json", `${JSON.stringify(signedManifest, null, 2)}\n`],
     ["background.js", signedBackground],
     ["META-INF/signature.sig", "signer metadata"]
   ]));
@@ -132,6 +136,18 @@ describe("create update site CLI", () => {
       await assert.rejects(
         () => command("--base-url", "https://example.invalid", "--expected-version", "1.2.3", "--xpi", files.xpi, "--source", files.source, "--output", files.output),
         /signed XPI manifest version.*does not match source manifest version/
+      );
+    } finally {
+      await rm(files.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects changed signed manifest content with the same identity", async () => {
+    const files = await fixture({ signedName: "Changed extension" });
+    try {
+      await assert.rejects(
+        () => command("--base-url", "https://example.invalid", "--expected-version", "1.2.3", "--xpi", files.xpi, "--source", files.source, "--output", files.output),
+        /signed XPI manifest contents differ/
       );
     } finally {
       await rm(files.directory, { recursive: true, force: true });

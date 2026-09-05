@@ -7,6 +7,14 @@ import { parseArgs, promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
 async function listSourceFiles(directory, relative = "") {
   const files = [];
   for (const entry of await readdir(path.join(directory, relative), { withFileTypes: true })) {
@@ -78,9 +86,13 @@ if (signedManifest.version !== manifest.version) {
 if (signedManifest.browser_specific_settings?.gecko?.id !== extensionId) {
   throw new Error("The signed XPI extension ID does not match the release source manifest");
 }
+if (JSON.stringify(canonicalJson(signedManifest)) !== JSON.stringify(canonicalJson(manifest))) {
+  throw new Error("The signed XPI manifest contents differ from the release source manifest");
+}
 
-// Firefox signing adds only META-INF signature records; every application file
-// must remain byte-for-byte identical to the prepared release source.
+// Firefox signing adds only META-INF signature records. The manifest is compared
+// semantically because signing may normalize its JSON serialization; every other
+// application file must remain byte-for-byte identical to the prepared source.
 let archiveFiles;
 try {
   const { stdout } = await execFileAsync("unzip", ["-Z1", xpiPath]);
@@ -96,6 +108,7 @@ if (new Set(archiveFiles).size !== archiveFiles.length
   throw new Error("The signed XPI application file list does not match the release source");
 }
 for (const name of sourceFiles) {
+  if (name === "manifest.json") continue;
   const [{ stdout }, sourceBytes] = await Promise.all([
     execFileAsync("unzip", ["-p", xpiPath, name], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 }),
     readFile(path.join(sourceDirectory, name))
