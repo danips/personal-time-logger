@@ -11,6 +11,7 @@ import { after, before, describe, it } from "node:test";
 const supported = Number(process.versions.node.split(".")[0]) >= 20;
 const token = "synthetic-local-worker-token";
 const root = resolve(new URL("..", import.meta.url).pathname);
+const wrangler = resolve(root, "node_modules/.bin/wrangler");
 let worker;
 
 function digestHex(value) {
@@ -57,9 +58,11 @@ async function startWorker() {
       migrations_dir: resolve(root, "migrations")
     }]
   }));
-  const migration = await run("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--config", configPath]);
+  const migration = await run(wrangler, [
+    "d1", "migrations", "apply", "DB", "--local", "--config", configPath, "--persist-to", statePath
+  ]);
   assert.equal(migration.code, 0, migration.output);
-  const child = spawn("npx", ["wrangler", "dev", "--local", "--config", configPath, "--persist-to", statePath, "--port", String(port), "--ip", "127.0.0.1"], {
+  const child = spawn(wrangler, ["dev", "--local", "--config", configPath, "--persist-to", statePath, "--port", String(port), "--ip", "127.0.0.1"], {
     cwd: root, stdio: ["ignore", "pipe", "pipe"]
   });
   let output = "";
@@ -77,14 +80,19 @@ async function startWorker() {
     }
     await new Promise((resolveReady) => setTimeout(resolveReady, 100));
   }
+  const closed = new Promise((resolveClose) => child.once("close", resolveClose));
   child.kill("SIGTERM");
+  await closed;
   throw new Error(`Local Worker did not become ready: ${output}`);
 }
 
 async function stopWorker() {
   if (!worker) return;
-  worker.child.kill("SIGTERM");
-  await new Promise((resolveStop) => worker.child.once("close", resolveStop));
+  if (worker.child.exitCode === null) {
+    const closed = new Promise((resolveStop) => worker.child.once("close", resolveStop));
+    worker.child.kill("SIGTERM");
+    await closed;
+  }
   await rm(worker.directory, { recursive: true, force: true });
   worker = null;
 }
@@ -151,11 +159,11 @@ describe("local Cloudflare Worker + D1 API", { skip: !supported }, () => {
     assert.equal(badOrigin.status, 403);
     const unknown = await api("/v1/not-a-route");
     assert.equal(unknown.status, 404);
-    const malformed = await api("/v1/entries/append", { body: "{" });
+    const malformed = await api("/v1/entries/append", { method: "POST", body: "{" });
     assert.equal(malformed.status, 400);
-    const unknownField = await api("/v1/entries/append", { body: { entries: [], unexpected: true } });
+    const unknownField = await api("/v1/entries/append", { method: "POST", body: { entries: [], unexpected: true } });
     assert.equal(unknownField.status, 400);
-    const sixteen = await api("/v1/entries/append", { body: { entries: Array.from({ length: 16 }, (_, index) => makeEntry(`limit-${index}`)) } });
+    const sixteen = await api("/v1/entries/append", { method: "POST", body: { entries: Array.from({ length: 16 }, (_, index) => makeEntry(`limit-${index}`)) } });
     assert.equal(sixteen.status, 400);
 
     const entries = [makeEntry("contract-a"), makeEntry("contract-b")];

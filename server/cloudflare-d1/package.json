@@ -11,5 +11,5 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
   },
-  "devDependencies": { "wrangler": "4.31.0" }
+  "devDependencies": { "wrangler": "4.129.0" }
 }
