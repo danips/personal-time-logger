@@ -30,8 +30,60 @@ jobs:
       - name: Run static analysis and extension lint
         run: timeout 10m npm run lint
 
+  server-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: test-root
+          MYSQL_DATABASE: personal_time_logger_test
+          MYSQL_USER: personal_time_logger_test
+          MYSQL_PASSWORD: test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ptest-root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install server test dependencies
+        run: |
+          timeout 10m npm ci --prefix server/cloudflare-d1
+          sudo apt-get update
+          sudo apt-get install -y php-mysql mysql-client
+
+      - name: Run Cloudflare D1 checks
+        run: timeout 10m npm run test:cloudflare
+
+      - name: Check PHP syntax
+        run: find server/mysql-api -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Initialize disposable MySQL schema
+        run: mysql --host=127.0.0.1 --user=personal_time_logger_test --password=test-password personal_time_logger_test < server/mysql-api/sql/001_initial_schema.sql
+
+      - name: Run MySQL API checks
+        env:
+          PTL_TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=personal_time_logger_test;charset=utf8mb4
+          PTL_TEST_MYSQL_USER: personal_time_logger_test
+          PTL_TEST_MYSQL_PASSWORD: test-password
+          PTL_TEST_MYSQL_ALLOW_RESET: 1
+        run: timeout 5m bash server/mysql-api/tests/run.sh
+
   browser-runtime:
-    needs: unit-tests
+    needs: [unit-tests, server-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
