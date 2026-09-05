@@ -50,8 +50,8 @@ the same date Tempo receives.
 ### D1 — Remote optimistic concurrency
 
 Every remote update or deletion checks the provider reference observed in the
-snapshot. Google Sheets uses a complete serialized row fingerprint, re-reads the
-row, and checks Drive's modification time again immediately before mutation;
+snapshot. Google Sheets uses a complete serialized row fingerprint, batch-reads
+only the affected rows, and checks Drive's modification time immediately before mutation;
 MySQL uses an API remote version. Google Sheets is still single-writer storage:
 it has no conditional row-update API, and an edit can land between the final
 Drive check and the write. The postflight check can report that race after data

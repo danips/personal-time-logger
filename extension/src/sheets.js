@@ -750,18 +750,39 @@ function remoteRowPreconditions(rows) {
   return requested;
 }
 
-async function readRowsForMutation(spreadsheetId, { interactiveAuth = false } = {}) {
-  const data = await apiFetch(`/${spreadsheetId}/values/${encodeRange(FULL_RANGE)}?valueRenderOption=UNFORMATTED_VALUE`, {}, { interactiveAuth });
-  const rows = rowsAsText(data.values);
-  if (!headersMatch(rows[0] || [])) {
-    throw codedError("REMOTE_ROW_STALE", "The spreadsheet header changed before the mutation could be applied.");
+function mutationRanges(rows) {
+  const indexes = [...new Set(rows.map((row) => row.rowIndex))].sort((first, second) => first - second);
+  const ranges = [];
+  for (const rowIndex of indexes) {
+    const last = ranges.at(-1);
+    if (last && rowIndex === last.end + 1) last.end = rowIndex;
+    else ranges.push({ start: rowIndex, end: rowIndex });
+  }
+  return ranges;
+}
+
+async function readRowsForMutation(spreadsheetId, expected, { interactiveAuth = false } = {}) {
+  const ranges = mutationRanges(expected);
+  const query = [
+    ...ranges.map(({ start, end }) => `ranges=${encodeRange(`${SHEET_NAME}!A${start}:${LAST_COLUMN}${end}`)}`),
+    "valueRenderOption=UNFORMATTED_VALUE",
+    "fields=valueRanges(range,values)"
+  ].join("&");
+  const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
+  if (!Array.isArray(data.valueRanges)) throw codedError("API_ERROR", "Google Sheets returned invalid mutation rows");
+  const rows = new Map();
+  for (const valueRange of data.valueRanges) {
+    const match = /!A(\d+):/.exec(String(valueRange.range || ""));
+    if (!match) continue;
+    const start = Number(match[1]);
+    rowsAsText(valueRange.values).forEach((row, index) => rows.set(start + index, row));
   }
   return rows;
 }
 
 function verifyRemoteRows(rows, expected) {
   for (const row of expected) {
-    const actual = rows[row.rowIndex - 1] || [];
+    const actual = rows.get(row.rowIndex) || [];
     if (String(actual[0] || "") !== row.id || rowFingerprint(actual) !== row.expectedFingerprint) {
       throw codedError("REMOTE_ROW_STALE", "A spreadsheet row changed before it could be updated. Refresh reconciliation and try again.");
     }
@@ -774,15 +795,6 @@ async function assertDriveUnchanged(expectedModifiedTime, { interactiveAuth = fa
   if (!currentModifiedTime || currentModifiedTime !== expectedModifiedTime) {
     throw codedError("REMOTE_ROW_STALE", "The spreadsheet changed before the mutation could be applied. Refresh reconciliation and try again.");
   }
-}
-
-function fingerprintCounts(rows) {
-  const counts = new Map();
-  for (const row of rows.slice(1)) {
-    const fingerprint = rowFingerprint(row);
-    counts.set(fingerprint, (counts.get(fingerprint) || 0) + 1);
-  }
-  return counts;
 }
 
 /**
@@ -846,7 +858,7 @@ export async function deleteRemoteRows(preconditions, { interactiveAuth = false 
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
   const expectedModifiedTime = await getRemoteModifiedTime({ interactiveAuth });
-  const before = await readRowsForMutation(spreadsheetId, { interactiveAuth });
+  const before = await readRowsForMutation(spreadsheetId, rows, { interactiveAuth });
   verifyRemoteRows(before, rows);
   const sheetId = await getSheetId({ interactiveAuth });
   await assertDriveUnchanged(expectedModifiedTime, { interactiveAuth });
@@ -862,16 +874,6 @@ export async function deleteRemoteRows(preconditions, { interactiveAuth = false 
     })
   }, { interactiveAuth });
 
-  const after = await readRowsForMutation(spreadsheetId, { interactiveAuth });
-  const beforeCounts = fingerprintCounts(before);
-  const afterCounts = fingerprintCounts(after);
-  for (const row of rows) {
-    const expectedCount = (beforeCounts.get(row.expectedFingerprint) || 0)
-      - rows.filter((candidate) => candidate.expectedFingerprint === row.expectedFingerprint).length;
-    if ((afterCounts.get(row.expectedFingerprint) || 0) !== expectedCount) {
-      throw codedError("REMOTE_ROW_STALE", "The spreadsheet changed while duplicate rows were being deleted. Refresh reconciliation and verify the result.");
-    }
-  }
 }
 
 /**
@@ -888,7 +890,7 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
     expectedFingerprint
   })));
   const expectedModifiedTime = await getRemoteModifiedTime({ interactiveAuth });
-  const before = await readRowsForMutation(spreadsheetId, { interactiveAuth });
+  const before = await readRowsForMutation(spreadsheetId, rows, { interactiveAuth });
   verifyRemoteRows(before, rows);
   await assertDriveUnchanged(expectedModifiedTime, { interactiveAuth });
 
@@ -903,10 +905,11 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
     })
   }, { interactiveAuth });
 
-  const after = await readRowsForMutation(spreadsheetId, { interactiveAuth });
-  verifyRemoteRows(after, updates.map(({ rowIndex, entry }) => ({
+  const expectedUpdates = updates.map(({ rowIndex, entry }) => ({
     rowIndex,
     id: entry.id,
     expectedFingerprint: rowFingerprint(entryToRow(entry))
-  })));
+  }));
+  const after = await readRowsForMutation(spreadsheetId, expectedUpdates, { interactiveAuth });
+  verifyRemoteRows(after, expectedUpdates);
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
+import { entryToRow, normalizeEntry } from "../extension/src/entries.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
 
@@ -40,8 +40,19 @@ const fixture = (over = {}) => normalizeEntry({
 });
 
 const entryRowsPath = (request) => request.method === "GET"
-  && request.pathname.endsWith("/values/time_entries!A%3AN");
+  && request.pathname.endsWith("/values:batchGet")
+  && !request.search.includes("config");
 const driveModifiedPath = { method: "GET", pathname: "/drive/v3/files/sheet-1" };
+
+function mutationRows(firstRow, entries) {
+  const lastRow = firstRow + entries.length - 1;
+  return google.json({
+    valueRanges: [{
+      range: `time_entries!A${firstRow}:N${lastRow}`,
+      values: entries.map(entryToRow)
+    }]
+  });
+}
 
 function enqueueStableDriveGate() {
   google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
@@ -69,7 +80,7 @@ describe("remote row fencing", () => {
     const second = fixture({ id: "duplicate-2", task: "original" });
     const changedSecond = fixture({ id: "duplicate-2", task: "edited outside the extension" });
     google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
-    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(first), entryToRow(changedSecond)] }));
+    google.enqueue(entryRowsPath, mutationRows(2, [first, changedSecond]));
 
     await assert.rejects(() => sheets.deleteRemoteRows([
       { id: first.id, rowIndex: 2, expectedFingerprint: sheets.rowFingerprint(entryToRow(first)) },
@@ -83,7 +94,7 @@ describe("remote row fencing", () => {
     const original = fixture();
     const changed = fixture({ task: "edited outside the extension" });
     google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
-    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(changed)] }));
+    google.enqueue(entryRowsPath, mutationRows(2, [changed]));
 
     await assert.rejects(() => sheets.updateRemoteEntries([{
       rowIndex: 2,
@@ -98,9 +109,9 @@ describe("remote row fencing", () => {
     const original = fixture();
     const replacement = fixture({ task: "local change", revision: 2 });
     enqueueStableDriveGate();
-    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(original)] }));
+    google.enqueue(entryRowsPath, mutationRows(2, [original]));
     google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/sheet-1/values:batchUpdate" }, google.json({}));
-    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(original)] }));
+    google.enqueue(entryRowsPath, mutationRows(2, [original]));
 
     await assert.rejects(() => sheets.updateRemoteEntries([{
       rowIndex: 2,
@@ -113,7 +124,7 @@ describe("remote row fencing", () => {
     const original = fixture();
     google.calls.length = 0;
     google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
-    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(original)] }));
+    google.enqueue(entryRowsPath, mutationRows(2, [original]));
     google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:31:00.000Z" }));
 
     await assert.rejects(() => sheets.updateRemoteEntries([{
@@ -143,19 +154,16 @@ describe("remote row fencing", () => {
     }));
     google.calls.length = 0;
     enqueueStableDriveGate();
-    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, ...originals.map(entryToRow)] }));
+    google.enqueue(entryRowsPath, mutationRows(2, originals));
     google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/sheet-1/values:batchUpdate" }, google.json({}));
-    google.enqueue(entryRowsPath, google.json({ values: [
-      SHEET_HEADERS,
-      ...updates.map(({ entry }) => entryToRow(entry))
-    ] }));
+    google.enqueue(entryRowsPath, mutationRows(2, updates.map(({ entry }) => entry)));
 
     await sheets.updateRemoteEntries(updates);
 
-    const verificationReads = google.calls.filter((call) => call.method === "GET"
-      && call.pathname.endsWith("/values/time_entries!A%3AN"));
+    const verificationReads = google.calls.filter(entryRowsPath);
     assert.equal(verificationReads.length, 2);
-    assert.equal(verificationReads.every((call) => !call.search.includes("ranges=")), true);
+    assert.equal(verificationReads.every((call) => call.search.includes("ranges=time_entries!A2%3AN301")), true);
+    assert.equal(verificationReads.every((call) => !call.search.includes("A%3AN")), true);
     const mutation = google.calls.find((call) => call.method === "POST"
       && call.pathname.endsWith("/values:batchUpdate"));
     assert.equal(JSON.parse(mutation.body).data.length, 300);
