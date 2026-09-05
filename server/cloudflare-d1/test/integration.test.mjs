@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { after, before, describe, it } from "node:test";
+import { assertHttpContract } from "../../http-contract.mjs";
 
 const supported = Number(process.versions.node.split(".")[0]) >= 20;
 const token = "synthetic-local-worker-token";
@@ -118,6 +119,10 @@ async function api(path, options = {}) {
 describe("local Cloudflare Worker + D1 API", { skip: !supported }, () => {
   before(async () => { worker = await startWorker(); });
   after(stopWorker);
+
+  it("matches the shared HTTP contract", async () => {
+    await assertHttpContract(worker.baseUrl, token);
+  });
 
   it("supports authenticated health, atomic append/update/config, and snapshot reads", async () => {
     const headers = { Authorization: `Bearer ${token}` };

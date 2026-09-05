@@ -31,6 +31,10 @@ final class Http
 
     public static function jsonBody(): array
     {
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        if (!preg_match('/\Aapplication\/json(?:\s*;|\s*\z)/i', $contentType)) {
+            throw new ApiException(400, 'INVALID_REQUEST', 'The request must use JSON content type.');
+        }
         $raw = file_get_contents('php://input');
         if ($raw === false || $raw === '' || strlen($raw) > 2_000_000) {
             throw new ApiException(400, 'INVALID_JSON', 'The request body must be a JSON object.');

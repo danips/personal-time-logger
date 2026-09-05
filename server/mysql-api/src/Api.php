@@ -8,21 +8,36 @@ use PDO;
 
 final class Api
 {
+    private const ROUTES = [
+        '/v1/health' => 'GET',
+        '/v1/change-token' => 'GET',
+        '/v1/snapshot' => 'GET',
+        '/v1/entries/append' => 'POST',
+        '/v1/entries/update' => 'POST',
+        '/v1/entries/delete' => 'POST',
+        '/v1/config/update' => 'POST',
+    ];
+
     public function __construct(private readonly Database $database)
     {
     }
 
     public function dispatch(string $method, string $path): array
     {
-        return match (true) {
-            $method === 'GET' && $path === '/v1/health' => $this->health(),
-            $method === 'GET' && $path === '/v1/change-token' => ['changeToken' => $this->changeToken()],
-            $method === 'GET' && $path === '/v1/snapshot' => $this->snapshot(),
-            $method === 'POST' && $path === '/v1/entries/append' => $this->append(Http::jsonBody()),
-            $method === 'POST' && $path === '/v1/entries/update' => $this->update(Http::jsonBody()),
-            $method === 'POST' && $path === '/v1/entries/delete' => $this->delete(Http::jsonBody()),
-            $method === 'POST' && $path === '/v1/config/update' => $this->updateConfig(Http::jsonBody()),
-            default => throw new ApiException(404, 'ROUTE_NOT_FOUND', 'The requested API route does not exist.'),
+        if (!isset(self::ROUTES[$path])) {
+            throw new ApiException(404, 'ROUTE_NOT_FOUND', 'The requested API route does not exist.');
+        }
+        if ($method !== self::ROUTES[$path]) {
+            throw new ApiException(405, 'METHOD_NOT_ALLOWED', 'The requested method is not allowed.');
+        }
+        return match ($path) {
+            '/v1/health' => $this->health(),
+            '/v1/change-token' => ['changeToken' => $this->changeToken()],
+            '/v1/snapshot' => $this->snapshot(),
+            '/v1/entries/append' => $this->append(Http::jsonBody()),
+            '/v1/entries/update' => $this->update(Http::jsonBody()),
+            '/v1/entries/delete' => $this->delete(Http::jsonBody()),
+            '/v1/config/update' => $this->updateConfig(Http::jsonBody()),
         };
     }
 
@@ -344,7 +359,8 @@ final class Api
 
     private function list(array $body, string $field, int $max): array
     {
-        if (!array_key_exists($field, $body) || !is_array($body[$field]) || !array_is_list($body[$field])
+        if (array_diff(array_keys($body), [$field]) || !array_key_exists($field, $body)
+            || !is_array($body[$field]) || !array_is_list($body[$field])
             || count($body[$field]) > $max) {
             throw new ApiException(400, 'INVALID_REQUEST', "{$field} must be a list of at most {$max} items.");
         }
