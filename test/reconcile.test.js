@@ -102,4 +102,13 @@ describe("compareEntries", () => {
     assert.equal(empty.remoteCount, 0);
     assert.equal(empty.inSync, 0);
   });
+
+  it("accounts for quarantined rows without offering their ids as local-only", () => {
+    const quarantined = [{ id: "entry-1", rowIndex: 4, reason: "invalid_entry" }];
+    const report = compareEntries([fixture()], [], [], quarantined);
+
+    assert.deepEqual(report.quarantined, quarantined);
+    assert.equal(report.localOnly.length, 0);
+    assert.equal(report.remoteRowCount, 1);
+  });
 });

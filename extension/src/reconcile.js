@@ -165,9 +165,10 @@ function newerSide(localEntry, remoteEntry) {
  * Sorts every entry into in-sync, differing, local-only, or remote-only.
  * Pure, so the classification can be exercised without touching the network.
  */
-export function compareEntries(localEntries, remoteEntries, duplicates = []) {
+export function compareEntries(localEntries, remoteEntries, duplicates = [], quarantined = []) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const localIds = new Set(localEntries.map((entry) => entry.id));
+  const quarantinedIds = new Set(quarantined.map((item) => item.id).filter(Boolean));
 
   const different = [];
   const localOnly = [];
@@ -175,6 +176,7 @@ export function compareEntries(localEntries, remoteEntries, duplicates = []) {
   let inSync = 0;
 
   for (const local of localEntries) {
+    if (quarantinedIds.has(local.id)) continue;
     const remote = remoteById.get(local.id);
     if (!remote) {
       localOnly.push({ id: local.id, local });
@@ -191,7 +193,7 @@ export function compareEntries(localEntries, remoteEntries, duplicates = []) {
   }
 
   for (const remote of remoteEntries) {
-    if (!localIds.has(remote.id)) remoteOnly.push({ id: remote.id, remote });
+    if (!localIds.has(remote.id) && !quarantinedIds.has(remote.id)) remoteOnly.push({ id: remote.id, remote });
   }
 
   const duplicateRowCount = duplicates.reduce((total, item) => total + item.extraRowIndexes.length, 0);
@@ -202,11 +204,12 @@ export function compareEntries(localEntries, remoteEntries, duplicates = []) {
     localOnly,
     remoteOnly,
     duplicates,
+    quarantined,
     localCount: localEntries.length,
     // Unique ids, which is what remoteEntries holds. Duplicate rows are counted
     // separately, otherwise the totals appear not to add up.
     remoteCount: remoteEntries.length,
-    remoteRowCount: remoteEntries.length + duplicateRowCount,
+    remoteRowCount: remoteEntries.length + duplicateRowCount + quarantined.length,
     duplicateRowCount
   };
 }
@@ -223,7 +226,12 @@ export async function loadReconciliation({ interactiveAuth = false, provider } =
   ]);
 
   return {
-    ...compareEntries(localEntries.map(normalizeEntry), snapshot.entries, snapshot.duplicates || []),
+    ...compareEntries(
+      localEntries.map(normalizeEntry),
+      snapshot.entries,
+      snapshot.duplicates || [],
+      snapshot.quarantined || []
+    ),
     provider: {
       id: String(remoteProvider.id || ""),
       label: String(remoteProvider.label || remoteProvider.id || "Remote storage"),

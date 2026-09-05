@@ -20,7 +20,7 @@ describe("provider-aware reconciliation UI", () => {
         label: "Future Remote",
         capabilities: { duplicateRemoteRecords: false },
         async readSnapshot() {
-          return { entries: [], duplicates: [] };
+          return { entries: [], duplicates: [], quarantined: [{ id: "bad", ref: { version: 3 }, reason: "invalid_entry" }] };
         },
         secretMethod() {}
       }
@@ -32,6 +32,7 @@ describe("provider-aware reconciliation UI", () => {
       capabilities: { duplicateRemoteRecords: false }
     });
     assert.equal(Object.hasOwn(report.provider, "secretMethod"), false);
+    assert.equal(report.quarantined[0].ref.version, 3);
   });
 
   it("keeps generic UI copy independent of spreadsheet terminology", () => {
@@ -47,6 +48,7 @@ describe("provider-aware reconciliation UI", () => {
     assert.match(reconcileUi, /duplicateRecordsSupported/);
     assert.match(reconcileUi, /Remote backend: /);
     assert.match(reconcileHtml, /id="duplicateSummaryMetric"/);
+    assert.match(reconcileHtml, /id="quarantinedSection"/);
   });
 
   it("keeps MySQL-style reports free of duplicate repair and spreadsheet controls", async () => {

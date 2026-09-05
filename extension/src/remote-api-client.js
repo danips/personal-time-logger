@@ -201,7 +201,12 @@ export function parseRemoteSnapshot(data, {
       entries.push(entry);
       entryRefs.set(entry.id, { kind: entryRefKind, version: parseRemoteVersion(record.version) });
     } catch {
-      quarantined.push({ id: String(record?.entry?.id || ""), reason: "invalid_entry" });
+      const version = Number(record?.version);
+      quarantined.push({
+        id: String(record?.entry?.id || ""),
+        reason: "invalid_entry",
+        ref: Number.isSafeInteger(version) && version > 0 ? { kind: entryRefKind, version } : null
+      });
     }
   }
 

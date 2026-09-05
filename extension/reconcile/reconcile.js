@@ -174,6 +174,29 @@ function renderDuplicates(items) {
   });
 }
 
+function renderQuarantined(items) {
+  if (!items.length) return [emptyNote("No invalid remote records were reported.")];
+
+  return items.map((item) => {
+    const row = document.createElement("article");
+    row.className = "row";
+    const reference = item.rowIndex
+      ? `row ${item.rowIndex}`
+      : item.ref?.version ? `record version ${item.ref.version}` : "unknown record";
+    const heading = document.createElement("div");
+    heading.className = "row-heading";
+    const title = document.createElement("span");
+    title.className = "row-title";
+    title.textContent = item.id || "Record without an ID";
+    heading.append(title, badge(reference), badge(item.reason || "invalid entry"));
+    row.append(
+      heading,
+      emptyNote(`Correct this record in ${report.provider?.label || "remote storage"}, then click Rescan. Sync will not push, pull, or purge this ID until it is valid.`)
+    );
+    return row;
+  });
+}
+
 /**
  * Duplicate-row deletion cannot be undone from here and touches provider storage
  * directly, so it always asks first.
@@ -229,6 +252,7 @@ function divergenceCount() {
   return report.different.length
     + report.localOnly.length
     + report.remoteOnly.length
+    + report.quarantined.length
     + (report.provider?.capabilities?.duplicateRemoteRecords === true ? report.duplicateRowCount : 0);
 }
 
@@ -241,6 +265,7 @@ function render() {
   $("#remoteRowCount").textContent = String(report.remoteRowCount);
   $("#remoteCount").textContent = String(report.remoteCount);
   $("#duplicateRowCount").textContent = String(report.duplicateRowCount);
+  $("#quarantinedCount").textContent = String(report.quarantined.length);
   $("#inSyncCount").textContent = String(report.inSync);
   $("#divergenceCount").textContent = String(divergenceCount());
 
@@ -251,6 +276,8 @@ function render() {
   $("#duplicateList").replaceChildren(...(
     supportsDuplicateRecords ? renderDuplicates(report.duplicates) : []
   ));
+  $("#quarantinedHeading").textContent = `Invalid remote records (${report.quarantined.length})`;
+  $("#quarantinedList").replaceChildren(...renderQuarantined(report.quarantined));
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
   $("#remoteOnlyHeading").textContent = `Only in remote storage (${report.remoteOnly.length})`;

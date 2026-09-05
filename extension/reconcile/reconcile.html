@@ -40,6 +40,10 @@
             <dd id="duplicateRowCount">-</dd>
           </div>
           <div>
+            <dt>Invalid remote records</dt>
+            <dd id="quarantinedCount">-</dd>
+          </div>
+          <div>
             <dt>Identical on both sides</dt>
             <dd id="inSyncCount">-</dd>
           </div>
@@ -74,6 +78,12 @@
           updated of them; the others are stale copies that only take up space.
         </p>
         <div id="duplicateList" class="group-list"></div>
+      </section>
+
+      <section id="quarantinedSection" class="panel" aria-labelledby="quarantinedHeading">
+        <h2 id="quarantinedHeading">Invalid remote records</h2>
+        <p class="note">These records are excluded from sync until corrected at the remote backend.</p>
+        <div id="quarantinedList" class="group-list"></div>
       </section>
 
       <section id="localOnlySection" class="panel" aria-labelledby="localOnlyHeading">

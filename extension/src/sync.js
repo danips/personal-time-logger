@@ -229,6 +229,7 @@ async function acknowledgePushedEntries(local, entries, pushedIds, { lease } = {
  */
 export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
   interactiveAuth,
+  blockedIds = new Set(),
   forcedIds = new Set(),
   lease,
   provider
@@ -240,7 +241,7 @@ export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
   const localMatches = [];
 
   for (const entry of local.values()) {
-    if (!entry.dirty) continue;
+    if (!entry.dirty || blockedIds.has(entry.id)) continue;
     const remote = remoteById.get(entry.id);
     if (remote && !forcedIds.has(entry.id)
       && (isRemoteNewer(remote, entry) || hasEqualTimestampConflict(remote, entry))) continue;
@@ -353,11 +354,11 @@ async function clearCompletedResolutions(resolutionIds, { lease } = {}) {
   });
 }
 
-export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set(), { lease } = {}) {
+export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Set(), { blockedIds = new Set(), lease } = {}) {
   const localById = local;
   const applied = [];
   const candidates = remoteEntries
-    .filter((remote) => !pushedIds.has(remote.id))
+    .filter((remote) => !pushedIds.has(remote.id) && !blockedIds.has(remote.id))
     .map((remote) => ({ remote, observed: localById.get(remote.id) }))
     // A remote value which was not newer than the snapshot cannot win. Recheck
     // inside the transaction because the local entry may change while sync I/O
@@ -441,24 +442,25 @@ function isExpiredDeletion(deletedAt) {
 }
 
 export async function purgeDeletedEntries(local, remoteEntries, entryRefs, duplicates = [], {
+  blockedIds = new Set(),
   interactiveAuth = false,
   lease,
   provider
 } = {}) {
   const remoteProvider = providerOrDefault(provider);
   const expiredRows = remoteEntries
-    .filter((entry) => isExpiredDeletion(entry.deleted_at) && entryRefs.has(entry.id))
+    .filter((entry) => !blockedIds.has(entry.id) && isExpiredDeletion(entry.deleted_at) && entryRefs.has(entry.id))
     .map((entry) => ({
       id: entry.id,
       expectedRef: entryRefs.get(entry.id)
     }));
   for (const duplicate of duplicates) {
-    if (!duplicate?.entry || !isExpiredDeletion(duplicate.entry.deleted_at)) continue;
+    if (!duplicate?.entry || blockedIds.has(duplicate.id) || !isExpiredDeletion(duplicate.entry.deleted_at)) continue;
     for (const ref of duplicate.extraRefs || []) expiredRows.push({ id: duplicate.id, expectedRef: ref });
   }
 
   // The provider owns ordering and optimistic-concurrency details for deletion.
-  let blockedIds = new Set();
+  let failedIds = new Set();
   if (expiredRows.length) {
     try {
       await lease?.assert();
@@ -467,18 +469,21 @@ export async function purgeDeletedEntries(local, remoteEntries, entryRefs, dupli
       for (const { id } of expiredRows) entryRefs.delete(id);
     } catch (error) {
       // Keep the local copies so the rows are retried on the next sync.
-      blockedIds = new Set(expiredRows.map((row) => row.id));
+      failedIds = new Set(expiredRows.map((row) => row.id));
       await recordDiagnostic({
         subsystem: "sync",
         phase: "purge",
         error,
-        entryCount: blockedIds.size,
+        entryCount: failedIds.size,
         recovery: "Expired deletions will retry during the next sync."
       });
     }
   }
 
-  const candidates = [...local.values()].filter((entry) => isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id));
+  const candidates = [...local.values()].filter((entry) => (
+    isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id) && !failedIds.has(entry.id)
+  ));
+  if (!candidates.length) return 0;
   const expectedById = new Map(candidates.map((entry) => [entry.id, entryFingerprint(entry)]));
   await lease?.assert();
   const deletedIds = await mutateEntries(candidates.map((entry) => entry.id), (entries) => {
@@ -763,14 +768,17 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
         phase: "remote_read",
         code: "REMOTE_ROWS_QUARANTINED",
         entryCount: snapshot.quarantined.length,
-        recovery: "Open Reconcile and correct the invalid spreadsheet rows."
+        recovery: "Open Reconcile and correct the invalid remote records."
       });
     }
+
+    const quarantinedIds = new Set((snapshot.quarantined || []).map((item) => item.id).filter(Boolean));
 
     const forcedResolutions = await verifiedLocalResolutions(local, snapshot.entries);
     phase = "push";
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.entryRefs, {
       interactiveAuth,
+      blockedIds: quarantinedIds,
       forcedIds: new Set(forcedResolutions.keys()),
       lease,
       provider
@@ -780,12 +788,13 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
       .map(([, resolutionId]) => resolutionId));
     await clearCompletedResolutions(completedResolutionIds, { lease });
     phase = "pull";
-    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { lease });
+    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { blockedIds: quarantinedIds, lease });
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
     phase = "purge";
     const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.entryRefs, snapshot.duplicates, {
       interactiveAuth,
+      blockedIds: quarantinedIds,
       lease,
       provider
     });

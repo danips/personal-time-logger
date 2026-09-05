@@ -8,7 +8,7 @@ installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
 
 const db = await import("../extension/src/db.js");
-const { markMultipleActiveTimers, purgeDeletedEntries, reseedForNewSpreadsheet } = await import("../extension/src/sync.js");
+const { markMultipleActiveTimers, purgeDeletedEntries, pushDirtyEntries, reseedForNewSpreadsheet } = await import("../extension/src/sync.js");
 const { RECONCILIATION_INTENTS_KEY } = await import("../extension/src/reconcile.js");
 
 const entry = (over = {}) => ({
@@ -37,6 +37,36 @@ function localState(entries) {
 }
 
 describe("sync maintenance transactions", () => {
+  it("does not push a dirty entry whose remote record is quarantined", async () => {
+    const dirty = entry({ id: "quarantined-dirty", dirty: true });
+    await seedEntry(db, dirty);
+    let writes = 0;
+    const provider = {
+      async updateEntries() { writes += 1; },
+      async appendEntries() { writes += 1; return []; }
+    };
+
+    const pushed = await pushDirtyEntries(localState([dirty]), [], new Map(), {
+      blockedIds: new Set([dirty.id]),
+      provider
+    });
+
+    assert.equal(writes, 0);
+    assert.equal(pushed.size, 0);
+    assert.equal((await db.getEntry(dirty.id)).dirty, true);
+  });
+
+  it("retains an expired tombstone whose remote record is quarantined", async () => {
+    const tombstone = entry({ id: "quarantined-tombstone", deleted_at: "2020-01-01T00:00:00.000Z" });
+    await seedEntry(db, tombstone);
+    const local = localState([tombstone]);
+
+    assert.equal(await purgeDeletedEntries(local, [], new Map(), [], {
+      blockedIds: new Set([tombstone.id])
+    }), 0);
+    assert.deepEqual(await db.getEntry(tombstone.id), tombstone);
+  });
+
   it("does not purge a tombstone restored after the sync snapshot", async () => {
     const snapshot = entry({ id: "restored-tombstone", deleted_at: "2020-01-01T00:00:00.000Z" });
     const restored = entry({ id: snapshot.id, task: "Restored", revision: 2, dirty: true });
