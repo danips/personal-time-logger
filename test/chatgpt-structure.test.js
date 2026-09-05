@@ -38,7 +38,7 @@ describe("ChatGPT usage security boundaries", () => {
 
   it("caps responses before parsing and stores normalized snapshots", () => {
     assert.match(service, /MAX_RESPONSE_BYTES/);
-    assert.match(service, /TextEncoder\(\)\.encode\(text\)\.byteLength/);
+    assert.match(service, /readBoundedJson\(\s*response,\s*MAX_RESPONSE_BYTES/);
     assert.match(service, /normalizeUsageResponse/);
     assert.doesNotMatch(service, /rawBody|raw_response/);
   });
