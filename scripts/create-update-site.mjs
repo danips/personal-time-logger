@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -6,6 +6,17 @@ import process from "node:process";
 import { parseArgs, promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+async function listSourceFiles(directory, relative = "") {
+  const files = [];
+  for (const entry of await readdir(path.join(directory, relative), { withFileTypes: true })) {
+    const name = relative ? `${relative}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await listSourceFiles(directory, name));
+    else if (entry.isFile()) files.push(name);
+    else throw new Error(`release source contains unsupported file type: ${name}`);
+  }
+  return files.sort();
+}
 
 const cliArgs = process.argv.slice(2);
 const optionNames = ["base-url", "expected-version", "output", "source", "xpi"];
@@ -65,6 +76,32 @@ if (signedManifest.version !== manifest.version) {
 }
 if (signedManifest.browser_specific_settings?.gecko?.id !== extensionId) {
   throw new Error("The signed XPI extension ID does not match the release source manifest");
+}
+
+// Firefox signing adds only META-INF signature records; every application file
+// must remain byte-for-byte identical to the prepared release source.
+let archiveFiles;
+try {
+  const { stdout } = await execFileAsync("unzip", ["-Z1", xpiPath]);
+  archiveFiles = stdout.split(/\r?\n/)
+    .filter((name) => name && !name.endsWith("/") && !name.startsWith("META-INF/"))
+    .sort();
+} catch {
+  throw new Error("The signed XPI file list could not be read");
+}
+const sourceFiles = await listSourceFiles(sourceDirectory);
+if (new Set(archiveFiles).size !== archiveFiles.length
+  || JSON.stringify(archiveFiles) !== JSON.stringify(sourceFiles)) {
+  throw new Error("The signed XPI application file list does not match the release source");
+}
+for (const name of sourceFiles) {
+  const [{ stdout }, sourceBytes] = await Promise.all([
+    execFileAsync("unzip", ["-p", xpiPath, name], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 }),
+    readFile(path.join(sourceDirectory, name))
+  ]);
+  if (!Buffer.from(stdout).equals(sourceBytes)) {
+    throw new Error(`The signed XPI application file differs from the release source: ${name}`);
+  }
 }
 
 const xpiBytes = await readFile(xpiPath);

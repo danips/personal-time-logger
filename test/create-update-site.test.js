@@ -59,7 +59,11 @@ function storedZip(entries) {
   return Buffer.concat([...localFiles, centralBytes, end]);
 }
 
-async function fixture({ signedVersion = "1.2.3", signedId = "personal-time-logger@example.local" } = {}) {
+async function fixture({
+  signedVersion = "1.2.3",
+  signedId = "personal-time-logger@example.local",
+  signedBackground = "reviewed extension bytes"
+} = {}) {
   await mkdir(artifactsDirectory, { recursive: true });
   const directory = await mkdtemp(join(artifactsDirectory, ".update-site-test-"));
   const source = join(directory, "source");
@@ -70,13 +74,15 @@ async function fixture({ signedVersion = "1.2.3", signedId = "personal-time-logg
     browser_specific_settings: { gecko: { id: "personal-time-logger@example.local", strict_min_version: "128.0" } }
   };
   await writeFile(join(source, "manifest.json"), JSON.stringify(sourceManifest));
+  await writeFile(join(source, "background.js"), "reviewed extension bytes");
   await writeFile(xpi, storedZip([
     ["manifest.json", JSON.stringify({
       ...sourceManifest,
       version: signedVersion,
       browser_specific_settings: { gecko: { ...sourceManifest.browser_specific_settings.gecko, id: signedId } }
     })],
-    ["background.js", "signed extension bytes"]
+    ["background.js", signedBackground],
+    ["META-INF/signature.sig", "signer metadata"]
   ]));
   return { directory, source, xpi, output: join(directory, "site") };
 }
@@ -125,6 +131,18 @@ describe("create update site CLI", () => {
       await assert.rejects(
         () => command("--base-url", "https://example.invalid", "--expected-version", "1.2.3", "--xpi", files.xpi, "--source", files.source, "--output", files.output),
         /signed XPI manifest version.*does not match source manifest version/
+      );
+    } finally {
+      await rm(files.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects changed application code with the same manifest identity", async () => {
+    const files = await fixture({ signedBackground: "different extension bytes" });
+    try {
+      await assert.rejects(
+        () => command("--base-url", "https://example.invalid", "--expected-version", "1.2.3", "--xpi", files.xpi, "--source", files.source, "--output", files.output),
+        /application file differs.*background\.js/
       );
     } finally {
       await rm(files.directory, { recursive: true, force: true });
