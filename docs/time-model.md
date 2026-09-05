@@ -49,15 +49,13 @@ the same date Tempo receives.
 
 ### D1 — Remote optimistic concurrency
 
-Every remote update or deletion is fenced by the provider reference observed in
-the snapshot. Google Sheets uses a complete serialized row fingerprint and
-re-reads the row immediately before mutation; MySQL uses an API remote version.
-The provider verifies the intended result afterward. A mismatch is a
-reconciliation conflict; the extension never intentionally overwrites a remote
-record that fails preflight. Google Sheets has no conditional row-update API,
-so a manual edit can still land in the narrow gap after preflight and before the
-write; postflight detects observable interleavings, but cannot provide a
-database-style atomic compare-and-swap guarantee.
+Every remote update or deletion checks the provider reference observed in the
+snapshot. Google Sheets uses a complete serialized row fingerprint, re-reads the
+row, and checks Drive's modification time again immediately before mutation;
+MySQL uses an API remote version. Google Sheets is still single-writer storage:
+it has no conditional row-update API, and an edit can land between the final
+Drive check and the write. The postflight check can report that race after data
+was changed, but cannot provide database-style atomic compare-and-swap.
 
 ### D2 — Cross-device conflict ordering
 

@@ -768,6 +768,14 @@ function verifyRemoteRows(rows, expected) {
   }
 }
 
+async function assertDriveUnchanged(expectedModifiedTime, { interactiveAuth = false } = {}) {
+  if (!expectedModifiedTime) return;
+  const currentModifiedTime = await getRemoteModifiedTime({ interactiveAuth });
+  if (!currentModifiedTime || currentModifiedTime !== expectedModifiedTime) {
+    throw codedError("REMOTE_ROW_STALE", "The spreadsheet changed before the mutation could be applied. Refresh reconciliation and try again.");
+  }
+}
+
 function fingerprintCounts(rows) {
   const counts = new Map();
   for (const row of rows.slice(1)) {
@@ -837,9 +845,11 @@ export async function deleteRemoteRows(preconditions, { interactiveAuth = false 
 
   const spreadsheetId = await getSpreadsheetId();
   if (!spreadsheetId) throw codedError("SPREADSHEET_MISSING", "Set a Google Spreadsheet ID");
+  const expectedModifiedTime = await getRemoteModifiedTime({ interactiveAuth });
   const before = await readRowsForMutation(spreadsheetId, { interactiveAuth });
   verifyRemoteRows(before, rows);
   const sheetId = await getSheetId({ interactiveAuth });
+  await assertDriveUnchanged(expectedModifiedTime, { interactiveAuth });
 
   await apiFetch(`/${spreadsheetId}:batchUpdate`, {
     method: "POST",
@@ -877,8 +887,10 @@ export async function updateRemoteEntries(updates, { interactiveAuth = false } =
     id: entry.id,
     expectedFingerprint
   })));
+  const expectedModifiedTime = await getRemoteModifiedTime({ interactiveAuth });
   const before = await readRowsForMutation(spreadsheetId, { interactiveAuth });
   verifyRemoteRows(before, rows);
+  await assertDriveUnchanged(expectedModifiedTime, { interactiveAuth });
 
   await apiFetch(`/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",

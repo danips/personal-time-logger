@@ -284,6 +284,8 @@ An idle cycle costs a single request. A timer left running overnight keeps runni
 
 Where a valid entry ID appears in several rows, the valid row with the newest `updated_at` is selected regardless of its position, so a stale duplicate cannot overwrite a newer one. Equal timestamps do not provide a reliable ordering and duplicate rows remain visible for review. Malformed rows are quarantined instead of participating in the choice. Surplus rows are deleted only after their full row fingerprints are rechecked.
 
+Google Sheets must be treated as single-writer storage. Immediately before an existing row is rewritten or deleted, the extension asks Drive whether the file changed during preflight and stops if it did. This narrows the race window but cannot make Sheets mutations atomic, so do not edit the sheet or sync another device while a sync is running.
+
 Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the active provider receives the same tombstone instead of an immediate physical removal. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote entries. Tombstones older than 14 days are removed from remote storage and local storage.
 
 ## Reconcile Screen
@@ -292,7 +294,7 @@ The ⇄ button in the popup header opens a page comparing this device with the a
 
 Differing entries list each field with the device value beside the active remote value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
 
-Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck the complete record before the request and verify the result afterward. Providers without physical duplicate records do not show duplicate repair controls. Google Sheets has no atomic compare-and-swap, so a manual edit in the narrow interval between those requests is detected after the fact rather than prevented. Deleting duplicate Google Sheet rows is the one action that writes directly to the spreadsheet, because a duplicate row has no local counterpart; it verifies every target before sending the batch and checks the result afterward.
+Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck the complete record before the request and verify the result afterward. Providers without physical duplicate records do not show duplicate repair controls. Google Sheets has no atomic compare-and-swap. The extension checks Drive's modification time immediately before a rewrite or delete and stops when it changed during preflight, but a smaller race remains between that final check and the mutation. Deleting duplicate Google Sheet rows is the one action that writes directly to the spreadsheet, because a duplicate row has no local counterpart; it verifies every target before sending the batch and checks the result afterward.
 
 ## Known Limitations
 

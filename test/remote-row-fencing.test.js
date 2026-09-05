@@ -40,6 +40,12 @@ const fixture = (over = {}) => normalizeEntry({
 
 const entryRowsPath = (request) => request.method === "GET"
   && request.pathname.endsWith("/values/time_entries!A%3AN");
+const driveModifiedPath = { method: "GET", pathname: "/drive/v3/files/sheet-1" };
+
+function enqueueStableDriveGate() {
+  google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
+  google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
+}
 
 before(async () => {
   db = await import("../extension/src/db.js");
@@ -61,6 +67,7 @@ describe("remote row fencing", () => {
     const first = fixture({ id: "duplicate-1" });
     const second = fixture({ id: "duplicate-2", task: "original" });
     const changedSecond = fixture({ id: "duplicate-2", task: "edited outside the extension" });
+    google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
     google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(first), entryToRow(changedSecond)] }));
 
     await assert.rejects(() => sheets.deleteRemoteRows([
@@ -74,6 +81,7 @@ describe("remote row fencing", () => {
   it("rejects a same-id row whose other fields changed before an update", async () => {
     const original = fixture();
     const changed = fixture({ task: "edited outside the extension" });
+    google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
     google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(changed)] }));
 
     await assert.rejects(() => sheets.updateRemoteEntries([{
@@ -88,6 +96,7 @@ describe("remote row fencing", () => {
   it("detects a row that changes after preflight verification", async () => {
     const original = fixture();
     const replacement = fixture({ task: "local change", revision: 2 });
+    enqueueStableDriveGate();
     google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(original)] }));
     google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/sheet-1/values:batchUpdate" }, google.json({}));
     google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(original)] }));
@@ -97,6 +106,23 @@ describe("remote row fencing", () => {
       entry: replacement,
       expectedFingerprint: sheets.rowFingerprint(entryToRow(original))
     }]), { code: "REMOTE_ROW_STALE" });
+  });
+
+  it("stops when Drive reports a row shift between preflight and mutation", async () => {
+    const original = fixture();
+    google.calls.length = 0;
+    google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:30:00.000Z" }));
+    google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, entryToRow(original)] }));
+    google.enqueue(driveModifiedPath, google.json({ modifiedTime: "2026-07-27T10:31:00.000Z" }));
+
+    await assert.rejects(() => sheets.updateRemoteEntries([{
+      rowIndex: 2,
+      entry: fixture({ task: "local change", revision: 2 }),
+      expectedFingerprint: sheets.rowFingerprint(entryToRow(original))
+    }]), { code: "REMOTE_ROW_STALE" });
+
+    assert.equal(google.calls.some((call) => call.method === "POST"
+      && call.pathname.endsWith("/values:batchUpdate")), false);
   });
 
   it("uses bounded contiguous reads for a large row-verification batch", async () => {
@@ -115,6 +141,7 @@ describe("remote row fencing", () => {
       expectedFingerprint: sheets.rowFingerprint(entryToRow(original))
     }));
     google.calls.length = 0;
+    enqueueStableDriveGate();
     google.enqueue(entryRowsPath, google.json({ values: [SHEET_HEADERS, ...originals.map(entryToRow)] }));
     google.enqueue({ method: "POST", pathname: "/v4/spreadsheets/sheet-1/values:batchUpdate" }, google.json({}));
     google.enqueue(entryRowsPath, google.json({ values: [
