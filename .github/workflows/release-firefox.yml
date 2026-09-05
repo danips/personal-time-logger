@@ -107,6 +107,9 @@ jobs:
       - name: Run unit tests
         run: timeout 10m npm test
 
+      - name: Audit release tooling
+        run: timeout 5m npm run audit
+
       - name: Prepare release source
         run: >-
           timeout 2m node scripts/prepare-firefox-release.mjs
