@@ -234,11 +234,11 @@ describe("deterministic anomalies", () => {
     assert.equal(SHORT_ANOMALY_SECONDS, 60);
     assert.equal(LONG_SESSION_SECONDS, 21_600);
     assert.equal(STALE_ACTIVE_SECONDS, 28_800);
-    assert.equal(anomalies.filter(({ entryId }) => entryId === "short").length, 4);
-    assert.ok(anomalies.some(({ type, entryId }) => type === "very_long" && entryId === "long"));
-    assert.ok(anomalies.some(({ type, entryId }) => type === "stale_active" && entryId === "stale"));
-    assert.ok(!anomalies.some(({ type, entryId }) => type === "very_short" && entryId === "not-short"));
-    assert.ok(!anomalies.some(({ type, entryId }) => type === "stale_active" && entryId === "fresh"));
+    assert.equal(anomalies.rows.filter(({ entryId }) => entryId === "short").length, 4);
+    assert.ok(anomalies.rows.some(({ type, entryId }) => type === "very_long" && entryId === "long"));
+    assert.ok(anomalies.rows.some(({ type, entryId }) => type === "stale_active" && entryId === "stale"));
+    assert.ok(!anomalies.rows.some(({ type, entryId }) => type === "very_short" && entryId === "not-short"));
+    assert.ok(!anomalies.rows.some(({ type, entryId }) => type === "stale_active" && entryId === "fresh"));
   });
 
   it("emits overlapping pairs once but not adjacent or effective-only tails", () => {
@@ -247,8 +247,22 @@ describe("deterministic anomalies", () => {
       entry("b", "2026-09-02T09:30:00Z", "2026-09-02T10:30:00Z"),
       entry("c", "2026-09-02T10:00:00Z", "2026-09-02T11:00:00Z")
     ], primary, { now });
-    const overlaps = detectAnomalies(sessions, { now }).filter(({ type }) => type === "overlap");
+    const overlaps = detectAnomalies(sessions, { now }).rows.filter(({ type }) => type === "overlap");
     assert.deepEqual(overlaps.map(({ entryId, relatedEntryId }) => [entryId, relatedEntryId]), [["b", "c"], ["a", "b"]]);
+  });
+
+  it("reports dense overlap totals without materializing every pair", () => {
+    const sessions = sessionsForPeriod(Array.from({ length: 101 }, (_, index) => entry(
+      `dense-${index}`,
+      "2026-09-02T09:00:00Z",
+      "2026-09-02T10:00:00Z"
+    )), primary, { now });
+
+    const anomalies = detectAnomalies(sessions, { now });
+    assert.deepEqual(anomalies.rows, []);
+    assert.equal(anomalies.overlapCount, 5_050);
+    assert.equal(anomalies.omittedOverlapCount, 5_050);
+    assert.equal(anomalies.totalCount, 5_050);
   });
 
   it("handles multiple stale active entries and reports their overlap once", () => {
@@ -258,13 +272,13 @@ describe("deterministic anomalies", () => {
       entry("active-b", "2026-09-07T09:00:00Z", "")
     ];
     const report = buildAnalyticsReport(running, { primary, comparison, now: activeNow });
-    const stale = report.anomalies.filter(({ type }) => type === "stale_active");
-    const overlaps = report.anomalies.filter(({ type }) => type === "overlap");
+    const stale = report.anomalies.rows.filter(({ type }) => type === "stale_active");
+    const overlaps = report.anomalies.rows.filter(({ type }) => type === "overlap");
 
     assert.equal(report.primary.sessionCount, 2);
     assert.deepEqual(stale.map(({ entryId }) => entryId), ["active-b", "active-a"]);
     assert.deepEqual(overlaps.map(({ entryId, relatedEntryId }) => [entryId, relatedEntryId]), [["active-a", "active-b"]]);
-    assert.deepEqual(report.anomalies.map(({ type }) => type), ["stale_active", "stale_active", "overlap"]);
+    assert.deepEqual(report.anomalies.rows.map(({ type }) => type), ["stale_active", "stale_active", "overlap"]);
   });
 });
 
@@ -280,6 +294,6 @@ describe("composed report", () => {
     assert.equal(report.projects[0].label, "Beta");
     assert.equal(report.descriptions[0].description, "Planning");
     assert.equal(report.fragmentation.sessionCount, 1);
-    assert.equal(report.anomalies.length, 0);
+    assert.equal(report.anomalies.totalCount, 0);
   });
 });

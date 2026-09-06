@@ -78,7 +78,7 @@ function renderSummary(report) {
     summaryCard("Project switches", String(fragmentation.projectSwitches)),
     summaryCard("Task switches", String(fragmentation.taskSwitches)),
     summaryCard("Short sessions", String(fragmentation.shortSessionCount), "Under 15 minutes"),
-    summaryCard("Detected anomalies", String(anomalies.length))
+    summaryCard("Detected anomalies", String(anomalies.totalCount))
   ]);
 }
 
@@ -155,9 +155,9 @@ function renderFragmentation({ fragmentation }) {
 }
 
 function renderAnomalies({ anomalies }) {
-  const visible = anomaliesExpanded ? anomalies : anomalies.slice(0, 100);
-  const total = anomalies.length < 100 ? anomalies.length : anomalies.length + Math.max(0, (anomalies.overlapCount || 0) - anomalies.filter(({ type }) => type === "overlap").length);
-  $("#anomalyCount").textContent = String(total);
+  const { rows, totalCount, omittedOverlapCount } = anomalies;
+  const visible = anomaliesExpanded ? rows : rows.slice(0, 100);
+  $("#anomalyCount").textContent = String(totalCount);
   replaceChildren($("#anomalyRows"), visible.map((anomaly) => {
     const row = element("article", "anomaly-row");
     const title = element("div");
@@ -166,10 +166,15 @@ function renderAnomalies({ anomalies }) {
     row.append(title, element("div", "", `${anomaly.project} / ${anomaly.task}`), element("div", "", anomaly.message));
     return row;
   }));
-  $("#anomaliesEmpty").hidden = total > 0;
+  $("#anomaliesEmpty").hidden = totalCount > 0;
+  const omitted = $("#anomaliesNote");
+  omitted.hidden = omittedOverlapCount === 0;
+  omitted.textContent = omittedOverlapCount
+    ? `${omittedOverlapCount} overlapping pairs omitted from the detail list.`
+    : "";
   const loadMore = $("#loadMoreAnomalies");
-  loadMore.hidden = anomaliesExpanded || anomalies.length <= 100;
-  loadMore.textContent = `Load more (${anomalies.length - 100} remaining)`;
+  loadMore.hidden = anomaliesExpanded || rows.length <= 100;
+  loadMore.textContent = `Load more (${rows.length - 100} remaining)`;
 }
 
 function renderDescriptions() {

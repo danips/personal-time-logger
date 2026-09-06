@@ -335,6 +335,7 @@ async function withMigrationLease(id, callback) {
 }
 
 async function switchBackend(targetId, state) {
+  const committedState = progressState(state, { phase: "post_switch" });
   await mutateSettings([
     SETTING_KEY.REMOTE_BACKEND,
     SETTING_KEY.REMOTE_BACKEND_ESTABLISHED,
@@ -356,8 +357,9 @@ async function switchBackend(targetId, state) {
     settings.set(SETTING_KEY.SYNC_BACKOFF_SECONDS, 0);
     settings.set(SETTING_KEY.SYNC_BACKOFF_UNTIL, 0);
     settings.set(SETTING_KEY.RECONCILIATION_INTENTS, []);
-    settings.set(SETTING_KEY.STORAGE_MIGRATION_STATE, progressState(state, { phase: "post_switch" }));
+    settings.set(SETTING_KEY.STORAGE_MIGRATION_STATE, committedState);
   });
+  return committedState;
 }
 
 async function finishMigration(state) {
@@ -367,6 +369,13 @@ async function finishMigration(state) {
 async function failMigration(state, error) {
   if (!state) return;
   await saveState(progressState(state, { phase: "failed", error_code: String(error?.code || "MIGRATION_FAILED") }));
+}
+
+async function preservePostSwitchFailure(state, error) {
+  const durable = await readState().catch(() => null);
+  if (!durable || durable.phase !== "post_switch" || durable.migration_id !== state?.migration_id) return false;
+  await saveState(progressState(durable, { error_code: String(error?.code || "MIGRATION_POST_SWITCH_FAILED") }));
+  return true;
 }
 
 async function localMigrationSnapshot() {
@@ -441,13 +450,13 @@ export async function activateProviderFromLocal(targetProviderId, { onProgress }
       if (await migrationDigest(await localMigrationSnapshot()) !== sourceDigest) {
         throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, `Local data changed during ${targetProvider.label} setup.`);
       }
-      await switchBackend(targetId, state);
+      state = await switchBackend(targetId, state);
     });
 
     await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
     return finishMigration(state);
   } catch (error) {
-    await failMigration(state, error);
+    if (!await preservePostSwitchFailure(state, error)) await failMigration(state, error);
     throw error;
   }
 }
@@ -497,13 +506,13 @@ export async function activateProviderFromRemote(targetProviderId, { onProgress 
       });
       await saveState(state);
       onProgress?.(state);
-      await switchBackend(targetId, state);
+      state = await switchBackend(targetId, state);
     });
 
     await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
     return finishMigration(state);
   } catch (error) {
-    await failMigration(state, error);
+    if (!await preservePostSwitchFailure(state, error)) await failMigration(state, error);
     throw error;
   }
 }
@@ -516,7 +525,12 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
   const targetId = cleanProviderId(targetProviderId);
   let state = await readState();
   if (state?.phase === "post_switch") {
-    await syncNow({ force: true, interactiveAuth, migrationId: state.migration_id });
+    try {
+      await syncNow({ force: true, interactiveAuth, migrationId: state.migration_id });
+    } catch (error) {
+      await preservePostSwitchFailure(state, error);
+      throw error;
+    }
     return finishMigration(state);
   }
   if (isActiveState(state)) {
@@ -583,7 +597,7 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
         if (await migrationDigest(finalSourceSnapshot) !== sourceDigest) {
           throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "The source changed during migration.");
         }
-        await switchBackend(state.target_provider, state);
+        state = await switchBackend(state.target_provider, state);
         return true;
       });
       if (result) {
@@ -592,13 +606,10 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
         return finishMigration(postSwitch || state);
       }
     } catch (error) {
-      const durable = await readState().catch(() => null);
-      if (durable?.phase === "post_switch") {
+      if (await preservePostSwitchFailure(state, error)) {
         // The backend switch is durable. Preserve that recovery phase even if
         // the first post-switch sync failed; retry must finalize, never pretend
         // the active dataset was rolled back.
-        state = progressState(durable, { error_code: String(error?.code || "MIGRATION_POST_SWITCH_FAILED") });
-        await saveState(state);
         throw error;
       }
       state = progressState(state, { attempt, error_code: String(error?.code || "MIGRATION_FAILED") });

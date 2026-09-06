@@ -100,6 +100,10 @@ function rowsAsText(rows) {
   return (rows || []).map((row) => (row || []).map((cell) => (cell == null ? "" : String(cell))));
 }
 
+function configRowFingerprint(row) {
+  return JSON.stringify([row?.[0] || "", row?.[1] || "", row?.[2] || ""]);
+}
+
 // The Sheets values API omits trailing blank cells. Keep every entry row at the
 // sheet schema width so an intentionally blank final `multiply` cell does not
 // look like a truncated record.
@@ -537,7 +541,7 @@ function rowsToConfig(rows) {
       value: row[1],
       updated_at: updatedAt
     };
-    configRows.set(key, { rowIndex: index + 2, expectedFingerprint: JSON.stringify(row.slice(0, 3)) });
+    configRows.set(key, { rowIndex: index + 2, expectedFingerprint: configRowFingerprint(row) });
   });
   return { config, configRows };
 }
@@ -551,11 +555,11 @@ export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, 
   if (!spreadsheetId) return;
   const beforeData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_FULL_RANGE)}?valueRenderOption=UNFORMATTED_VALUE`, {}, { interactiveAuth });
   const beforeRows = rowsAsText(beforeData.values || []);
-  const nextFingerprint = [key, value, updatedAt].join("\u0000");
+  const nextFingerprint = configRowFingerprint([key, value, updatedAt]);
 
   if (rowIndex > 0) {
     const current = beforeRows[rowIndex - 1] || [];
-    if (current[0] !== key || current.slice(0, 3).join("\u0000") !== expectedFingerprint) {
+    if (current[0] !== key || configRowFingerprint(current) !== expectedFingerprint) {
       throw codedError("REMOTE_ROW_STALE", "A config row changed before it could be updated.");
     }
     await apiFetch(`/${spreadsheetId}/values/${encodeRange(`${CONFIG_SHEET_NAME}!A${rowIndex}:C${rowIndex}`)}?valueInputOption=RAW`, {
@@ -572,7 +576,7 @@ export async function updateRemoteConfig(key, value, updatedAt, { rowIndex = 0, 
     }, { interactiveAuth });
   }
   const afterData = await apiFetch(`/${spreadsheetId}/values/${encodeRange(CONFIG_FULL_RANGE)}?valueRenderOption=UNFORMATTED_VALUE`, {}, { interactiveAuth });
-  if (!rowsAsText(afterData.values || []).slice(1).some((row) => row.slice(0, 3).join("\u0000") === nextFingerprint)) {
+  if (!rowsAsText(afterData.values || []).slice(1).some((row) => configRowFingerprint(row) === nextFingerprint)) {
     throw codedError("REMOTE_ROW_STALE", "The config write could not be verified.");
   }
 }

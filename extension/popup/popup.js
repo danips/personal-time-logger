@@ -57,10 +57,8 @@ mountEntryEditor(document.getElementById("popupEntryEditor"), {
 });
 
 let activeEntries = [];
-let editingId = "";
-let editingRevision = null;
-let editingMultiplyValue = "";
-let mergeTargetRevisions = new Map();
+let editorSession = null;
+let editorToken = 0;
 let ticker = null;
 let unsubscribeEntryEvents = null;
 let eventsBound = false;
@@ -641,15 +639,21 @@ async function stopTimer(target) {
 }
 
 async function showEdit(id) {
+  const token = ++editorToken;
   const entry = await getEntry(id);
-  if (!entry) return;
-  editingId = id;
-  editingRevision = Number(entry.revision || 0);
-  editingMultiplyValue = entry.multiply || "";
+  if (!entry || token !== editorToken) return;
+  const session = {
+    token,
+    id,
+    revision: Number(entry.revision || 0),
+    multiplyValue: entry.multiply || "",
+    mergeTargetRevisions: new Map()
+  };
+  editorSession = session;
   $editProjectDot.classList.toggle("hidden", !entry.project);
   $editProjectDot.style.setProperty("--project-color", projectColor(entry));
   writeEntryForm(editFields(), entry);
-  renderMergeTargets(entry, recentEntries);
+  renderMergeTargets(entry, recentEntries, session);
   setNewTimerOpen(false);
   $editPanel.classList.remove("hidden");
   $editProject.focus();
@@ -674,21 +678,21 @@ function editActiveTimerFromKeyboard(event) {
   editActiveTimer(event);
 }
 
-function hideEdit() {
-  editingId = "";
-  editingRevision = null;
-  editingMultiplyValue = "";
-  mergeTargetRevisions = new Map();
+function hideEdit(session = editorSession) {
+  if (session && editorSession !== session) return false;
+  editorToken += 1;
+  editorSession = null;
   $mergeTarget.replaceChildren();
   $mergeEdit.disabled = true;
   setEntryEditorMergeAvailability($mergeTools, false);
   $editProjectDot.classList.add("hidden");
   $editPanel.classList.add("hidden");
+  return true;
 }
 
-function renderMergeTargets(entry, entries) {
+function renderMergeTargets(entry, entries, session) {
   const candidates = entries.filter((candidate) => canMergeEntries(entry, candidate));
-  mergeTargetRevisions = new Map(candidates.map((candidate) => [candidate.id, Number(candidate.revision || 0)]));
+  session.mergeTargetRevisions = new Map(candidates.map((candidate) => [candidate.id, Number(candidate.revision || 0)]));
   const options = candidates.map((candidate) => {
     const option = document.createElement("option");
     option.value = candidate.id;
@@ -701,17 +705,18 @@ function renderMergeTargets(entry, entries) {
 }
 
 async function saveEdit() {
-  if (!editingId) return;
+  const session = editorSession;
+  if (!session) return;
   try {
     await updateEntry(
-      editingId,
-      readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
-      { expectedRevision: editingRevision }
+      session.id,
+      readEntryForm(editFields(), { multiplyValue: session.multiplyValue }),
+      { expectedRevision: session.revision }
     );
-    hideEdit();
+    if (editorSession === session) hideEdit(session);
     queueSync();
   } catch (error) {
-    if (error.code === "STORAGE_CONFLICT") hideEdit();
+    if (error.code === "STORAGE_CONFLICT" && editorSession === session) hideEdit(session);
     throw error;
   }
 }
@@ -719,37 +724,40 @@ async function saveEdit() {
 function saveEditOnEnter(event) {
   if (event.key !== "Enter" || event.isComposing || event.repeat) return;
   event.preventDefault();
-  runPopupAction(`save-entry:${editingId}`, saveEdit, { expectedRevision: editingRevision });
+  const session = editorSession;
+  runPopupAction(`save-entry:${session?.id || "none"}:${session?.token || 0}`, saveEdit, { expectedRevision: session?.revision });
 }
 
 async function deleteEdit() {
-  if (!editingId) return;
+  const session = editorSession;
+  if (!session) return;
   if (!confirm("Delete this time log entry?")) return;
   try {
-    await softDeleteEntry(editingId, { expectedRevision: editingRevision });
-    hideEdit();
+    await softDeleteEntry(session.id, { expectedRevision: session.revision });
+    if (editorSession === session) hideEdit(session);
     queueSync();
   } catch (error) {
-    if (error.code === "STORAGE_CONFLICT") hideEdit();
+    if (error.code === "STORAGE_CONFLICT" && editorSession === session) hideEdit(session);
     throw error;
   }
 }
 
 async function mergeEdit() {
-  if (!editingId) return;
+  const session = editorSession;
+  if (!session) return;
   const sourceId = $mergeTarget.value;
   if (!sourceId) return;
   try {
-    await mergeEntries(editingId, sourceId, {
+    await mergeEntries(session.id, sourceId, {
       expectedRevisions: {
-        [editingId]: editingRevision,
-        [sourceId]: mergeTargetRevisions.get(sourceId)
+        [session.id]: session.revision,
+        [sourceId]: session.mergeTargetRevisions.get(sourceId)
       }
     });
-    hideEdit();
+    if (editorSession === session) hideEdit(session);
     queueSync();
   } catch (error) {
-    if (error.code === "STORAGE_CONFLICT") hideEdit();
+    if (error.code === "STORAGE_CONFLICT" && editorSession === session) hideEdit(session);
     throw error;
   }
 }
@@ -813,18 +821,18 @@ function bindEvents() {
     }
   });
   $("#openOptions").addEventListener("click", () => platform.openExtensionPage("options/options.html").catch((error) => setSyncStatus("error", formatError(error))));
-  $("#saveEdit").addEventListener("click", (event) => runPopupAction(`save-entry:${editingId}`, saveEdit, {
+  $("#saveEdit").addEventListener("click", (event) => runPopupAction(`save-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, saveEdit, {
     button: event.currentTarget,
-    expectedRevision: editingRevision
+    expectedRevision: editorSession?.revision
   }));
-  $("#mergeEdit").addEventListener("click", (event) => runPopupAction(`merge-entry:${editingId}`, mergeEdit, {
+  $("#mergeEdit").addEventListener("click", (event) => runPopupAction(`merge-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, mergeEdit, {
     button: event.currentTarget,
-    expectedRevision: editingRevision
+    expectedRevision: editorSession?.revision
   }));
-  $("#cancelEdit").addEventListener("click", hideEdit);
-  $("#deleteEdit").addEventListener("click", (event) => runPopupAction(`delete-entry:${editingId}`, deleteEdit, {
+  $("#cancelEdit").addEventListener("click", () => hideEdit());
+  $("#deleteEdit").addEventListener("click", (event) => runPopupAction(`delete-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, deleteEdit, {
     button: event.currentTarget,
-    expectedRevision: editingRevision
+    expectedRevision: editorSession?.revision
   }));
   $recentEntries.addEventListener("click", (event) => {
     const groupButton = event.target.closest("[data-toggle-group]");

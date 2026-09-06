@@ -257,6 +257,22 @@ describe("Google provider adapter", () => {
       assert.equal(snapshot.rowMap, undefined);
       assert.equal(snapshot.configRows, undefined);
       assert.equal(snapshot.duplicates.length, 0);
+
+      const configRead = { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values/config!A%3AC" };
+      google.enqueue(configRead, google.json({
+        values: [["key", "value", "updated_at"], ["duration_multiplier", "1.5", entry.updated_at]]
+      }));
+      google.enqueue({ method: "PUT", pathname: "/v4/spreadsheets/sheet-1/values/config!A2%3AC2" }, google.json({}));
+      google.enqueue(configRead, google.json({
+        values: [["key", "value", "updated_at"], ["duration_multiplier", "1.5", entry.updated_at]]
+      }));
+
+      await googleProvider.googleSheetsProvider.updateConfig(
+        "duration_multiplier",
+        "1.5",
+        entry.updated_at,
+        { expectedRef: configRef }
+      );
     } finally {
       google.restore();
     }

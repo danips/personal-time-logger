@@ -622,7 +622,12 @@ async function testCloudflareD1Connection() {
 async function migrateStorageClicked() {
   const target = decodeRemoteProviderId($("#remoteBackendTarget").value);
   const active = decodeRemoteProviderId(await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS));
-  if (target === active) throw Object.assign(new Error("Choose a different target backend."), { code: "MIGRATION_SOURCE_UNSAFE" });
+  const migrationState = await getStorageMigrationState();
+  const resumingPostSwitch = migrationState?.phase === "post_switch"
+    && migrationState.target_provider === target;
+  if (target === active && !resumingPostSwitch) {
+    throw Object.assign(new Error("Choose a different target backend."), { code: "MIGRATION_SOURCE_UNSAFE" });
+  }
   if (globalThis.confirm && !globalThis.confirm("Migration pauses sync and switches this profile only after full verification. Close other devices and stop editing timers now. Continue?")) return false;
   $("#migrationStatus").textContent = "Migration starting...";
   try {

@@ -303,11 +303,16 @@ export function detectAnomalies(sessions, { now = new Date() } = {}) {
     let active = 0;
     for (const [, type] of events) { if (type < 0) active -= 1; else { overlapCount += active; active += 1; } }
   }
-  anomalies.overlapCount = overlapCount;
-
-  return anomalies.sort((left, right) => (ANOMALY_ORDER[left.type] ?? 99) - (ANOMALY_ORDER[right.type] ?? 99)
+  const rows = anomalies.sort((left, right) => (ANOMALY_ORDER[left.type] ?? 99) - (ANOMALY_ORDER[right.type] ?? 99)
     || right.start - left.start || left.entryId.localeCompare(right.entryId)
     || left.relatedEntryId.localeCompare(right.relatedEntryId));
+  const omittedOverlapCount = sorted.length > 100 ? overlapCount : 0;
+  return {
+    rows,
+    totalCount: rows.length + omittedOverlapCount,
+    overlapCount,
+    omittedOverlapCount
+  };
 }
 
 export function buildAnalyticsReport(entries, { primary, comparison, now = new Date() } = {}) {
@@ -331,7 +336,6 @@ export function buildAnalyticsReport(entries, { primary, comparison, now = new D
     projects: aggregateProjects(primarySessions, comparisonSessions, primaryMetrics.totalEffectiveSeconds),
     descriptions: aggregateDescriptions(primarySessions, comparisonSessions, primaryMetrics.totalEffectiveSeconds),
     fragmentation,
-    anomalies,
-    overlapCount: anomalies.overlapCount || 0
+    anomalies
   };
 }
