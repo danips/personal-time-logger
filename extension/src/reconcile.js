@@ -229,6 +229,18 @@ export async function loadReconciliation({ interactiveAuth = false, provider } =
     remoteProvider.readSnapshot({ interactiveAuth })
   ]);
 
+  if (!Array.isArray(localEntries)) {
+    const error = new Error("Local entry storage returned an invalid collection.");
+    error.code = ERROR_CODE.ENTRY_INVALID;
+    throw error;
+  }
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
+    || !Array.isArray(snapshot.entries)) {
+    const error = new Error("The remote provider returned an invalid reconciliation snapshot.");
+    error.code = ERROR_CODE.REMOTE_API_INCOMPATIBLE;
+    throw error;
+  }
+
   return {
     ...compareEntries(
       localEntries.map(normalizeEntry),

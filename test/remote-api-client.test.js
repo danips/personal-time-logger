@@ -5,6 +5,7 @@ import {
   chunkByEncodedBytes,
   createRemoteApiClient,
   normalizeRemoteApiBaseUrl,
+  parseRemoteSnapshot,
   remoteHostPermission
 } from "../extension/src/remote-api-client.js";
 
@@ -90,6 +91,14 @@ describe("provider-neutral remote API client", () => {
       const malformed = createRemoteApiClient({ ...base, fetchImpl: async () => response(body) });
       await assert.rejects(() => malformed.health(), { code: "REMOTE_API_INCOMPATIBLE" });
     }
+  });
+
+  it("classifies a non-object snapshot as an incompatible API response", () => {
+    assert.throws(() => parseRemoteSnapshot(null, {
+      entryRefKind: "test-entry",
+      configRefKind: "test-config",
+      providerLabel: "Test API"
+    }), { code: "REMOTE_API_INCOMPATIBLE" });
   });
 
   it("maps recognized server errors without exposing server text or secrets", async () => {

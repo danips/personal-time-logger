@@ -273,7 +273,8 @@ export function parseRemoteSnapshot(data, {
   configRefKind,
   providerLabel = "remote API"
 } = {}) {
-  if (!Array.isArray(data.entries) || !Array.isArray(data.config)) {
+  if (!data || typeof data !== "object" || Array.isArray(data)
+    || !Array.isArray(data.entries) || !Array.isArray(data.config)) {
     throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The ${labelText(providerLabel)} snapshot shape is invalid.`);
   }
   const entries = [];

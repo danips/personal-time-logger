@@ -70,4 +70,15 @@ describe("provider-aware reconciliation UI", () => {
     assert.match(reconcileUi, /Import from remote/);
     assert.doesNotMatch(reconcileHtml, /spreadsheet/i);
   });
+
+  it("classifies an invalid provider snapshot before comparison", async () => {
+    await assert.rejects(() => loadReconciliation({
+      provider: {
+        id: "mysql",
+        label: "MySQL 8.4",
+        capabilities: { duplicateRemoteRecords: false },
+        async readSnapshot() { return null; }
+      }
+    }), { code: "REMOTE_API_INCOMPATIBLE" });
+  });
 });

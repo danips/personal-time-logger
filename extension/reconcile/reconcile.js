@@ -16,6 +16,7 @@ import {
   buildKeepNewestCommands
 } from "../src/reconcile-ui-state.js";
 import { syncNow } from "../src/sync.js";
+import { recordDiagnostic } from "../src/diagnostics.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
 import { $, entryTitle, formatError } from "../src/ui-helpers.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
@@ -303,6 +304,16 @@ async function scan({ quiet = false, manageBusy = true } = {}) {
       : "This device and remote storage agree on every entry.");
   } catch (error) {
     setStatus(`Could not compare: ${formatError(error)}`);
+    try {
+      await recordDiagnostic({
+        subsystem: "reconciliation",
+        phase: "scan",
+        error,
+        recovery: "Retry reconciliation. If it continues, check the remote backend and Options diagnostics."
+      });
+    } catch {
+      // The visible failure remains useful when diagnostics storage is unavailable.
+    }
   } finally {
     if (manageBusy) setBusy(false);
   }
