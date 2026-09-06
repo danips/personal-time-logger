@@ -259,14 +259,12 @@ async function refreshTokenOnce({ force, rejectedAccessToken = "" }) {
     const lock = await claimLock(TOKEN_REFRESH_LOCK_KEY, holder, TOKEN_REFRESH_LOCK_TTL_MS);
     if (lock) {
       try {
-        const tokenData = await getTokenData();
+        const { tokenData, generation } = await getAuthSessionSnapshot();
         if (!force && isUsable(tokenData)) return tokenData;
         if (force && isUsable(tokenData) && tokenData.access_token !== rejectedAccessToken) return tokenData;
         if (!tokenData || !tokenData.refresh_token) {
           throw codedError("AUTH_EXPIRED", "Please sign in again");
         }
-        const session = await getAuthSessionSnapshot();
-        const generation = session.generation;
 
         const { response, data: refreshed } = await formRequest(
           TOKEN_URL,

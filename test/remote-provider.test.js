@@ -3,9 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
+import { entryToRow, SHEET_HEADERS } from "../extension/src/entries.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -29,21 +30,9 @@ const providers = await import("../extension/src/remote-provider.js");
 const googleProvider = await import("../extension/src/remote-google-sheets.js");
 const mysql = await import("../extension/src/remote-mysql.js");
 
-const fixture = (over = {}) => normalizeEntry({
+const fixture = (over = {}) => persistedEntryFixture({
   id: "provider-entry",
-  project: "Project",
-  task: "Task",
   description: "",
-  start_at: "2026-08-08T09:00:00.000Z",
-  end_at: "2026-08-08T10:00:00.000Z",
-  duration_seconds: 3600,
-  status: "ok",
-  created_at: "2026-08-08T09:00:00.000Z",
-  updated_at: "2026-08-08T10:00:00.000Z",
-  deleted_at: "",
-  device_id: "device",
-  revision: 1,
-  multiply: "",
   ...over
 });
 

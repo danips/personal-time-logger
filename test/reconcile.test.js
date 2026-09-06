@@ -1,20 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { normalizeEntry } from "../extension/src/entries.js";
 import { compareEntries, fieldDifferences } from "../extension/src/reconcile.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
-const fixture = (over = {}) => normalizeEntry({
-  id: "entry-1",
-  project: "Project",
-  task: "Task",
+const fixture = (over = {}) => persistedEntryFixture({
   start_at: "2026-07-27T09:00:00.000Z",
   end_at: "2026-07-27T10:00:00.000Z",
-  duration_seconds: 3600,
   created_at: "2026-07-27T09:00:00.000Z",
   updated_at: "2026-07-27T10:00:00.000Z",
-  device_id: "device",
-  revision: 1,
   ...over
 });
 

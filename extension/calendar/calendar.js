@@ -49,24 +49,19 @@ import { SETTING_KEY } from "../src/setting-keys.js";
 import { platform } from "../src/platform.js";
 import { DEFAULT_WORKDAY_START_HOUR, normalizeWorkdayStartHour } from "../src/options-settings.js";
 
-mountEntryEditor(document.getElementById("calendarEntryEditor"), {
-  formId: "calendarEditForm",
-  projectId: "calendarEditProject",
-  taskId: "calendarEditTask",
-  descriptionId: "calendarEditDescription",
-  multiplyId: "calendarEditMultiply",
-  statusId: "calendarEditStatus",
-  startId: "calendarEditStart",
-  endId: "calendarEditEnd",
-  mergeControlId: "calendarMergeControl",
-  mergeTargetId: "calendarMergeTarget",
-  mergeButtonId: "calendarMergeButton",
-  duplicateButtonId: "duplicateEntryButton",
-  saveButtonId: "calendarSaveEntry",
-  cancelButtonId: "cancelCalendarEditButton",
-  deleteButtonId: "deleteCalendarEntry",
+const entryEditor = mountEntryEditor(document.getElementById("calendarEntryEditor"), {
+  variant: "calendar",
+  showDuplicate: true,
   saveType: "submit"
 });
+const $editForm = entryEditor.form;
+const $editProject = entryEditor.fields.project;
+const $editStart = entryEditor.fields.start;
+const $editEnd = entryEditor.fields.end;
+const $mergeTarget = entryEditor.merge.target;
+const $mergeButton = entryEditor.merge.button;
+const $mergeControl = entryEditor.merge.control;
+const $duplicateButton = entryEditor.actions.duplicate;
 
 const DRAG_THRESHOLD_PX = 5;
 const NO_DAYS_SELECTED_MESSAGE = "Check at least one day to send to Tempo";
@@ -572,15 +567,7 @@ function positionPopupForEntry(entryId) {
 }
 
 function editFields() {
-  return {
-    project: $("#calendarEditProject"),
-    task: $("#calendarEditTask"),
-    description: $("#calendarEditDescription"),
-    multiply: $("#calendarEditMultiply"),
-    start: $("#calendarEditStart"),
-    end: $("#calendarEditEnd"),
-    status: $("#calendarEditStatus")
-  };
+  return entryEditor.fields;
 }
 
 function loadEditor(entry) {
@@ -929,7 +916,7 @@ function queueSync() {
 }
 
 async function mergeSelectedEntry() {
-  const sourceId = $("#calendarMergeTarget").value;
+  const sourceId = $mergeTarget.value;
   if (!selectedEntryId || !sourceId) return;
 
   setCalendarUndo(null);
@@ -964,7 +951,7 @@ function closeEditor() {
   editingEntryId = "";
   editingEntryRevision = null;
   editingMultiplyValue = "";
-  $("#calendarEditForm").reset();
+  $editForm.reset();
   $("#calendarEditOverlay").hidden = true;
 }
 
@@ -981,11 +968,11 @@ function openSelectedEntryEditor() {
     option.textContent = `${shortDay(new Date(e.start_at))} ${localTime(new Date(e.start_at))} · ${formatElapsed(e.duration_seconds || durationSeconds(e.start_at, e.end_at))}`;
     return option;
   });
-  $("#calendarMergeTarget").replaceChildren(...mergeOptions);
-  $("#calendarMergeButton").disabled = !candidates.length;
-  setEntryEditorMergeAvailability($("#calendarMergeControl"), candidates.length > 0);
-  $("#duplicateEntryButton").disabled = !entry.end_at;
-  $("#duplicateEntryButton").title = entry.end_at
+  $mergeTarget.replaceChildren(...mergeOptions);
+  $mergeButton.disabled = !candidates.length;
+  setEntryEditorMergeAvailability($mergeControl, candidates.length > 0);
+  $duplicateButton.disabled = !entry.end_at;
+  $duplicateButton.title = entry.end_at
     ? "Create a copy at the same date and time"
     : "Stop this entry before duplicating it";
 
@@ -994,7 +981,7 @@ function openSelectedEntryEditor() {
   $("#calendarEditOverlay").hidden = false;
   positionPopupForEntry(entry.id);
   clampEditorToViewport();
-  $("#calendarEditProject").focus();
+  $editProject.focus();
 }
 
 async function deleteCalendarEntry() {
@@ -1083,8 +1070,8 @@ function sendWholeWeekToTempo(button) {
 function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
-  bindMinuteRollover($("#calendarEditStart"));
-  bindMinuteRollover($("#calendarEditEnd"));
+  bindMinuteRollover($editStart);
+  bindMinuteRollover($editEnd);
   $("#prevWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, -DAY_COUNT)), { button: event.currentTarget }));
   $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
@@ -1113,12 +1100,12 @@ function bindEvents() {
     expectedRevision: lastCalendarUndo?.revision,
     afterRender: refreshSelectedEntryEditor
   }));
-  $("#duplicateEntryButton").addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));
-  $("#calendarMergeButton").addEventListener("click", (event) => runCalendarAction(`merge-entry:${selectedEntryId}`, mergeSelectedEntry, { button: event.currentTarget }));
-  $("#calendarEditForm").addEventListener("submit", (event) => runCalendarAction(`save-entry:${editingEntryId}`, () => saveCalendarEdit(event), { expectedRevision: editingEntryRevision }));
-  $("#cancelCalendarEditButton").addEventListener("click", () => clearSelection().catch((error) => setStatus(formatError(error))));
+  $duplicateButton.addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));
+  $mergeButton.addEventListener("click", (event) => runCalendarAction(`merge-entry:${selectedEntryId}`, mergeSelectedEntry, { button: event.currentTarget }));
+  $editForm.addEventListener("submit", (event) => runCalendarAction(`save-entry:${editingEntryId}`, () => saveCalendarEdit(event), { expectedRevision: editingEntryRevision }));
+  entryEditor.actions.cancel.addEventListener("click", () => clearSelection().catch((error) => setStatus(formatError(error))));
 
-  $("#deleteCalendarEntry").addEventListener("click", (event) => runCalendarAction(`delete-entry:${editingEntryId}`, deleteCalendarEntry, {
+  entryEditor.actions.delete.addEventListener("click", (event) => runCalendarAction(`delete-entry:${editingEntryId}`, deleteCalendarEntry, {
     button: event.currentTarget,
     expectedRevision: editingEntryRevision
   }));

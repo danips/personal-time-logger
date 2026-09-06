@@ -15,23 +15,11 @@ import {
   normalizeMultiplierText,
   rowToEntry
 } from "../extension/src/entries.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 const contract = JSON.parse(readFileSync(new URL("./fixtures/entry-contract.json", import.meta.url), "utf8"));
 
-const fixture = (over = {}) => normalizeEntry({
-  id: "entry-1",
-  project: "Project",
-  task: "Task",
-  description: "Notes",
-  start_at: "2026-07-27T09:00:00.000Z",
-  end_at: "2026-07-27T10:00:00.000Z",
-  duration_seconds: 3600,
-  created_at: "2026-07-27T09:00:00.000Z",
-  updated_at: "2026-07-27T10:00:00.000Z",
-  device_id: "device",
-  revision: 1,
-  ...over
-});
+const fixture = (over = {}) => persistedEntryFixture({ description: "Notes", ...over });
 
 describe("sheet schema", () => {
   it("identifies different records with an equal timestamp as a conflict", () => {
@@ -124,7 +112,7 @@ describe("hasMultiplier", () => {
 
 describe("row serialization", () => {
   it("round-trips an entry through the sheet row", () => {
-    const entry = fixture({ multiply: "1.5", device_id: "device-a", status: "needs_review" });
+    const entry = fixture({ multiply: "1.500", device_id: "device-a", status: "needs_review" });
     const restored = rowToEntry(entryToRow(entry));
 
     for (const field of SHEET_HEADERS) {

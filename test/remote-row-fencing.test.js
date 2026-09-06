@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { entryToRow, normalizeEntry } from "../extension/src/entries.js";
+import { entryToRow } from "../extension/src/entries.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 installFakeIndexedDB();
 globalThis.browser = {
@@ -25,17 +26,13 @@ let db;
 let google;
 let sheets;
 
-const fixture = (over = {}) => normalizeEntry({
+const fixture = (over = {}) => persistedEntryFixture({
   id: "entry-1",
-  project: "Project",
-  task: "Task",
+  description: "",
   start_at: "2026-07-27T09:00:00.000Z",
   end_at: "2026-07-27T10:00:00.000Z",
-  duration_seconds: 3600,
   created_at: "2026-07-27T09:00:00.000Z",
   updated_at: "2026-07-27T10:00:00.000Z",
-  device_id: "device",
-  revision: 1,
   ...over
 });
 

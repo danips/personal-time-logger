@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { seedEntry, seedEntries } from "./support/db-fixtures.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -11,21 +12,14 @@ const db = await import("../extension/src/db.js");
 const { markMultipleActiveTimers, purgeDeletedEntries, pushDirtyEntries, reseedForNewSpreadsheet } = await import("../extension/src/sync.js");
 const { RECONCILIATION_INTENTS_KEY } = await import("../extension/src/reconcile.js");
 
-const entry = (over = {}) => ({
+const entry = (over = {}) => persistedEntryFixture({
   id: "maintenance-entry",
-  project: "Project",
-  task: "Task",
   description: "",
   start_at: "2026-08-08T09:00:00.000Z",
   end_at: "",
   duration_seconds: 0,
-  status: "ok",
   created_at: "2026-08-08T09:00:00.000Z",
   updated_at: "2026-08-08T09:00:00.000Z",
-  deleted_at: "",
-  device_id: "device",
-  revision: 1,
-  multiply: "",
   dirty: false,
   last_sync_at: "",
   sync_error: "",

@@ -20,6 +20,7 @@ const expectedFiles = [
   "calendar/calendar.js",
   "calendar/popup-drag.js",
   "calendar/tempo-controller.js",
+  "icons/icon-active.svg",
   "icons/icon.svg",
   "manifest.json",
   "options/options.css",

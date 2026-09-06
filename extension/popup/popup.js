@@ -39,21 +39,8 @@ import { platform } from "../src/platform.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 
-mountEntryEditor(document.getElementById("popupEntryEditor"), {
-  formId: "editForm",
-  projectId: "editProject",
-  taskId: "editTask",
-  descriptionId: "editDescription",
-  multiplyId: "editMultiply",
-  statusId: "editStatus",
-  startId: "editStart",
-  endId: "editEnd",
-  mergeControlId: "editMergeControl",
-  mergeTargetId: "mergeTarget",
-  mergeButtonId: "mergeEdit",
-  saveButtonId: "saveEdit",
-  cancelButtonId: "cancelEdit",
-  deleteButtonId: "deleteEdit"
+const entryEditor = mountEntryEditor(document.getElementById("popupEntryEditor"), {
+  variant: "popup"
 });
 
 let activeEntries = [];
@@ -83,17 +70,12 @@ const $brandRow = $(".brand-row");
 const $statusRow = $(".status-row");
 const $editPanel = $("#editPanel");
 const $editProjectDot = $("#editProjectDot");
-const $editProject = $("#editProject");
-const $editTask = $("#editTask");
-const $editDescription = $("#editDescription");
-
-const $editMultiply = $("#editMultiply");
-const $editStart = $("#editStart");
-const $editEnd = $("#editEnd");
-const $editStatus = $("#editStatus");
-const $mergeTarget = $("#mergeTarget");
-const $mergeEdit = $("#mergeEdit");
-const $mergeTools = $("#editMergeControl");
+const $editProject = entryEditor.fields.project;
+const $editStart = entryEditor.fields.start;
+const $editEnd = entryEditor.fields.end;
+const $mergeTarget = entryEditor.merge.target;
+const $mergeEdit = entryEditor.merge.button;
+const $mergeTools = entryEditor.merge.control;
 const $newTimerToggle = $("#newTimerToggle");
 const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
@@ -134,15 +116,7 @@ function formFields() {
 }
 
 function editFields() {
-  return {
-    project: $editProject,
-    task: $editTask,
-    description: $editDescription,
-    multiply: $editMultiply,
-    start: $editStart,
-    end: $editEnd,
-    status: $editStatus
-  };
+  return entryEditor.fields;
 }
 
 function entryDuration(entry) {
@@ -821,16 +795,16 @@ function bindEvents() {
     }
   });
   $("#openOptions").addEventListener("click", () => platform.openExtensionPage("options/options.html").catch((error) => setSyncStatus("error", formatError(error))));
-  $("#saveEdit").addEventListener("click", (event) => runPopupAction(`save-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, saveEdit, {
+  entryEditor.actions.save.addEventListener("click", (event) => runPopupAction(`save-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, saveEdit, {
     button: event.currentTarget,
     expectedRevision: editorSession?.revision
   }));
-  $("#mergeEdit").addEventListener("click", (event) => runPopupAction(`merge-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, mergeEdit, {
+  entryEditor.merge.button.addEventListener("click", (event) => runPopupAction(`merge-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, mergeEdit, {
     button: event.currentTarget,
     expectedRevision: editorSession?.revision
   }));
-  $("#cancelEdit").addEventListener("click", () => hideEdit());
-  $("#deleteEdit").addEventListener("click", (event) => runPopupAction(`delete-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, deleteEdit, {
+  entryEditor.actions.cancel.addEventListener("click", () => hideEdit());
+  entryEditor.actions.delete.addEventListener("click", (event) => runPopupAction(`delete-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, deleteEdit, {
     button: event.currentTarget,
     expectedRevision: editorSession?.revision
   }));

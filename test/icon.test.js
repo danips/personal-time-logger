@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
 installFakeIndexedDB();
 
-let fetchMode = "success";
 let actionMode = "success";
 globalThis.browser = {
   runtime: { getURL: (path) => `moz-extension://test/${path}` },
@@ -15,23 +15,31 @@ globalThis.browser = {
     }
   }
 };
-globalThis.fetch = async () => {
-  if (fetchMode === "fail") throw new Error("icon resource unavailable");
-  return {
-    ok: true,
-    async text() { return '<svg fill="#1a73e8"></svg>'; }
-  };
-};
 
 const diagnostics = await import("../extension/src/diagnostics.js");
 const { setActiveIcon, updateActiveIcon } = await import("../extension/src/icon.js");
 
 describe("toolbar icon updates", () => {
-  it("rejects direct icon updates when the SVG resource or browser action fails", async () => {
-    fetchMode = "fail";
-    await assert.rejects(() => setActiveIcon(true), /icon resource unavailable/);
+  it("keeps the active asset geometry aligned with the packaged base icon", () => {
+    const inactive = readFileSync(new URL("../extension/icons/icon.svg", import.meta.url), "utf8");
+    const active = readFileSync(new URL("../extension/icons/icon-active.svg", import.meta.url), "utf8");
+    assert.equal(active.replace("#22c55e", "#1a73e8"), inactive);
+  });
 
-    fetchMode = "success";
+  it("selects packaged inactive and active icon paths", async () => {
+    const paths = [];
+    const original = globalThis.browser.action.setIcon;
+    globalThis.browser.action.setIcon = async ({ path }) => { paths.push(path); };
+    try {
+      await setActiveIcon(false);
+      await setActiveIcon(true);
+    } finally {
+      globalThis.browser.action.setIcon = original;
+    }
+    assert.deepEqual(paths, ["moz-extension://test/icons/icon.svg", "moz-extension://test/icons/icon-active.svg"]);
+  });
+
+  it("rejects direct icon updates when the browser action fails", async () => {
     actionMode = "fail";
     await assert.rejects(() => setActiveIcon(true), /icon action unavailable/);
     actionMode = "success";

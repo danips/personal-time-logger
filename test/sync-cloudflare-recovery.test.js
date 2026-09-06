@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { normalizeEntry } from "../extension/src/entries.js";
 import { pushDirtyEntries } from "../extension/src/sync.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { seedEntries } from "./support/db-fixtures.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -12,21 +12,14 @@ globalThis.BroadcastChannel = undefined;
 const db = await import("../extension/src/db.js");
 
 function fixture(index, over = {}) {
-  return normalizeEntry({
+  return persistedEntryFixture({
     id: `cloudflare-recovery-${index}`,
-    project: "Project",
-    task: "Task",
     description: `Local ${index}`,
     start_at: "2026-08-30T09:00:00.000Z",
     end_at: "2026-08-30T10:00:00.000Z",
-    duration_seconds: 3600,
-    status: "ok",
     created_at: "2026-08-30T09:00:00.000Z",
     updated_at: "2026-08-30T10:00:00.000Z",
-    deleted_at: "",
     device_id: "recovery-device",
-    revision: 1,
-    multiply: "",
     dirty: true,
     ...over
   });

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { seedEntry } from "./support/db-fixtures.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
@@ -10,21 +11,10 @@ globalThis.BroadcastChannel = undefined;
 const db = await import("../extension/src/db.js");
 const { pullRemoteEntries } = await import("../extension/src/sync.js");
 
-const entry = (over = {}) => ({
+const entry = (over = {}) => persistedEntryFixture({
   id: "entry-1",
-  project: "Project",
-  task: "Task",
   description: "",
-  start_at: "2026-08-08T09:00:00.000Z",
-  end_at: "2026-08-08T10:00:00.000Z",
-  duration_seconds: 3600,
-  status: "ok",
-  created_at: "2026-08-08T09:00:00.000Z",
   updated_at: "2026-08-08T10:00:00.000Z",
-  deleted_at: "",
-  device_id: "device",
-  revision: 1,
-  multiply: "",
   dirty: false,
   last_sync_at: "",
   sync_error: "",

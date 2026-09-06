@@ -3,22 +3,10 @@ import { describe, it } from "node:test";
 
 import { canonicalMigrationDataset, canonicalMigrationText, migrationDigest, assertLocalCompatibleWithRemote } from "../extension/src/storage-migration.js";
 import { registeredRemoteProviderIds } from "../extension/src/remote-provider.js";
+import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
-const entry = (id, over = {}) => ({
+const entry = (id, over = {}) => persistedEntryFixture({
   id,
-  project: "Project",
-  task: "Task",
-  description: "Description",
-  start_at: "2026-08-08T09:00:00.000Z",
-  end_at: "2026-08-08T10:00:00.000Z",
-  duration_seconds: 3600,
-  status: "ok",
-  created_at: "2026-08-08T09:00:00.000Z",
-  updated_at: "2026-08-08T10:00:00.000Z",
-  deleted_at: "",
-  device_id: "device",
-  revision: 1,
-  multiply: "",
   ...over
 });
 
