@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  chunkByEncodedBytes,
   createRemoteApiClient,
   normalizeRemoteApiBaseUrl,
   remoteHostPermission
@@ -25,6 +26,44 @@ const response = (body, status = 200) => ({
 });
 
 describe("provider-neutral remote API client", () => {
+  it("chunks exact UTF-8 wire bodies with one projection per item", () => {
+    let encodeCalls = 0;
+    const values = [
+      { id: "a", text: "quoted \"text\"" },
+      { id: "b", text: "Grüße" },
+      { id: "c", text: "tail" }
+    ];
+    const encode = (value) => { encodeCalls += 1; return value; };
+    const chunks = chunkByEncodedBytes(values, {
+      maxBytes: 63,
+      envelopeKey: "entries",
+      encode
+    });
+
+    assert.equal(encodeCalls, values.length);
+    assert.deepEqual(chunks.flat(), values);
+    for (const chunk of chunks) {
+      assert.equal(new TextEncoder().encode(chunk.encodedBody).byteLength <= 63, true);
+      assert.deepEqual(JSON.parse(chunk.encodedBody), { entries: chunk });
+    }
+  });
+
+  it("rejects one item whose encoded envelope exceeds the byte cap", () => {
+    assert.throws(() => chunkByEncodedBytes([{ text: "x".repeat(100) }], {
+      maxBytes: 20,
+      envelopeKey: "entries"
+    }), { code: "REMOTE_API_INCOMPATIBLE" });
+  });
+
+  it("enforces an item-count cap alongside the byte cap", () => {
+    const chunks = chunkByEncodedBytes([1, 2, 3], {
+      maxBytes: 100,
+      maxItems: 2,
+      envelopeKey: "values"
+    });
+    assert.deepEqual(chunks.map((chunk) => [...chunk]), [[1, 2], [3]]);
+  });
+
   it("normalizes safe URLs and rejects credentials, queries, fragments, and HTTP", () => {
     assert.equal(normalizeRemoteApiBaseUrl("https://example.workers.dev///"), "https://example.workers.dev");
     for (const value of [

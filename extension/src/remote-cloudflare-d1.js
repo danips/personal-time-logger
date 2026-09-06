@@ -73,17 +73,12 @@ function health(data) {
 }
 
 function sizedChunks(values, envelopeKey, encode) {
-  const result = [];
-  for (const countChunk of chunksForCount(values)) result.push(...chunkByEncodedBytes(countChunk, {
-    maxBytes: MAX_REQUEST_BYTES, envelopeKey, encode
-  }));
-  return result;
-}
-
-function chunksForCount(values) {
-  const result = [];
-  for (let index = 0; index < values.length; index += CHUNK_SIZE) result.push(values.slice(index, index + CHUNK_SIZE));
-  return result;
+  return chunkByEncodedBytes(values, {
+    maxBytes: MAX_REQUEST_BYTES,
+    maxItems: CHUNK_SIZE,
+    envelopeKey,
+    encode
+  });
 }
 
 export const cloudflareD1Provider = Object.freeze({
@@ -116,7 +111,9 @@ export const cloudflareD1Provider = Object.freeze({
     const result = [];
     const client = await configuredClient(options);
     for (const chunk of sizedChunks(entries, "entries", persistedEntry)) {
-      const data = await client.append(chunk.map(persistedEntry));
+      const data = client.appendEncoded
+        ? await client.appendEncoded(chunk.encodedBody)
+        : await client.append(chunk.map(persistedEntry));
       result.push(...parseAppendAcknowledgements(data.entries, chunk.map((entry) => entry.id), ENTRY_REF_KIND));
     }
     const byId = new Map(result.map((record) => [record.id, record]));
@@ -128,7 +125,8 @@ export const cloudflareD1Provider = Object.freeze({
     for (const chunk of sizedChunks(updates, "updates", ({ entry, expectedRef }) => ({
       entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
     }))) {
-      await client.update(chunk.map(({ entry, expectedRef }) => ({
+      if (client.updateEncoded) await client.updateEncoded(chunk.encodedBody);
+      else await client.update(chunk.map(({ entry, expectedRef }) => ({
         entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
       })));
     }
@@ -139,7 +137,8 @@ export const cloudflareD1Provider = Object.freeze({
     for (const chunk of sizedChunks(preconditions, "preconditions", ({ id, expectedRef }) => ({
       id, expectedVersion: parseRemoteVersion(expectedRef?.version)
     }))) {
-      await client.delete(chunk.map(({ id, expectedRef }) => ({
+      if (client.deleteEncoded) await client.deleteEncoded(chunk.encodedBody);
+      else await client.delete(chunk.map(({ id, expectedRef }) => ({
         id, expectedVersion: parseRemoteVersion(expectedRef?.version)
       })));
     }

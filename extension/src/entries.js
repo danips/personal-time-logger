@@ -4,23 +4,9 @@ import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { durationSeconds, nowIso, uuid } from "./time.js";
 import { entryFingerprint } from "./fingerprints.js";
+import { ENTRY_FIELDS } from "./entry-contract.js";
 
-export const SHEET_HEADERS = [
-  "id",
-  "project",
-  "task",
-  "description",
-  "start_at",
-  "end_at",
-  "duration_seconds",
-  "status",
-  "created_at",
-  "updated_at",
-  "deleted_at",
-  "device_id",
-  "revision",
-  "multiply"
-];
+export const SHEET_HEADERS = ENTRY_FIELDS;
 
 const CREATE_FIELDS = new Set(["project", "task", "description", "multiply"]);
 const EDITABLE_FIELDS = new Set([
@@ -157,7 +143,7 @@ export function decodeEntryEdit(changes) {
  */
 export function decodePersistedEntry(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw entryModelError("Persisted entry must be an object.");
-  for (const field of ["id", "project", "task", "description", "start_at", "end_at", "duration_seconds", "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"]) {
+  for (const field of ENTRY_FIELDS) {
     if (!Object.hasOwn(entry, field)) throw entryModelError(`Persisted entry is missing ${field}.`);
   }
   const decoded = {

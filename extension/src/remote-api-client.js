@@ -2,15 +2,13 @@ import { decodePersistedEntry } from "./entries.js";
 import { readBoundedJson } from "./bounded-json.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { platform } from "./platform.js";
+import { ENTRY_FIELDS } from "./entry-contract.js";
 
 export const API_VERSION = 1;
 export const SCHEMA_VERSION = 1;
 export const API_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
-export const PERSISTED_ENTRY_FIELDS = Object.freeze([
-  "id", "project", "task", "description", "start_at", "end_at", "duration_seconds",
-  "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"
-]);
+export const PERSISTED_ENTRY_FIELDS = ENTRY_FIELDS;
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 const requestEncoder = new TextEncoder();
 
@@ -98,7 +96,7 @@ export function createRemoteApiClient({
   requestPermission = false,
   timeoutMs = API_TIMEOUT_MS
 } = {}) {
-  const requestJson = async (path, { method = "GET", body } = {}) => {
+  const requestJson = async (path, { method = "GET", body, encodedBody } = {}) => {
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl, {
       invalidConfigCode,
       providerLabel
@@ -108,6 +106,7 @@ export function createRemoteApiClient({
     }
     if (!platformApi.isOnline()) throw codedError(ERROR_CODE.OFFLINE, "Network is offline.");
     if (typeof fetchImpl !== "function") throw codedError(ERROR_CODE.API_NETWORK, "Fetch is unavailable.");
+    const requestBody = encodedBody === undefined ? JSON.stringify(body) : encodedBody;
 
     const permission = hostPermission(normalizedBaseUrl, normalizeBaseUrl);
     let permitted = await platformApi.hasOptionalHostPermission(permission);
@@ -124,9 +123,9 @@ export function createRemoteApiClient({
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${token}`,
-          ...(body === undefined ? {} : { "Content-Type": "application/json" })
+          ...(requestBody === undefined ? {} : { "Content-Type": "application/json" })
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) })
+        ...(requestBody === undefined ? {} : { body: requestBody })
       });
       if (!response.ok) {
         // Status is authoritative for an error response. Intermediaries often
@@ -167,8 +166,11 @@ export function createRemoteApiClient({
     changeToken: () => request("/v1/change-token"),
     snapshot: () => request("/v1/snapshot"),
     append: (entries) => request("/v1/entries/append", { method: "POST", body: { entries } }),
+    appendEncoded: (body) => request("/v1/entries/append", { method: "POST", encodedBody: body }),
     update: (updates) => request("/v1/entries/update", { method: "POST", body: { updates } }),
+    updateEncoded: (body) => request("/v1/entries/update", { method: "POST", encodedBody: body }),
     delete: (preconditions) => request("/v1/entries/delete", { method: "POST", body: { preconditions } }),
+    deleteEncoded: (body) => request("/v1/entries/delete", { method: "POST", encodedBody: body }),
     updateConfig: (payload) => request("/v1/config/update", { method: "POST", body: payload })
   });
 }
@@ -211,19 +213,49 @@ export function parseAppendAcknowledgements(records, submittedIds, refKind) {
   return submittedIds.map((id) => byId.get(String(id)));
 }
 
-export function chunkByEncodedBytes(values, { maxBytes, envelopeKey, encode = (value) => value } = {}) {
+export function chunkByEncodedBytes(values, {
+  maxBytes,
+  maxItems = Infinity,
+  envelopeKey,
+  encode = (value) => value
+} = {}) {
   const result = [];
   let current = [];
-  const sizeOf = (items) => requestEncoder.encode(JSON.stringify({ [envelopeKey]: items.map(encode) })).byteLength;
+  const emptyBody = JSON.stringify({ [envelopeKey]: [] });
+  const arrayStart = emptyBody.indexOf("[]");
+  const prefix = emptyBody.slice(0, arrayStart + 1);
+  const suffix = emptyBody.slice(arrayStart + 1);
+  const prefixBytes = requestEncoder.encode(prefix).byteLength;
+  const suffixBytes = requestEncoder.encode(suffix).byteLength;
+  const commaBytes = requestEncoder.encode(",").byteLength;
+  let currentBytes = prefixBytes + suffixBytes;
+
+  const flush = () => {
+    if (!current.length) return;
+    const body = `${prefix}${current.map(({ encoded }) => encoded).join(",")}${suffix}`;
+    const valuesForChunk = current.map(({ value }) => value);
+    Object.defineProperty(valuesForChunk, "encodedBody", { value: body });
+    result.push(valuesForChunk);
+    current = [];
+    currentBytes = prefixBytes + suffixBytes;
+  };
+
   for (const value of values) {
-    const candidate = [...current, value];
-    if (sizeOf(candidate) <= maxBytes) { current = candidate; continue; }
-    if (!current.length) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "A single remote entry is too large for the API request limit.");
-    result.push(current);
-    current = [value];
-    if (sizeOf(current) > maxBytes) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "A single remote entry is too large for the API request limit.");
+    const encoded = JSON.stringify(encode(value));
+    const itemBytes = requestEncoder.encode(encoded).byteLength;
+    const nextBytes = currentBytes + (current.length ? commaBytes : 0) + itemBytes;
+    if (nextBytes > maxBytes || current.length >= maxItems) {
+      if (!current.length) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "A single remote entry is too large for the API request limit.");
+      flush();
+      if (prefixBytes + suffixBytes + itemBytes > maxBytes) {
+        throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "A single remote entry is too large for the API request limit.");
+      }
+    }
+    const separatorBytes = current.length ? commaBytes : 0;
+    current.push({ value, encoded });
+    currentBytes += separatorBytes + itemBytes;
   }
-  if (current.length) result.push(current);
+  flush();
   return result;
 }
 

@@ -61,13 +61,26 @@ function harness() {
       return jsonResponse(usageResponse());
     },
     async getSetting(key, fallback) { return values.has(key) ? values.get(key) : fallback; },
-    async setSetting(key, value) { values.set(key, value); return value; },
-    async removeSetting(key) { values.delete(key); }
+    async mutateSettings(keys, mutator) {
+      const settings = new Map(keys.filter((key) => values.has(key)).map((key) => [key, values.get(key)]));
+      const result = mutator(settings);
+      for (const key of keys) {
+        if (settings.has(key)) values.set(key, settings.get(key));
+        else values.delete(key);
+      }
+      return result;
+    }
   };
   return { calls, values, overrides };
 }
 
 describe("single-session ChatGPT usage", () => {
+  it("requires the injected persistence pair instead of a CRUD fallback", async () => {
+    const { overrides } = harness();
+    const incomplete = { ...overrides, mutateSettings: undefined };
+    await assert.rejects(() => getChatGptUsageState(incomplete), TypeError);
+  });
+
   it("retrieves both the 5-hour and weekly limits without tabs or containers", async () => {
     const { calls, overrides } = harness();
     const snapshot = await requestCurrentChatGptUsage(overrides);

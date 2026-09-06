@@ -662,16 +662,22 @@ export async function getActiveEntries() {
 export async function getEntriesIntersecting(start, end) {
   const startAt = new Date(start).toISOString();
   const endAt = new Date(end).toISOString();
-  const [completed, active] = await Promise.all([
-    entriesFromIndex(ENTRY_INDEX.END_AT, {
-      range: keyRange("lowerBound", startAt, true),
-      filter: (entry) => !entry.deleted_at && Boolean(entry.end_at) && String(entry.start_at || "") < endAt
-    }),
-    getActiveEntries()
-  ]);
-  return [...new Map([...completed, ...active]
-    .filter((entry) => String(entry.start_at || "") < endAt)
-    .map((entry) => [entry.id, entry]))
-    .values()]
-    .sort((left, right) => String(left.start_at).localeCompare(String(right.start_at)));
+  return store(ENTRY_STORE, "readonly", async (objectStore) => {
+    // Both index reads share this readonly transaction, so completed and
+    // active entries come from one IndexedDB snapshot. Their index ranges are
+    // disjoint, so no cross-snapshot deduplication map is needed.
+    const [completed, active] = await Promise.all([
+      readEntriesFromIndex(objectStore, ENTRY_INDEX.END_AT, {
+        range: keyRange("lowerBound", startAt, true),
+        filter: (entry) => !entry.deleted_at && Boolean(entry.end_at) && String(entry.start_at || "") < endAt
+      }),
+      readEntriesFromIndex(objectStore, ENTRY_INDEX.ACTIVE, {
+        range: keyRange("bound", ["", "", ""], ["", "", "\uffff"])
+      })
+    ]);
+    return [...completed, ...active]
+      .filter((entry) => String(entry.start_at || "") < endAt)
+      .map(entryFromStorage)
+      .sort((left, right) => String(left.start_at).localeCompare(String(right.start_at)));
+  });
 }

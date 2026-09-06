@@ -100,7 +100,9 @@ export const mysqlProvider = Object.freeze({
     const client = await configuredClient(options);
     const result = [];
     for (const chunk of sizedChunks(entries, "entries", persistedEntry)) {
-      const data = await client.append(chunk.map(persistedEntry));
+      const data = client.appendEncoded
+        ? await client.appendEncoded(chunk.encodedBody)
+        : await client.append(chunk.map(persistedEntry));
       result.push(...parseAppendAcknowledgements(data.entries, chunk.map((entry) => entry.id), ENTRY_REF_KIND));
     }
     return entries.map((entry) => result.find((record) => record.id === entry.id));
@@ -111,14 +113,18 @@ export const mysqlProvider = Object.freeze({
     const client = await configuredClient(options);
     for (const chunk of sizedChunks(updates, "updates", ({ entry, expectedRef }) => ({
       entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
-    }))) await client.update(chunk.map(({ entry, expectedRef }) => ({ entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version) })));
+    }))) {
+      if (client.updateEncoded) await client.updateEncoded(chunk.encodedBody);
+      else await client.update(chunk.map(({ entry, expectedRef }) => ({ entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version) })));
+    }
   },
 
   async deleteEntries(preconditions, options = {}) {
     if (!preconditions.length) return;
     const client = await configuredClient(options);
     for (const chunk of sizedChunks(preconditions, "preconditions", ({ id, expectedRef }) => ({ id, expectedVersion: parseRemoteVersion(expectedRef?.version) }))) {
-      await client.delete(chunk.map(({ id, expectedRef }) => ({ id, expectedVersion: parseRemoteVersion(expectedRef?.version) })));
+      if (client.deleteEncoded) await client.deleteEncoded(chunk.encodedBody);
+      else await client.delete(chunk.map(({ id, expectedRef }) => ({ id, expectedVersion: parseRemoteVersion(expectedRef?.version) })));
     }
   },
 

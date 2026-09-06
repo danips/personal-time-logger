@@ -1,4 +1,4 @@
-import { getSetting, mutateSetting, mutateSettings, removeSetting, setSetting } from "./db.js";
+import { getSetting, mutateSettings } from "./db.js";
 import { readBoundedJson } from "./bounded-json.js";
 import { normalizeUsageResponse, UsageError } from "./codex-usage.js";
 import { platform } from "./platform.js";
@@ -22,24 +22,19 @@ function usageError(code, message, details = {}) {
 }
 
 function dependencies(overrides = {}) {
-  const get = overrides.getSetting || getSetting;
-  const set = overrides.setSetting || setSetting;
-  const remove = overrides.removeSetting || removeSetting;
+  const persistenceKeys = ["getSetting", "mutateSettings", "setSetting", "removeSetting", "mutateSetting"];
+  const injectedPersistence = persistenceKeys.some((key) => Object.hasOwn(overrides, key));
+  if (injectedPersistence && (typeof overrides.getSetting !== "function" || typeof overrides.mutateSettings !== "function")) {
+    throw new TypeError("ChatGPT usage persistence must provide getSetting and mutateSettings together.");
+  }
+  if (Object.hasOwn(overrides, "setSetting") || Object.hasOwn(overrides, "removeSetting") || Object.hasOwn(overrides, "mutateSetting")) {
+    throw new TypeError("ChatGPT usage persistence must use getSetting and mutateSettings.");
+  }
   return {
     platform: overrides.platform || platform,
     fetch: overrides.fetch || globalThis.fetch,
-    getSetting: get,
-    setSetting: set,
-    removeSetting: remove,
-    mutateSetting: overrides.mutateSetting || (overrides.getSetting || overrides.setSetting || overrides.removeSetting
-      ? async (key, mutator) => {
-        const next = mutator(await get(key));
-        if (next === undefined) await remove(key);
-        else await set(key, next);
-        return next;
-      }
-      : mutateSetting),
-    mutateSettings: overrides.mutateSettings || (!overrides.getSetting && !overrides.setSetting && !overrides.removeSetting ? mutateSettings : null),
+    getSetting: overrides.getSetting || getSetting,
+    mutateSettings: overrides.mutateSettings || mutateSettings,
     now: overrides.now || (() => Date.now()),
     language: overrides.language || globalThis.navigator?.language || "en-US"
   };
@@ -197,26 +192,19 @@ export async function refreshChatGptUsage(overrides = {}) {
     const attemptedAt = deps.now();
     let generation;
     let current;
-    if (deps.mutateSettings) {
-      const claim = await deps.mutateSettings([
-        CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION
-      ], (settings) => {
-        if (!settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) throw usageError("consent_required", "Confirm session-token use before refreshing usage");
-        const state = normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY));
-        const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, Number(state.last_error?.retry_after_seconds || 0) * 1000);
-        if (!overrides.ignoreCooldown && attemptedAt - state.last_attempt_at < cooldownMs) return { skipped: true, state };
-        generation = Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0);
-        settings.set(CHATGPT_USAGE_STATE_KEY, { ...state, last_attempt_at: attemptedAt });
-        return { skipped: false, state };
-      });
-      current = claim.state;
-      if (claim.skipped) return { kind: "skipped", reason: "cooldown", state: current };
-    } else {
-      current = await getChatGptUsageState(overrides);
-      const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, Number(current.last_error?.retry_after_seconds || 0) * 1000);
-      if (!overrides.ignoreCooldown && attemptedAt - current.last_attempt_at < cooldownMs) return { kind: "skipped", reason: "cooldown", state: current };
-      await deps.mutateSetting(CHATGPT_USAGE_STATE_KEY, (value) => ({ ...normalizeChatGptUsageState(value), last_attempt_at: attemptedAt }));
-    }
+    const claim = await deps.mutateSettings([
+      CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION
+    ], (settings) => {
+      if (!settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) throw usageError("consent_required", "Confirm session-token use before refreshing usage");
+      const state = normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY));
+      const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, Number(state.last_error?.retry_after_seconds || 0) * 1000);
+      if (!overrides.ignoreCooldown && attemptedAt - state.last_attempt_at < cooldownMs) return { skipped: true, state };
+      generation = Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0);
+      settings.set(CHATGPT_USAGE_STATE_KEY, { ...state, last_attempt_at: attemptedAt });
+      return { skipped: false, state };
+    });
+    current = claim.state;
+    if (claim.skipped) return { kind: "skipped", reason: "cooldown", state: current };
 
     try {
       const snapshot = await requestCurrentChatGptUsage({ ...overrides, now: deps.now, fetch: deps.fetch, language: deps.language });
@@ -225,13 +213,11 @@ export async function refreshChatGptUsage(overrides = {}) {
         last_attempt_at: attemptedAt,
         last_error: null
       };
-      if (deps.mutateSettings) {
-        await deps.mutateSettings([CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
-          if (Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) !== generation
-            || !settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) return;
-          settings.set(CHATGPT_USAGE_STATE_KEY, state);
-        });
-      } else await deps.setSetting(CHATGPT_USAGE_STATE_KEY, state);
+      await deps.mutateSettings([CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
+        if (Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) !== generation
+          || !settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) return;
+        settings.set(CHATGPT_USAGE_STATE_KEY, state);
+      });
       return { kind: "refreshed", state };
     } catch (error) {
       const safeError = error instanceof UsageError ? error : usageError("service_error", "ChatGPT usage refresh failed");
@@ -241,13 +227,11 @@ export async function refreshChatGptUsage(overrides = {}) {
         occurred_at: new Date(deps.now()).toISOString(),
         retry_after_seconds: Number.isFinite(safeError.retry_after_seconds) ? safeError.retry_after_seconds : null
       };
-      if (deps.mutateSettings) {
-        await deps.mutateSettings([CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
-          if (Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) !== generation
-            || !settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) return;
-          settings.set(CHATGPT_USAGE_STATE_KEY, { ...normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY)), last_attempt_at: attemptedAt, last_error: failure });
-        });
-      } else await deps.mutateSetting(CHATGPT_USAGE_STATE_KEY, (value) => ({ ...normalizeChatGptUsageState(value), last_attempt_at: attemptedAt, last_error: failure }));
+      await deps.mutateSettings([CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
+        if (Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) !== generation
+          || !settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) return;
+        settings.set(CHATGPT_USAGE_STATE_KEY, { ...normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY)), last_attempt_at: attemptedAt, last_error: failure });
+      });
       throw safeError;
     }
   })().finally(() => {
@@ -259,12 +243,8 @@ export async function refreshChatGptUsage(overrides = {}) {
 export async function clearChatGptUsageData(overrides = {}) {
   const deps = dependencies(overrides);
   const keys = [CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY];
-  if (overrides.mutateSettings || (!overrides.getSetting && !overrides.setSetting && !overrides.removeSetting)) {
-    await deps.mutateSettings([...keys, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
-      for (const key of keys) settings.delete(key);
-      settings.set(SETTING_KEY.CHATGPT_USAGE_GENERATION, Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) + 1);
-    });
-    return;
-  }
-  await Promise.all(keys.map((key) => deps.removeSetting(key)));
+  await deps.mutateSettings([...keys, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
+    for (const key of keys) settings.delete(key);
+    settings.set(SETTING_KEY.CHATGPT_USAGE_GENERATION, Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) + 1);
+  });
 }
