@@ -73,7 +73,10 @@ export function mountEntryEditor(container, { variant = "default", showDuplicate
   </form>`;
   const form = template.content.firstElementChild;
   const roleIds = [["entry-editor-form", ids.form], ["entry-editor-project", ids.project], ["entry-editor-task", ids.task], ["entry-editor-description", ids.description], ["entry-editor-multiply", ids.multiply], ["entry-editor-status", ids.status], ["entry-editor-start", ids.start], ["entry-editor-end", ids.end], ["entry-editor-merge-control", ids.mergeControl], ["entry-editor-merge-target", ids.mergeTarget], ["entry-editor-merge-button", ids.mergeButton], ["entry-editor-save", ids.save], ["entry-editor-cancel", ids.cancel], ["entry-editor-delete", ids.delete]];
-  for (const [from, to] of roleIds) form.querySelector(`#${from}`).id = to;
+  for (const [from, to] of roleIds) {
+    const element = from === "entry-editor-form" ? form : form.querySelector(`#${from}`);
+    element.id = to;
+  }
   const duplicate = form.querySelector("#entry-editor-duplicate");
   if (showDuplicate) { duplicate.id = ids.duplicate; duplicate.hidden = false; }
   else duplicate.remove();
