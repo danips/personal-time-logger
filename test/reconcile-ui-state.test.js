@@ -38,7 +38,7 @@ describe("reconciliation action state", () => {
   it("enables only the actions represented by a mixed report", () => {
     assert.deepEqual(reconciliationActionEligibility({
       duplicates: [{}],
-      different: [{}, {}],
+      different: [{ newer: "local" }, { newer: "remote" }],
       localOnly: [],
       remoteOnly: [{}]
     }), {

@@ -1,6 +1,6 @@
-import { getAllEntries, getAllSettings, getDirtyEntryCount, getSetting, mutateAllLocalState, mutateSettings } from "../src/db.js";
+import { claimLock, getAllEntries, getDirtyEntryCount, getSetting, mutateSettings, releaseLock } from "../src/db.js";
 import { runAction } from "../src/action-runner.js";
-import { SHEET_HEADERS, decodePersistedEntry, getDeviceId } from "../src/entries.js";
+import { getDeviceId } from "../src/entries.js";
 import { getAuthStatus, signIn, signOut } from "../src/auth.js";
 import { getConfig, setOAuthClientCredentials } from "../src/config-loader.js";
 import { clearDiagnostics, diagnosticsText, getDiagnostics } from "../src/diagnostics.js";
@@ -27,65 +27,42 @@ import { bindThemeControls, readThemePreferences, saveThemePreferences, THEME_OP
 import { initReconcilePage } from "../reconcile/reconcile.js";
 import { initUsagePage } from "../usage/usage.js";
 import {
-  BACKUP_SETTING_KEYS,
   DEFAULT_WORKDAY_START_HOUR,
-  normalizeBackupSettings,
   normalizeOptionsSettings,
   normalizeWorkdayStartHour,
   planOptionsSettingsSave
 } from "../src/options-settings.js";
 import { storageUiState } from "../src/options-storage-ui.js";
+import { parseBackup, readPortableBackupSnapshot, restoreBackup, serializeBackup, MAX_BACKUP_BYTES } from "../src/backup.js";
 
 let diagnostics = [];
 let eventsBound = false;
 let auxiliaryPagesInitialized = false;
+let auxiliaryPagesInitialization = null;
 let settingsLayoutWasVisible = false;
 let syncSectionNavigation = () => {};
+const dirtyOptionFields = new Set();
+const CONFIG_SAVE_LOCK = "sync_lock";
 
-const BACKUP_FORMAT = "personal-time-logger-backup";
-const BACKUP_SCHEMA_VERSION = 1;
-function backupError(code) {
-  return Object.assign(new Error("The backup operation could not complete."), { code });
+function backupError(code, message = "The backup operation could not complete.") {
+  return Object.assign(new Error(message), { code });
 }
 
-function entryBackupFingerprint(entry) {
-  return JSON.stringify(SHEET_HEADERS.map((field) => entry[field]));
+function optionDraftKey(element) {
+  return element?.closest?.("#tempoMappings")?.id || element?.id || element?.name || "";
 }
 
-function parseBackup(text) {
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw backupError(ERROR_CODE.BACKUP_INVALID);
-  }
-  if (!value || value.format !== BACKUP_FORMAT || value.schema_version !== BACKUP_SCHEMA_VERSION
-    || !Array.isArray(value.entries) || !value.settings || typeof value.settings !== "object" || Array.isArray(value.settings)) {
-    throw backupError(ERROR_CODE.BACKUP_INVALID);
-  }
+function setRefreshedValue(element, value) {
+  if (!element || dirtyOptionFields.has(optionDraftKey(element))) return;
+  element.value = String(value ?? "");
+}
 
-  const ids = new Set();
-  const entries = value.entries.map((entry) => {
-    let decoded;
-    try {
-      decoded = decodePersistedEntry(entry);
-    } catch {
-      throw backupError(ERROR_CODE.BACKUP_INVALID);
-    }
-    if (decoded.dirty || ids.has(decoded.id)) throw backupError(ERROR_CODE.BACKUP_INVALID);
-    ids.add(decoded.id);
-    return { ...decoded, dirty: false, last_sync_at: "", sync_error: "" };
-  });
-  let settings;
-  try {
-    settings = normalizeBackupSettings(value.settings);
-  } catch {
-    throw backupError(ERROR_CODE.BACKUP_INVALID);
-  }
-  const appearance = value.appearance && typeof value.appearance === "object" && !Array.isArray(value.appearance)
-    ? value.appearance
-    : null;
-  return { entries, settings, appearance };
+function markOptionClean(...ids) {
+  ids.flat().forEach((id) => dirtyOptionFields.delete(id));
+}
+
+function configSaveOwner() {
+  return `options-config:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 }
 
 async function ensureBackupSync() {
@@ -98,30 +75,21 @@ async function ensureBackupSync() {
 async function exportBackupClicked() {
   setStatus("Synchronizing before creating backup...");
   await ensureBackupSync();
-  const [entries, allSettings] = await Promise.all([getAllEntries(), getAllSettings()]);
-  const settings = Object.fromEntries(BACKUP_SETTING_KEYS
-    .filter((key) => Object.hasOwn(allSettings, key))
-    .map((key) => [key, allSettings[key]]));
-  const backup = {
-    format: BACKUP_FORMAT,
-    schema_version: BACKUP_SCHEMA_VERSION,
-    exported_at: nowIso(),
-    settings,
-    appearance: readThemePreferences(),
-    entries
-  };
-  const blob = new Blob([`${JSON.stringify(backup, null, 2)}\n`], { type: "application/json" });
+  const snapshot = await readPortableBackupSnapshot();
+  const text = serializeBackup({ ...snapshot, appearance: readThemePreferences() });
+  const blob = new Blob([text], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = `personal-time-logger-backup-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
   link.click();
   URL.revokeObjectURL(url);
-  setStatus(`Backup downloaded (${entries.length} entr${entries.length === 1 ? "y" : "ies"})`);
+  setStatus(`Backup downloaded (${snapshot.entries.length} entr${snapshot.entries.length === 1 ? "y" : "ies"})`);
 }
 
 async function importBackupClicked(file) {
   if (!file) return false;
+  if (Number(file.size) > MAX_BACKUP_BYTES) throw Object.assign(new Error("This backup exceeds the 128 MiB UTF-8 limit. Choose a smaller file or use the documented alternate recovery path."), { code: ERROR_CODE.BACKUP_INVALID });
   const backup = parseBackup(await file.text());
   if (globalThis.confirm && !globalThis.confirm(
     `Restore ${backup.entries.length} entr${backup.entries.length === 1 ? "y" : "ies"} from this backup? Existing entries with the same ID will be compared and conflicts will be left unchanged.`
@@ -129,32 +97,13 @@ async function importBackupClicked(file) {
 
   setStatus("Synchronizing before restoring backup...");
   await ensureBackupSync();
-  const summary = { added: 0, settingsChanged: 0, conflicts: [] };
-  await mutateAllLocalState([...BACKUP_SETTING_KEYS, SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT], ({ entries, settings }) => {
-    for (const [key, value] of Object.entries(backup.settings)) {
-      if (JSON.stringify(settings.get(key)) !== JSON.stringify(value)) {
-        settings.set(key, value);
-        if (key === SETTING_KEY.DURATION_MULTIPLIER) {
-          settings.set(SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT, nowIso());
-        }
-        summary.settingsChanged += 1;
-      }
-    }
-    for (const entry of backup.entries) {
-      const current = entries.get(entry.id);
-      if (!current) {
-        entries.set(entry.id, { ...entry, dirty: true });
-        summary.added += 1;
-      } else if (entryBackupFingerprint(current) !== entryBackupFingerprint(entry)) {
-        summary.conflicts.push(entry.id);
-      }
-    }
-  });
+  const summary = await restoreBackup(backup);
   if (backup.appearance) saveThemePreferences(backup.appearance);
 
   if (summary.added || summary.settingsChanged) {
     setStatus("Synchronizing restored backup...");
-    await ensureBackupSync();
+    try { await ensureBackupSync(); }
+    catch (error) { setStatus(`Restored locally; sync pending. Retry synchronization. ${formatError(error)}`); return true; }
   }
   const conflictIds = summary.conflicts.slice(0, 5).join(", ");
   const conflictSuffix = summary.conflicts.length > 5 ? ", …" : "";
@@ -219,6 +168,7 @@ function createTempoMappingRow(task = "", issueId = "") {
   removeButton.className = "compact-button";
   removeButton.textContent = "Remove";
   removeButton.addEventListener("click", () => {
+    dirtyOptionFields.add("tempoMappings");
     row.remove();
     updateTempoMappingsEmptyState();
   });
@@ -235,6 +185,7 @@ function updateTempoMappingsEmptyState() {
 }
 
 function renderTempoMappings(value) {
+  if (dirtyOptionFields.has("tempoMappings")) return;
   const mappings = normalizeTempoTaskIssueIds(value);
   const rows = Object.entries(mappings)
     .sort(([first], [second]) => first.localeCompare(second))
@@ -244,16 +195,16 @@ function renderTempoMappings(value) {
 }
 
 function readTempoMappings() {
-  const mappings = {};
+  const mappings = new Map();
   for (const row of $("#tempoMappings").querySelectorAll("tr")) {
     const task = row.querySelector(".tempo-task").value.trim();
     const rawIssueId = row.querySelector(".tempo-issue-id").value;
     const issueId = normalizeTempoIssueId(rawIssueId);
     if (!issueId) throw new Error(`Enter a positive numeric issue ID for ${task || "entries without a Task"}`);
-    if (Object.hasOwn(mappings, task)) throw new Error(`Task “${task || "(No task)"}” is listed more than once`);
-    mappings[task] = issueId;
+    if (mappings.has(task)) throw new Error(`Task “${task || "(No task)"}” is listed more than once`);
+    mappings.set(task, issueId);
   }
-  return mappings;
+  return Object.fromEntries(mappings);
 }
 
 async function saveTempoSettings() {
@@ -269,6 +220,7 @@ async function saveTempoSettings() {
     settings.set(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, authorAccountId);
     settings.set(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, taskIssueIds);
   });
+  markOptionClean("tempoApiToken", "tempoAuthorAccountId", "tempoMappings");
   setStatus("Tempo settings saved on this device");
 }
 
@@ -303,8 +255,11 @@ async function markBackendEstablished(providerId) {
 
 async function initializeAuxiliaryPages() {
   if (auxiliaryPagesInitialized) return;
-  auxiliaryPagesInitialized = true;
-  await Promise.all([initUsagePage(), initReconcilePage()]);
+  if (auxiliaryPagesInitialization) return auxiliaryPagesInitialization;
+  auxiliaryPagesInitialization = Promise.all([initUsagePage(), initReconcilePage()])
+    .then((result) => { auxiliaryPagesInitialized = true; return result; })
+    .finally(() => { auxiliaryPagesInitialization = null; });
+  return auxiliaryPagesInitialization;
 }
 
 function runOptionsAction(key, action, button, actionOptions) {
@@ -378,9 +333,10 @@ async function saveSettings() {
     multiplier: multiplierInput.value
   });
   if (!next.valid) {
-    multiplierInput.setCustomValidity(next.message);
-    multiplierInput.reportValidity();
-    multiplierInput.focus();
+    const invalidInput = next.field === "interval" ? $("#syncInterval") : multiplierInput;
+    invalidInput.setCustomValidity(next.message);
+    invalidInput.reportValidity();
+    invalidInput.focus();
     setStatus(next.message);
     return false;
   }
@@ -429,6 +385,7 @@ async function saveSettings() {
   $("#syncInterval").value = String(next.interval);
   multiplierInput.value = String(next.multiplier);
   workdayStartInput.value = String(workdayStart.start);
+  markOptionClean("syncInterval", "durationMultiplier", "workdayStartHour");
 
   if (!saved.intervalChanged && !saved.multiplierSyncNeeded && !saved.workdayStartChanged) {
     setStatus("Settings unchanged");
@@ -552,20 +509,33 @@ function renderMigration(activeBackend, migrationState) {
   }
 }
 
-async function saveMysqlSettingsValues(rawBaseUrl, rawToken) {
+async function saveMysqlSettingsValues(rawBaseUrl, rawToken, { allowActiveChange = false } = {}) {
   const baseUrl = normalizeMysqlApiBaseUrl(rawBaseUrl);
   const token = String(rawToken || "").trim();
   if (!token) throw Object.assign(new Error("Enter the MySQL API token."), { code: "MYSQL_CONFIG_MISSING" });
-  await mutateSettings([SETTING_KEY.MYSQL_API_BASE_URL, SETTING_KEY.MYSQL_API_TOKEN], (settings) => {
-    settings.set(SETTING_KEY.MYSQL_API_BASE_URL, baseUrl);
-    settings.set(SETTING_KEY.MYSQL_API_TOKEN, token);
-  });
+  const lock = await claimLock(CONFIG_SAVE_LOCK, configSaveOwner(), 30_000);
+  if (!lock) throw Object.assign(new Error("A sync or migration is active. Wait for it to finish before changing the MySQL destination."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
+  try {
+    const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
+    const established = await getSetting(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, false);
+    const currentUrl = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
+    if (!allowActiveChange && established && active === REMOTE_PROVIDER_ID.MYSQL && currentUrl && currentUrl !== baseUrl) {
+      throw Object.assign(new Error("The active MySQL destination cannot change from ordinary Save. Test the new destination, then use migration or activation."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
+    }
+    await mutateSettings([SETTING_KEY.MYSQL_API_BASE_URL, SETTING_KEY.MYSQL_API_TOKEN], (settings) => {
+      settings.set(SETTING_KEY.MYSQL_API_BASE_URL, baseUrl);
+      settings.set(SETTING_KEY.MYSQL_API_TOKEN, token);
+    });
+  } finally {
+    await releaseLock(lock);
+  }
   return { baseUrl, token };
 }
 
 async function saveMysqlSettings() {
   const { baseUrl } = await saveMysqlSettingsValues($("#mysqlApiBaseUrl").value, $("#mysqlApiToken").value);
   $("#mysqlApiBaseUrl").value = baseUrl;
+  markOptionClean("mysqlApiBaseUrl", "mysqlApiToken");
   setStatus("MySQL API settings saved on this device");
   return false;
 }
@@ -594,20 +564,33 @@ async function testMysqlConnection() {
   return false;
 }
 
-async function saveCloudflareD1SettingsValues(rawBaseUrl, rawToken) {
+async function saveCloudflareD1SettingsValues(rawBaseUrl, rawToken, { allowActiveChange = false } = {}) {
   const baseUrl = normalizeCloudflareD1ApiBaseUrl(rawBaseUrl);
   const token = String(rawToken || "").trim();
   if (!token) throw Object.assign(new Error("Enter the Cloudflare D1 API token."), { code: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING });
-  await mutateSettings([SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, SETTING_KEY.CLOUDFLARE_D1_API_TOKEN], (settings) => {
-    settings.set(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, baseUrl);
-    settings.set(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, token);
-  });
+  const lock = await claimLock(CONFIG_SAVE_LOCK, configSaveOwner(), 30_000);
+  if (!lock) throw Object.assign(new Error("A sync or migration is active. Wait for it to finish before changing the Cloudflare destination."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
+  try {
+    const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
+    const established = await getSetting(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, false);
+    const currentUrl = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, DEFAULT_CLOUDFLARE_D1_API_BASE_URL);
+    if (!allowActiveChange && established && active === REMOTE_PROVIDER_ID.CLOUDFLARE_D1 && currentUrl && currentUrl !== baseUrl) {
+      throw Object.assign(new Error("The active Cloudflare D1 destination cannot change from ordinary Save. Test the new destination, then use migration or activation."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
+    }
+    await mutateSettings([SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, SETTING_KEY.CLOUDFLARE_D1_API_TOKEN], (settings) => {
+      settings.set(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, baseUrl);
+      settings.set(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, token);
+    });
+  } finally {
+    await releaseLock(lock);
+  }
   return { baseUrl, token };
 }
 
 async function saveCloudflareD1Settings() {
   const { baseUrl } = await saveCloudflareD1SettingsValues($("#cloudflareD1ApiBaseUrl").value, $("#cloudflareD1ApiToken").value);
   $("#cloudflareD1ApiBaseUrl").value = baseUrl;
+  markOptionClean("cloudflareD1ApiBaseUrl", "cloudflareD1ApiToken");
   setStatus("Cloudflare D1 settings saved on this device");
   return false;
 }
@@ -768,7 +751,7 @@ async function setupGoogleClicked() {
 }
 
 async function setupMysqlClicked(source) {
-  const { baseUrl } = await saveMysqlSettingsValues($("#setupMysqlApiBaseUrl").value, $("#setupMysqlApiToken").value);
+  const { baseUrl } = await saveMysqlSettingsValues($("#setupMysqlApiBaseUrl").value, $("#setupMysqlApiToken").value, { allowActiveChange: true });
   $("#mysqlApiBaseUrl").value = baseUrl;
   $("#mysqlApiToken").value = $("#setupMysqlApiToken").value.trim();
   $("#migrationStatus").textContent = source === "remote"
@@ -785,7 +768,7 @@ async function setupMysqlClicked(source) {
 }
 
 async function setupCloudflareD1Clicked(source) {
-  await saveCloudflareD1SettingsValues($("#setupCloudflareD1ApiBaseUrl").value, $("#setupCloudflareD1ApiToken").value);
+  await saveCloudflareD1SettingsValues($("#setupCloudflareD1ApiBaseUrl").value, $("#setupCloudflareD1ApiToken").value, { allowActiveChange: true });
   $("#cloudflareD1ApiBaseUrl").value = $("#setupCloudflareD1ApiBaseUrl").value.trim();
   $("#cloudflareD1ApiToken").value = $("#setupCloudflareD1ApiToken").value.trim();
   await activateCloudflareD1Clicked(source);
@@ -833,30 +816,34 @@ async function refresh() {
   const config = await getConfig();
   const auth = await getAuthStatus({ config });
   $("#deviceId").textContent = await getDeviceId();
-  $("#googleClientId").value = config.GOOGLE_CLIENT_ID || "";
-  $("#googleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
-  $("#setupGoogleClientId").value = config.GOOGLE_CLIENT_ID || "";
-  $("#setupGoogleClientSecret").value = config.GOOGLE_CLIENT_SECRET || "";
+  setRefreshedValue($("#googleClientId"), config.GOOGLE_CLIENT_ID || "");
+  setRefreshedValue($("#googleClientSecret"), config.GOOGLE_CLIENT_SECRET || "");
+  setRefreshedValue($("#setupGoogleClientId"), config.GOOGLE_CLIENT_ID || "");
+  setRefreshedValue($("#setupGoogleClientSecret"), config.GOOGLE_CLIENT_SECRET || "");
   const activeBackend = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
   renderStorage(activeBackend);
   renderMigration(activeBackend, await getStorageMigrationState());
-  $("#mysqlApiBaseUrl").value = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
-  $("#mysqlApiToken").value = await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
-  $("#setupMysqlApiBaseUrl").value = $("#mysqlApiBaseUrl").value;
-  $("#setupMysqlApiToken").value = $("#mysqlApiToken").value;
-  $("#cloudflareD1ApiBaseUrl").value = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, DEFAULT_CLOUDFLARE_D1_API_BASE_URL);
-  $("#cloudflareD1ApiToken").value = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, "");
-  $("#setupCloudflareD1ApiBaseUrl").value = $("#cloudflareD1ApiBaseUrl").value;
-  $("#setupCloudflareD1ApiToken").value = $("#cloudflareD1ApiToken").value;
+  const mysqlBaseUrl = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
+  const mysqlToken = await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
+  setRefreshedValue($("#mysqlApiBaseUrl"), mysqlBaseUrl);
+  setRefreshedValue($("#mysqlApiToken"), mysqlToken);
+  setRefreshedValue($("#setupMysqlApiBaseUrl"), mysqlBaseUrl);
+  setRefreshedValue($("#setupMysqlApiToken"), mysqlToken);
+  const cloudflareBaseUrl = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, DEFAULT_CLOUDFLARE_D1_API_BASE_URL);
+  const cloudflareToken = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, "");
+  setRefreshedValue($("#cloudflareD1ApiBaseUrl"), cloudflareBaseUrl);
+  setRefreshedValue($("#cloudflareD1ApiToken"), cloudflareToken);
+  setRefreshedValue($("#setupCloudflareD1ApiBaseUrl"), cloudflareBaseUrl);
+  setRefreshedValue($("#setupCloudflareD1ApiToken"), cloudflareToken);
   renderSpreadsheet(await getSpreadsheetId());
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
   renderDiagnostics();
-  $("#syncInterval").value = String(await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
-  $("#durationMultiplier").value = String(await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
-  $("#workdayStartHour").value = String(await getSetting(SETTING_KEY.WORKDAY_START_HOUR, DEFAULT_WORKDAY_START_HOUR));
-  $("#tempoApiToken").value = await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "");
-  $("#tempoAuthorAccountId").value = await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, "");
+  setRefreshedValue($("#syncInterval"), await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
+  setRefreshedValue($("#durationMultiplier"), await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
+  setRefreshedValue($("#workdayStartHour"), await getSetting(SETTING_KEY.WORKDAY_START_HOUR, DEFAULT_WORKDAY_START_HOUR));
+  setRefreshedValue($("#tempoApiToken"), await getSetting(SETTING_KEY.TEMPO_API_TOKEN, ""));
+  setRefreshedValue($("#tempoAuthorAccountId"), await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, ""));
   renderTempoMappings(await getSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, {}));
 
   if (auth.missingClientId) {
@@ -990,6 +977,12 @@ function bindEvents() {
     theme: $("#themeSelect").value,
     highContrast: $("#highContrast").checked
   });
+  for (const field of document.querySelectorAll("input, select, textarea")) {
+    field.addEventListener("input", () => dirtyOptionFields.add(optionDraftKey(field)));
+    field.addEventListener("change", () => dirtyOptionFields.add(optionDraftKey(field)));
+  }
+  $("#tempoMappings").addEventListener("input", () => dirtyOptionFields.add("tempoMappings"));
+  $("#tempoMappings").addEventListener("change", () => dirtyOptionFields.add("tempoMappings"));
   $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
   $("#reconnectSpreadsheet").addEventListener("click", (event) => runOptionsAction("reconnect-spreadsheet", reconnectSpreadsheetClicked, event.currentTarget));
@@ -1006,6 +999,7 @@ function bindEvents() {
       .finally(() => { input.value = ""; });
   });
   $("#addTempoMapping").addEventListener("click", () => {
+    dirtyOptionFields.add("tempoMappings");
     const row = createTempoMappingRow();
     $("#tempoMappings").append(row);
     updateTempoMappingsEmptyState();

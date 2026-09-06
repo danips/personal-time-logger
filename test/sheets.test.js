@@ -59,7 +59,7 @@ describe("rowsToEntries", () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].multiply, "");
     assert.deepEqual(quarantined, []);
-    assert.equal(rowFingerprint(rows[1]), entryToRow(entry).join("\u0000"));
+    assert.equal(rowFingerprint(rows[1]), JSON.stringify(entryToRow(entry)));
   });
 
   it("keeps the most recently updated of duplicated rows, whatever their order", () => {

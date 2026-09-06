@@ -169,11 +169,12 @@ describe("Tempo week preparation", () => {
 describe("Tempo bulk upload", () => {
   it("keeps the authenticated request in the privileged background context", () => {
     const calendar = readFileSync(join(root, "extension/calendar/calendar.js"), "utf8");
+    const tempoController = readFileSync(join(root, "extension/calendar/tempo-controller.js"), "utf8");
     const background = readFileSync(join(root, "extension/background/background.js"), "utf8");
     const manifest = JSON.parse(readFileSync(join(root, "extension/manifest.json"), "utf8"));
 
     assert.doesNotMatch(calendar, /sendTempoWorklogs/);
-    assert.match(calendar, /sendRuntimeMessage/);
+    assert.match(tempoController, /sendRuntimeMessage/);
     assert.match(background, /fetchImpl:\s*tempoXhrRequest/);
     assert.equal(manifest.host_permissions.includes("https://api.tempo.io/*"), false);
     assert.equal(manifest.optional_host_permissions.includes("https://api.tempo.io/*"), true);

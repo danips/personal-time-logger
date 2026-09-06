@@ -122,9 +122,28 @@ async function stores(names, mode, fn) {
   const storeNames = Array.isArray(names) ? names : [names];
   const tx = db.transaction(storeNames, mode);
   const objectStores = new Map(storeNames.map((name) => [name, tx.objectStore(name)]));
-  const result = await fn(objectStores, tx);
-  if (mode !== "readonly") await txDone(tx);
-  return result;
+  // Install the settlement listeners before any callback work. Application
+  // exceptions must abort the same transaction that may already contain
+  // successful requests; otherwise a rejected mutation can partially commit.
+  const settled = txDone(tx);
+  try {
+    const result = await fn(objectStores, tx);
+    await settled;
+    return result;
+  } catch (error) {
+    try {
+      tx.abort?.();
+    } catch {
+      // A native transaction can become inactive between the callback error
+      // and this cleanup. Its settlement still carries the useful failure.
+    }
+    try {
+      await settled;
+    } catch {
+      // Preserve the original application/request error for callers.
+    }
+    throw error;
+  }
 }
 
 async function store(name, mode, fn) {
@@ -185,6 +204,13 @@ async function writeChangedSettings(objectStore, keys, original, settings) {
 }
 
 async function writeChangedEntries(objectStore, original, entries) {
+  // Validate every replacement before issuing a delete or put. This is an
+  // additional guard; stores() still aborts if a later application error occurs.
+  for (const [id, entry] of entries) {
+    if (entry !== undefined && (!entry || entry.id !== id)) {
+      throw new TypeError("Mutated entries must retain their id");
+    }
+  }
   for (const [id, previous] of original) {
     if (!entries.has(id) && previous !== undefined) {
       await requestToPromise(objectStore.delete(id));
@@ -195,7 +221,6 @@ async function writeChangedEntries(objectStore, original, entries) {
       if (original.get(id) !== undefined) await requestToPromise(objectStore.delete(id));
       continue;
     }
-    if (!entry || entry.id !== id) throw new TypeError("Mutated entries must retain their id");
     const stored = entryForStorage(entry);
     if (!original.has(id) || original.get(id) === undefined || !sameStoredValue(original.get(id), stored)) {
       await requestToPromise(objectStore.put(stored));
@@ -246,6 +271,16 @@ export async function getAllSettings() {
   return store(SETTINGS_STORE, "readonly", async (s) => Object.fromEntries(
     (await requestToPromise(s.getAll())).map(({ key, value }) => [key, clone(value)])
   ));
+}
+
+/** Read the portable backup inputs from one coherent readonly snapshot. */
+export async function getBackupSnapshot(settingKeys) {
+  const keys = [...new Set(settingKeys || [])];
+  return stores([ENTRY_STORE, SETTINGS_STORE], "readonly", async (objectStores) => {
+    const entries = (await requestToPromise(objectStores.get(ENTRY_STORE).getAll())).map(entryFromStorage);
+    const { settings } = await readSettings(objectStores.get(SETTINGS_STORE), keys);
+    return { entries, settings: Object.fromEntries(settings) };
+  });
 }
 
 export async function setSetting(key, value) {

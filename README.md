@@ -1,6 +1,6 @@
 # Personal Time Logger Extension
 
-Current release: `0.1.70` (`v0.1.70`).
+Current release: `0.1.73` (`v0.1.73`).
 
 A Firefox extension for local-first time tracking with Google Sheets, MySQL, or a user-owned Cloudflare Worker + D1 backend. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
@@ -23,6 +23,12 @@ A Firefox extension for local-first time tracking with Google Sheets, MySQL, or 
 - Refresh-token-capable Google device OAuth flow for Firefox.
 - Experimental ChatGPT 5-hour and weekly usage controls for the current Firefox session.
 - Unit tests over the pure logic, run with `npm test`.
+
+## Manual backups
+
+Options provides manual JSON backup and restore. Export first completes a successful sync and captures one coherent local snapshot; unsynchronized edits block the export. The backup includes entries and selected non-secret settings (duration multiplier, sync interval, Tempo mapping/account, window presets, and calendar start hour). OAuth credentials, API tokens, ChatGPT consent, diagnostics, locks, and backend bindings are never included.
+
+Restore merges entries by ID: existing differing entries are preserved and reported as conflicts, while new entries and selected settings are restored locally. A follow-up sync is attempted; if the network is unavailable, the local restore remains committed and Options reports that synchronization is pending. JSON backups are limited to 128 MiB of UTF-8 text; oversized files require an alternate recovery path.
 
 ## ChatGPT Usage Limits (Experimental)
 
@@ -398,4 +404,3 @@ OAuth client credentials are stored in Firefox synchronized extension storage th
 - Show elapsed time as badge text on the toolbar icon.
 - Let an Analytics anomaly open its entry directly in an editor.
 - Add entry search across all history.
-- Add local backup and restore of the entry database.

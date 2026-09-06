@@ -154,6 +154,14 @@ class FakeTransaction {
     return new FakeObjectStore(this.state.stores.get(name), this, this.mode);
   }
 
+  abort() {
+    if (this.finished) return;
+    this.operations = [];
+    this.pending = 0;
+    this.processing = false;
+    this.finish(false);
+  }
+
   enqueue(operation) {
     if (this.finished) throw new Error("Transaction is no longer active");
     this.hasOperations = true;

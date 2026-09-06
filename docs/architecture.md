@@ -21,10 +21,10 @@ ChatGPT usage service ───────────────────�
 | Context | Entry point | Responsibility | Boundary |
 | --- | --- | --- | --- |
 | Background | `extension/background/background.js` | Alarm heartbeat, installation recovery, and non-interactive sync. | Does not own entries; it calls `extension/src/sync.js`. |
-| Popup | `extension/popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `extension/src/entries.js` and refreshes on entry events. |
-| Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; a fixed runtime message delegates Tempo transport to the background context through `extension/src/tempo.js`. |
+| Popup | `extension/popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `extension/src/entries.js`; recent grouping is pure `extension/src/popup-recent-groups.js`; window-size controls use the page-local `extension/popup/window-size-controller.js`. |
+| Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; `extension/calendar/tempo-controller.js` captures the selected week and delegates Tempo transport to the background context. |
 | Analytics | `extension/analytics/analytics.js` | Period reports, automatic comparisons, project/task and description breakdowns, fragmentation, and anomaly display. | Queries the bounded union of current and comparison intervals once; pure period and aggregation logic lives in `extension/src/analytics-period.js` and `extension/src/analytics.js`. |
-| Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, and diagnostics. | It mounts the usage and reconciliation page modules; active backend and preparation target stay separate; OAuth client settings use synchronized browser storage, while tokens remain local. |
+| Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, backups, and diagnostics. | It mounts the usage and reconciliation page modules; backup parsing/serialization is in `extension/src/backup.js`; active backend and preparation target stay separate; OAuth client settings use synchronized browser storage, while tokens remain local. |
 | Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
 | Usage | `extension/usage/usage.js` | Displays the current Firefox ChatGPT session's 5-hour and weekly limits. | It can run standalone or mounted in Options and delegates the fixed session-authenticated request to `extension/src/chatgpt-usage-service.js`. |
 | ChatGPT usage service | `extension/src/chatgpt-usage-service.js` | Fetches the fixed session and usage endpoints directly from the extension context. | The access token stays in memory for one request and is never persisted, logged, or sent outside ChatGPT. |
@@ -129,9 +129,9 @@ MySQL uses API version fencing.
 ## Trust and release boundaries
 
 - Google Sheets/Drive and OAuth are required only for Google operation. HTTPS origins are declared as optional so Firefox can grant a self-hosted API domain, while runtime requests still ask only for the exact configured MySQL or Cloudflare origin. Cloudflare's raw bearer token remains local to the Firefox profile, while the Worker secret is only its SHA-256 digest.
-- `chatgpt.com` is optional and isolated to the usage feature. Its page-world
-  bridge is intentionally narrow because page scripts are untrusted extension
-  inputs.
+- `chatgpt.com` is optional and isolated to the usage feature. The usage service
+  performs its bounded session and usage requests directly from the extension
+  context; no page-world bridge is used.
 - Release packaging starts from tracked extension files only. The prepared
   source changes only the Firefox update URL; local secrets, tests, and build
   files are excluded.

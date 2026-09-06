@@ -3,6 +3,7 @@ import { notifyEntriesChanged } from "./events.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { durationSeconds, nowIso, uuid } from "./time.js";
+import { entryFingerprint } from "./fingerprints.js";
 
 export const SHEET_HEADERS = [
   "id",
@@ -103,6 +104,12 @@ export function decodeEntryCreate(fields) {
     throw entryModelError("multiply must be a checkbox value or numeric multiplier.");
   }
   if (Object.hasOwn(fields, "multiply")) decoded.multiply = fields.multiply;
+  if (Object.hasOwn(decoded, "multiply") && typeof decoded.multiply !== "boolean"
+    && decoded.multiply !== "" && decoded.multiply !== "true" && decoded.multiply !== "TRUE"
+    && decoded.multiply !== "false" && decoded.multiply !== "FALSE"
+    && !normalizeMultiplierText(decoded.multiply)) {
+    throw entryModelError("multiply must be empty or a valid numeric multiplier.");
+  }
   return decoded;
 }
 
@@ -116,12 +123,12 @@ export function decodeEntryEdit(changes) {
   for (const field of ["start_at", "end_at", "deleted_at"]) {
     if (!Object.hasOwn(changes, field)) continue;
     const value = changes[field];
-    if (field === "end_at" && value === "") {
+    if ((field === "end_at" || field === "deleted_at") && value === "") {
       decoded[field] = "";
       continue;
     }
     if (!validTimestamp(value)) throw entryModelError(`${field} must be a valid timestamp.`);
-    decoded[field] = value;
+    decoded[field] = persistedTimestamp(value, field);
   }
   if (Object.hasOwn(changes, "status")) {
     if (changes.status !== "ok" && changes.status !== "needs_review") {
@@ -133,6 +140,10 @@ export function decodeEntryEdit(changes) {
     const value = changes.multiply;
     if (typeof value !== "boolean" && typeof value !== "string" && typeof value !== "number") {
       throw entryModelError("multiply must be a checkbox value or numeric multiplier.");
+    }
+    if (typeof value !== "boolean" && value !== "" && value !== "true" && value !== "TRUE"
+      && value !== "false" && value !== "FALSE" && !normalizeMultiplierText(value)) {
+      throw entryModelError("multiply must be empty or a valid numeric multiplier.");
     }
     decoded.multiply = value;
   }
@@ -359,6 +370,9 @@ export async function stopEntry(id, { expectedRevision } = {}) {
   const entry = await mutateEntry(id, expectedRevision, (existing) => {
     // Idempotent: a second stop (stale UI, double click) must not rewrite end_at.
     if (existing.end_at) return normalizeEntry(existing);
+    if (new Date(existing.start_at).getTime() > Date.now()) {
+      throw entryModelError("This timer starts in the future. Correct its start time before stopping it.");
+    }
     const multiply = normalizeMultiplyValue(existing.multiply);
     return normalizeEntry({
       ...existing,
@@ -386,7 +400,10 @@ export async function updateEntry(id, changes, { expectedRevision } = {}) {
     const nextMultiply = requestedMultiply === undefined
       ? normalizeMultiplyValue(existing.multiply)
       : requestedMultiply;
-    return normalizeEntry({
+    if (!nextEnd && new Date(nextStart).getTime() > Date.now()) {
+      throw entryModelError("An active timer cannot start in the future. Correct its start time first.");
+    }
+    const candidate = normalizeEntry({
       ...existing,
       ...editableChanges,
       multiply: nextMultiply,
@@ -398,6 +415,9 @@ export async function updateEntry(id, changes, { expectedRevision } = {}) {
       dirty: true,
       sync_error: ""
     });
+    // Older local fixtures/records may predate device_id. Preserve their
+    // compatibility while still strictly validating modern persisted entries.
+    return candidate.device_id ? decodePersistedEntry(candidate) : candidate;
   });
   notifyEntriesChanged({ action: "update", ids: [next.id] });
   return next;
@@ -498,5 +518,5 @@ export function isRemoteNewer(remoteEntry, localEntry) {
 export function hasEqualTimestampConflict(firstEntry, secondEntry) {
   return Boolean(firstEntry && secondEntry
     && String(firstEntry.updated_at || "") === String(secondEntry.updated_at || "")
-    && entryToRow(firstEntry).join("\u0000") !== entryToRow(secondEntry).join("\u0000"));
+    && entryFingerprint(firstEntry) !== entryFingerprint(secondEntry));
 }

@@ -1,6 +1,7 @@
 import {
   deleteDuplicateRows,
   deleteEverywhere,
+  entryFingerprint,
   keepLocal,
   keepRemote,
   loadReconciliation,
@@ -11,7 +12,8 @@ import { onEntriesChanged } from "../src/events.js";
 import {
   duplicateRecordsSupported,
   reconciliationActionDisabled,
-  reconciliationActionEligibility
+  reconciliationActionEligibility,
+  buildKeepNewestCommands
 } from "../src/reconcile-ui-state.js";
 import { syncNow } from "../src/sync.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
@@ -145,8 +147,8 @@ function renderDifferent(items) {
       rowHeading(item.local, badges),
       differenceTable(item.differences, report.provider?.label || "Remote storage"),
       actionRow([
-        { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision }) },
-        { label: "Keep remote", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision }) }
+        { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) },
+        { label: "Keep remote", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) }
       ])
     );
     return row;
@@ -222,8 +224,8 @@ function renderLocalOnly(items) {
     row.append(
       rowHeading(item.local, item.local.dirty ? ["pending upload"] : []),
       actionRow([
-        { label: "Push to remote", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision }) },
-        { label: "Delete", action: () => deleteEverywhere(item.id, null, { expectedLocalRevision: item.local.revision }), danger: true }
+        { label: "Push to remote", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) },
+        { label: "Delete", action: () => deleteEverywhere(item.id, null, { expectedLocalRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }), danger: true }
       ])
     );
     return row;
@@ -240,7 +242,7 @@ function renderRemoteOnly(items) {
       rowHeading(item.remote),
       actionRow([
         { label: "Import from remote", action: () => keepRemote(item.remote) },
-        { label: "Delete", action: () => deleteEverywhere(item.id, item.remote), danger: true }
+        { label: "Delete", action: () => deleteEverywhere(item.id, item.remote, { expectedRemoteFingerprint: entryFingerprint(item.remote) }), danger: true }
       ])
     );
     return row;
@@ -363,19 +365,17 @@ function bindEvents() {
     action: "keepLocal",
     id: item.id,
     remoteEntry: item.remote,
-    expectedRevision: item.local.revision
+    expectedRevision: item.local.revision,
+    expectedLocalFingerprint: entryFingerprint(item.local)
   }))));
   $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different.map((item) => ({
     action: "keepRemote",
     id: item.id,
     remoteEntry: item.remote,
-    expectedLocalRevision: item.local.revision
+    expectedLocalRevision: item.local.revision,
+    expectedLocalFingerprint: entryFingerprint(item.local)
   }))));
-  $("#keepAllNewest").addEventListener("click", () => resolveMany(report.different.map((item) => (
-    item.newer === "remote"
-      ? { action: "keepRemote", id: item.id, remoteEntry: item.remote, expectedLocalRevision: item.local.revision }
-      : { action: "keepLocal", id: item.id, remoteEntry: item.remote, expectedRevision: item.local.revision }
-  ))));
+  $("#keepAllNewest").addEventListener("click", () => resolveMany(buildKeepNewestCommands(report.different)));
   $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly.map((item) => ({
     action: "keepLocal",
     id: item.id,

@@ -101,7 +101,7 @@ function showFatalPanel({ title, error, retry }) {
     });
   };
   diagnosticsButton.onclick = () => {
-    void platform.openOptionsPage().catch(() => {
+    void platform.openOptionsPage("diagnostics").catch(() => {
       messageElement.textContent = "Could not open Options. Retry this page, then open Options diagnostics manually.";
     });
   };

@@ -12,6 +12,7 @@ export const PERSISTED_ENTRY_FIELDS = Object.freeze([
   "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"
 ]);
 const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
+const requestEncoder = new TextEncoder();
 
 function codedError(code, message, cause) {
   if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
@@ -127,9 +128,21 @@ export function createRemoteApiClient({
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) })
       });
-      data = await readBoundedJson(response, MAX_RESPONSE_BYTES, (reason) => (
-        codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The remote API ${reason}.`)
-      ));
+      if (!response.ok) {
+        // Status is authoritative for an error response. Intermediaries often
+        // return HTML/text for 429/503, which must not become an incompatible
+        // API report merely because that body is not JSON.
+        try { data = await readBoundedJson(response, MAX_RESPONSE_BYTES, (reason) => (
+          codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The remote API ${reason}.`)
+        )); } catch {
+          if (controller.signal.aborted) throw codedError(ERROR_CODE.API_TIMEOUT, `The ${labelText(providerLabel)} request timed out.`);
+          data = null;
+        }
+      } else {
+        data = await readBoundedJson(response, MAX_RESPONSE_BYTES, (reason) => (
+          codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The remote API ${reason}.`)
+        ));
+        }
     } catch (error) {
       if (error?.code) throw error;
       if (controller.signal.aborted) throw codedError(ERROR_CODE.API_TIMEOUT, `The ${labelText(providerLabel)} request timed out.`);
@@ -138,13 +151,13 @@ export function createRemoteApiClient({
       clearTimeout(timeout);
     }
 
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-      throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API returned an invalid response.");
-    }
     if (!response.ok) {
-      const serverCode = typeof data.error?.code === "string" ? data.error.code : "";
+      const serverCode = typeof data?.error?.code === "string" ? data.error.code : "";
       const code = mapApiError(response.status, serverCode);
       throw codedError(code, safeApiMessage(code, providerLabel));
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API returned an invalid response.");
     }
     return data;
   };
@@ -172,6 +185,48 @@ export function parseRemoteVersion(value, invalidCode = ERROR_CODE.REMOTE_API_IN
   return version;
 }
 
+/** Validate an append acknowledgement without losing order or duplicate IDs. */
+export function parseAppendAcknowledgements(records, submittedIds, refKind) {
+  if (!Array.isArray(records) || !Array.isArray(submittedIds)) {
+    throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API append acknowledgement is invalid.");
+  }
+  if (records.length !== submittedIds.length) {
+    throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API did not acknowledge every submitted entry.");
+  }
+  const expected = new Set(submittedIds.map((id) => String(id)));
+  const seen = new Set();
+  const byId = new Map();
+  for (const record of records) {
+    if (!record || typeof record !== "object" || Array.isArray(record)
+      || typeof record.id !== "string" || !expected.has(record.id) || seen.has(record.id)) {
+      throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API append acknowledgement contains unexpected or duplicate IDs.");
+    }
+    const version = parseRemoteVersion(record.version);
+    seen.add(record.id);
+    byId.set(record.id, { id: record.id, ref: { kind: refKind, version } });
+  }
+  if (seen.size !== expected.size) {
+    throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The remote API append acknowledgement is incomplete.");
+  }
+  return submittedIds.map((id) => byId.get(String(id)));
+}
+
+export function chunkByEncodedBytes(values, { maxBytes, envelopeKey, encode = (value) => value } = {}) {
+  const result = [];
+  let current = [];
+  const sizeOf = (items) => requestEncoder.encode(JSON.stringify({ [envelopeKey]: items.map(encode) })).byteLength;
+  for (const value of values) {
+    const candidate = [...current, value];
+    if (sizeOf(candidate) <= maxBytes) { current = candidate; continue; }
+    if (!current.length) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "A single remote entry is too large for the API request limit.");
+    result.push(current);
+    current = [value];
+    if (sizeOf(current) > maxBytes) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "A single remote entry is too large for the API request limit.");
+  }
+  if (current.length) result.push(current);
+  return result;
+}
+
 export function normalizeRemoteEntry(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
   const normalized = { ...entry };
@@ -197,8 +252,11 @@ export function parseRemoteSnapshot(data, {
       if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("record");
       const entry = decodePersistedEntry(normalizeRemoteEntry(record.entry));
       if (entryRefs.has(entry.id)) throw new Error("duplicate");
+      // Validate the provider reference before mutating either accepted
+      // collection. Invalid versions must remain quarantine-only records.
+      const version = parseRemoteVersion(record.version);
       entries.push(entry);
-      entryRefs.set(entry.id, { kind: entryRefKind, version: parseRemoteVersion(record.version) });
+      entryRefs.set(entry.id, { kind: entryRefKind, version });
     } catch {
       const version = Number(record?.version);
       quarantined.push({

@@ -16,18 +16,16 @@ import {
   UPDATE_CHECK_MESSAGE,
   UPDATE_INSTALL_MESSAGE
 } from "../src/sync-request.js";
-import { allocateEntryByLocalDay } from "../src/time-allocation.js";
+import { groupRecentEntries } from "../src/popup-recent-groups.js";
+import { createWindowSizeController } from "./window-size-controller.js";
 import {
   addDays,
   bindMinuteRollover,
-  dayMonth,
   durationSeconds,
   formatElapsed,
-  localDateKey,
   localTime,
   shortDateTime,
-  startOfLocalWeek,
-  weekdayDayMonth
+  startOfLocalWeek
 } from "../src/time.js";
 import {
   $,
@@ -40,12 +38,6 @@ import {
 import { platform } from "../src/platform.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
-import { updateActiveIcon } from "../src/icon.js";
-import {
-  MAX_WINDOW_SIZE,
-  normalizeWindowSizePreset,
-  resizeCurrentWindow
-} from "../src/window-resize.js";
 
 mountEntryEditor(document.getElementById("popupEntryEditor"), {
   formId: "editForm",
@@ -75,15 +67,6 @@ let eventsBound = false;
 const expandedRecentGroups = new Set();
 let recentWeekCount = 1;
 let recentEntries = [];
-const WINDOW_SIZE_SETTING = SETTING_KEY.WINDOW_RESIZE_PRESETS;
-const DEFAULT_WINDOW_SIZES = [
-  { width: 2000, height: 1000, isWindow: false },
-  { width: 1500, height: 1000, isWindow: false },
-  { width: 1300, height: 900, isWindow: false }
-];
-let windowSizes = DEFAULT_WINDOW_SIZES.map((size) => ({ ...size }));
-let editingWindowSizes = [];
-let windowSizeEditorOpen = false;
 let renderGeneration = 0;
 
 const $activePanel = $(".active-panel");
@@ -123,6 +106,16 @@ const $chatGptUsageValues = $("#chatGptUsageValues");
 const $windowSizePresets = $("#windowSizePresets");
 const $windowSizeEditor = $("#windowSizeEditor");
 const $windowSizeFields = $("#windowSizeFields");
+const windowSizeController = createWindowSizeController({
+  presets: $windowSizePresets,
+  editor: $windowSizeEditor,
+  fields: $windowSizeFields,
+  getSetting,
+  setSetting,
+  settingKey: SETTING_KEY.WINDOW_RESIZE_PRESETS,
+  platform,
+  onError: (error) => setSyncStatus("error", formatError(error))
+});
 
 function setSyncStatus(status, detail = "") {
   setStatus($syncStatus, status, detail);
@@ -192,130 +185,6 @@ function groupChips(group) {
     for (const chip of entryChips(entry)) chips.add(chip);
   }
   return [...chips];
-}
-
-function localDayKey(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "unknown";
-  return localDateKey(date);
-}
-
-function localDayLabel(iso) {
-  return weekdayDayMonth(iso) || "Unknown day";
-}
-
-function weekInfo(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return {
-      key: "unknown",
-      label: "Unknown week",
-      start: null,
-      totalSeconds: 0,
-      days: [],
-      dayMap: new Map()
-    };
-  }
-
-  const start = startOfLocalWeek(date);
-  const end = addDays(start, 6);
-  const currentWeek = startOfLocalWeek(new Date());
-  const previousWeek = addDays(currentWeek, -7);
-  let label = `${dayMonth(start)} - ${dayMonth(end)}`;
-  if (start.getTime() === currentWeek.getTime()) label = "This week";
-  if (start.getTime() === previousWeek.getTime()) label = "Last week";
-
-  return {
-    key: localDateKey(start),
-    label,
-    start,
-    totalSeconds: 0,
-    days: [],
-    dayMap: new Map()
-  };
-}
-
-function recentGroupKey(entry) {
-  return [
-    localDayKey(entry.start_at),
-    entry.project || "",
-    entry.task || "",
-    entry.description || "",
-    entry.multiply || ""
-  ].map((part) => encodeURIComponent(part)).join("|");
-}
-
-function compareRecentEntries(left, right) {
-  const byStart = String(right.start_at || "").localeCompare(String(left.start_at || ""));
-  return byStart || String(right.id || "").localeCompare(String(left.id || ""));
-}
-
-function groupRecentEntries(entries, { start, end }) {
-  const weeks = [];
-  const weekMap = new Map();
-
-  for (const entry of entries) {
-    for (const allocation of allocateEntryByLocalDay(entry)) {
-      if (allocation.end <= start || allocation.start >= end) continue;
-      const displayEntry = {
-        ...entry,
-        start_at: allocation.start.toISOString(),
-        end_at: allocation.end.toISOString(),
-        duration_seconds: allocation.effectiveSeconds
-      };
-      const weekSeed = weekInfo(displayEntry.start_at);
-      if (!weekMap.has(weekSeed.key)) {
-        weekMap.set(weekSeed.key, weekSeed);
-        weeks.push(weekSeed);
-      }
-
-      const week = weekMap.get(weekSeed.key);
-      const dayKey = localDayKey(displayEntry.start_at);
-      if (!week.dayMap.has(dayKey)) {
-        const day = {
-          key: dayKey,
-          label: localDayLabel(displayEntry.start_at),
-          totalSeconds: 0,
-          groups: [],
-          groupMap: new Map()
-        };
-        week.dayMap.set(dayKey, day);
-        week.days.push(day);
-      }
-
-      const day = week.dayMap.get(dayKey);
-      const groupKey = recentGroupKey(displayEntry);
-      if (!day.groupMap.has(groupKey)) {
-        const group = {
-          key: groupKey,
-          entries: [],
-          totalSeconds: 0
-        };
-        day.groupMap.set(groupKey, group);
-        day.groups.push(group);
-      }
-
-      const group = day.groupMap.get(groupKey);
-      group.entries.push(displayEntry);
-      group.totalSeconds += allocation.effectiveSeconds;
-      day.totalSeconds += allocation.effectiveSeconds;
-      week.totalSeconds += allocation.effectiveSeconds;
-    }
-  }
-
-  for (const week of weeks) {
-    delete week.dayMap;
-    week.days.sort((left, right) => right.key.localeCompare(left.key));
-    for (const day of week.days) {
-      delete day.groupMap;
-      day.groups.sort((left, right) => compareRecentEntries(left.entries[0], right.entries[0]));
-      for (const group of day.groups) group.entries.sort(compareRecentEntries);
-    }
-  }
-
-  weeks.sort((left, right) => right.start.getTime() - left.start.getTime());
-
-  return weeks;
 }
 
 function renderEntryRow(entry, { child = false } = {}) {
@@ -466,7 +335,6 @@ function renderActiveState(latest) {
   $activePanel.setAttribute("role", "button");
   $activePanel.setAttribute("aria-label", state.ariaLabel);
   if (state.running) setNewTimerOpen(false);
-  void updateActiveIcon(state.iconActive);
 }
 
 function updateElapsed() {
@@ -631,135 +499,8 @@ function compactPercent(value) {
   return `${Math.round(numeric * 10) / 10}%`;
 }
 
-function normalizeWindowSizes(value) {
-  if (!Array.isArray(value)) return null;
-  return value
-    .map(normalizeWindowSizePreset)
-    .filter(Boolean);
-}
-
-function windowSizeLabel(size) {
-  return `${size.width}×${size.height}`;
-}
-
-function renderWindowSizePresets() {
-  const buttons = windowSizes.map((size) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "window-size-button";
-    button.dataset.windowWidth = String(size.width);
-    button.dataset.windowHeight = String(size.height);
-    button.dataset.windowMode = String(size.isWindow);
-    button.textContent = windowSizeLabel(size);
-    button.title = `${size.isWindow ? "Resize browser window" : "Resize viewport"} to ${size.width} by ${size.height}`;
-    return button;
-  });
-  if (!buttons.length) {
-    const empty = document.createElement("span");
-    empty.className = "window-size-empty";
-    empty.textContent = "No sizes";
-    buttons.push(empty);
-  }
-  $windowSizePresets.replaceChildren(...buttons);
-}
-
-function renderWindowSizeEditor() {
-  const rows = editingWindowSizes.map((size, index) => {
-    const row = document.createElement("div");
-    row.className = "window-size-field-row";
-
-    const width = document.createElement("input");
-    width.className = "window-size-input window-size-width";
-    width.type = "number";
-    width.min = "1";
-    width.max = String(MAX_WINDOW_SIZE);
-    width.step = "1";
-    width.value = String(size.width);
-    width.placeholder = "Width";
-    width.setAttribute("aria-label", `Width for window size ${index + 1}`);
-
-    const separator = document.createElement("span");
-    separator.className = "window-size-separator";
-    separator.textContent = "×";
-
-    const height = document.createElement("input");
-    height.className = "window-size-input window-size-height";
-    height.type = "number";
-    height.min = "1";
-    height.max = String(MAX_WINDOW_SIZE);
-    height.step = "1";
-    height.value = String(size.height);
-    height.placeholder = "Height";
-    height.setAttribute("aria-label", `Height for window size ${index + 1}`);
-
-    const modeLabel = document.createElement("label");
-    modeLabel.className = "window-size-mode";
-    modeLabel.title = "Checked: width and height apply to the outer browser window. Unchecked: they apply to the page viewport.";
-    const mode = document.createElement("input");
-    mode.className = "window-size-window-mode";
-    mode.type = "checkbox";
-    mode.checked = Boolean(size.isWindow);
-    mode.setAttribute("aria-label", `Use outer window size for preset ${index + 1}`);
-    const modeText = document.createElement("span");
-    modeText.textContent = "Window";
-    modeLabel.append(mode, modeText);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "window-size-remove danger";
-    remove.dataset.removeWindowSize = String(index);
-    remove.title = "Remove window size";
-    remove.setAttribute("aria-label", `Remove window size ${index + 1}`);
-    remove.textContent = "×";
-
-    row.append(width, separator, height, modeLabel, remove);
-    return row;
-  });
-  $windowSizeFields.replaceChildren(...rows);
-}
-
-function setWindowSizeEditorOpen(open) {
-  windowSizeEditorOpen = open;
-  if (open) {
-    editingWindowSizes = windowSizes.map((size) => ({ ...size }));
-    renderWindowSizeEditor();
-  }
-  $windowSizeEditor.classList.toggle("hidden", !open);
-}
-
-function readWindowSizeEditor() {
-  return [...$windowSizeFields.querySelectorAll(".window-size-field-row")].map((row) => ({
-    width: Number(row.querySelector(".window-size-width").value),
-    height: Number(row.querySelector(".window-size-height").value),
-    isWindow: row.querySelector(".window-size-window-mode").checked
-  }));
-}
-
-async function resizeBrowserWindow(width, height, isWindow) {
-  try {
-    await resizeCurrentWindow({ width, height, isWindow }, platform);
-  } catch (error) {
-    setSyncStatus("error", formatError(error));
-  }
-}
-
-async function saveWindowSizes() {
-  const sizes = readWindowSizeEditor();
-  const normalized = sizes.map(normalizeWindowSizePreset);
-  if (normalized.some((size) => !size)) {
-    setSyncStatus("error", `Window sizes must be whole numbers from 1 to ${MAX_WINDOW_SIZE}`);
-    return;
-  }
-  windowSizes = normalized;
-  await setSetting(WINDOW_SIZE_SETTING, windowSizes);
-  setWindowSizeEditorOpen(false);
-  renderWindowSizePresets();
-}
-
 async function loadWindowSizes() {
-  const stored = normalizeWindowSizes(await getSetting(WINDOW_SIZE_SETTING, null));
-  if (stored) windowSizes = stored;
-  renderWindowSizePresets();
+  await windowSizeController.load();
 }
 
 async function renderChatGptUsageSummary(isCurrent) {
@@ -1048,28 +789,24 @@ function bindEvents() {
     const button = event.target.closest("[data-window-width]");
     if (!button) return;
     runPopupAction(`resize-window:${button.dataset.windowWidth}x${button.dataset.windowHeight}:${button.dataset.windowMode}`, () => (
-      resizeBrowserWindow(
-        Number(button.dataset.windowWidth),
-        Number(button.dataset.windowHeight),
-        button.dataset.windowMode === "true"
-      )
+      windowSizeController.resize({
+        width: Number(button.dataset.windowWidth),
+        height: Number(button.dataset.windowHeight),
+        isWindow: button.dataset.windowMode === "true"
+      })
     ), { button });
   });
-  $("#editWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(!windowSizeEditorOpen));
+  $("#editWindowSizes").addEventListener("click", () => windowSizeController.setOpen(!windowSizeController.isOpen));
   $("#addWindowSize").addEventListener("click", () => {
-    editingWindowSizes = readWindowSizeEditor();
-    editingWindowSizes.push({ width: 1280, height: 720, isWindow: false });
-    renderWindowSizeEditor();
+    windowSizeController.add();
   });
   $windowSizeFields.addEventListener("click", (event) => {
     const remove = event.target.closest("[data-remove-window-size]");
     if (!remove) return;
-    editingWindowSizes = readWindowSizeEditor();
-    editingWindowSizes.splice(Number(remove.dataset.removeWindowSize), 1);
-    renderWindowSizeEditor();
+    windowSizeController.remove(remove.dataset.removeWindowSize);
   });
-  $("#saveWindowSizes").addEventListener("click", (event) => runPopupAction("save-window-sizes", saveWindowSizes, { button: event.currentTarget }));
-  $("#cancelWindowSizes").addEventListener("click", () => setWindowSizeEditorOpen(false));
+  $("#saveWindowSizes").addEventListener("click", (event) => runPopupAction("save-window-sizes", () => windowSizeController.save(), { button: event.currentTarget }));
+  $("#cancelWindowSizes").addEventListener("click", () => windowSizeController.setOpen(false));
   $chatGptUsageValues.addEventListener("click", (event) => {
     if (event.target.closest(".chatgpt-usage-value")) {
       platform.openExtensionPage("options/options.html#chatgpt-usage").catch((error) => setSyncStatus("error", formatError(error)));

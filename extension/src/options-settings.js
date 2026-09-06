@@ -1,4 +1,4 @@
-import { MIN_SYNC_INTERVAL_SECONDS } from "./background-schedule.js";
+import { DEFAULT_SYNC_INTERVAL_SECONDS, normalizeSyncInterval } from "./background-schedule.js";
 import { normalizeMultiplierText } from "./entries.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { normalizeTempoTaskIssueIds } from "./tempo.js";
@@ -29,10 +29,12 @@ export function normalizeWorkdayStartHour(value) {
 export function normalizeOptionsSettings({ interval, multiplier }) {
   const normalizedMultiplier = normalizeMultiplierText(multiplier);
   if (!normalizedMultiplier) return { valid: false, message: INVALID_MULTIPLIER_MESSAGE };
+  const normalizedInterval = normalizeSyncInterval(interval);
+  if (!normalizedInterval.valid) return normalizedInterval;
 
   return {
     valid: true,
-    interval: Math.max(MIN_SYNC_INTERVAL_SECONDS, Number(interval) || 60),
+    interval: normalizedInterval.value,
     multiplier: normalizedMultiplier
   };
 }
@@ -50,9 +52,9 @@ export function normalizeBackupSettings(value) {
     return multiplier;
   });
   copy(SETTING_KEY.SYNC_INTERVAL_SECONDS, (raw) => {
-    const interval = Number(raw);
-    if (!Number.isInteger(interval) || interval < MIN_SYNC_INTERVAL_SECONDS) throw new TypeError("Invalid backup sync interval");
-    return interval;
+    const result = normalizeSyncInterval(raw, { allowBlank: false });
+    if (!result.valid) throw new TypeError("Invalid backup sync interval");
+    return result.value;
   });
   copy(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, (raw) => {
     if (typeof raw !== "string") throw new TypeError("Invalid backup Tempo account");
@@ -89,7 +91,7 @@ export function planOptionsSettingsSave({
   interval,
   multiplier
 }) {
-  const savedInterval = Math.max(MIN_SYNC_INTERVAL_SECONDS, Number(currentInterval) || 60);
+  const savedInterval = normalizeSyncInterval(currentInterval).value || DEFAULT_SYNC_INTERVAL_SECONDS;
   const savedMultiplier = normalizeMultiplierText(currentMultiplier) || "1.000";
   const intervalChanged = savedInterval !== interval;
   const multiplierChanged = savedMultiplier !== multiplier;

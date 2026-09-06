@@ -38,9 +38,13 @@ export function normalizeTheme(value) {
 
 export function readThemePreferences() {
   const local = storage();
+  let theme = "";
+  let highContrast = false;
+  try { theme = local?.getItem(THEME_STORAGE_KEY) || ""; } catch { /* defaults */ }
+  try { highContrast = local?.getItem(CONTRAST_STORAGE_KEY) === "true"; } catch { /* standard contrast */ }
   return {
-    theme: normalizeTheme(local?.getItem(THEME_STORAGE_KEY)),
-    highContrast: local?.getItem(CONTRAST_STORAGE_KEY) === "true"
+    theme: normalizeTheme(theme),
+    highContrast
   };
 }
 
@@ -59,8 +63,8 @@ export function applyThemePreferences(preferences = readThemePreferences(), root
 export function saveThemePreferences(preferences) {
   const normalized = applyThemePreferences(preferences);
   const local = storage();
-  local?.setItem(THEME_STORAGE_KEY, normalized.theme);
-  local?.setItem(CONTRAST_STORAGE_KEY, String(normalized.highContrast));
+  try { local?.setItem(THEME_STORAGE_KEY, normalized.theme); } catch { /* applied in memory */ }
+  try { local?.setItem(CONTRAST_STORAGE_KEY, String(normalized.highContrast)); } catch { /* applied in memory */ }
   globalThis.dispatchEvent?.(new CustomEvent("worklog-theme-change", { detail: normalized }));
   return normalized;
 }

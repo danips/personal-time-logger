@@ -4,15 +4,7 @@ import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDelet
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
 import { moveEntryChanges, ownsGesturePointer, resizeEntryChanges } from "../src/calendar-gesture-state.js";
-import {
-  normalizeTempoIssueId,
-  normalizeTempoTaskIssueIds,
-  prepareTempoWeek,
-  TEMPO_HOST_PERMISSION,
-  TEMPO_UPLOAD_MESSAGE
-} from "../src/tempo.js";
 import { tempoDaySelectionState, weekDayKeys } from "../src/tempo-day-selection.js";
-import { ERROR_CODE } from "../src/error-codes.js";
 import { onEntriesChanged } from "../src/events.js";
 import { requestBackgroundSync } from "../src/sync-request.js";
 import {
@@ -44,6 +36,7 @@ import {
   isSameLocalDate,
   isoWeekValue,
   layoutSegments,
+  localDateAtMinute,
   minDate,
   minutesSinceStartOfDay,
   snapDateToGrid,
@@ -51,6 +44,7 @@ import {
   weekStartFromInput
 } from "../src/calendar-layout.js";
 import { bindPopupDrag } from "./popup-drag.js";
+import { createTempoController } from "./tempo-controller.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { platform } from "../src/platform.js";
 import { DEFAULT_WORKDAY_START_HOUR, normalizeWorkdayStartHour } from "../src/options-settings.js";
@@ -388,6 +382,32 @@ function renderCalendar(segmentsByDay) {
     }
     column.className = `day-column${isSameLocalDate(addDays(weekStart, index), today) ? " today" : ""}`;
 
+    let clockChangeArea = column.querySelector(".clock-change-area");
+    if (!clockChangeArea) {
+      clockChangeArea = document.createElement("section");
+      clockChangeArea.className = "clock-change-area";
+      const heading = document.createElement("strong");
+      heading.textContent = "Clock-change entries";
+      clockChangeArea.append(heading);
+      column.append(clockChangeArea);
+    }
+    clockChangeArea.replaceChildren(clockChangeArea.firstElementChild || (() => {
+      const heading = document.createElement("strong");
+      heading.textContent = "Clock-change entries";
+      return heading;
+    })());
+    for (const special of (segmentsByDay.clockChangeEntries || []).filter((item) => item.dayIndex === index)) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "clock-change-entry";
+      item.dataset.entryId = special.entry.id;
+      item.textContent = `${entryTitle(special.entry)} · ${localTime(special.start)} ${special.startOffset} → ${localTime(special.end)} ${special.endOffset} · ${formatElapsed(special.elapsedSeconds)}`;
+      item.title = "Clock-change entry. Edit non-time fields or delete it; move and resize are disabled.";
+      item.addEventListener("click", selectEntryFromBlock);
+      clockChangeArea.append(item);
+    }
+    clockChangeArea.hidden = !clockChangeArea.children.length || clockChangeArea.children.length === 1;
+
     const segments = layoutSegments(segmentsByDay[index]);
     const existingBlocks = new Map([...column.querySelectorAll(".entry-block")]
       .map((block) => [block.dataset.entryId, block]));
@@ -398,10 +418,11 @@ function renderCalendar(segmentsByDay) {
       usedBlocks.add(block);
       nextBlocks.push(block);
     }
-    for (let position = 0; position < nextBlocks.length; position += 1) {
-      const block = nextBlocks[position];
-      if (column.children[position] !== block) {
-        column.insertBefore(block, column.children[position] || null);
+    const desired = [clockChangeArea, ...nextBlocks];
+    for (let position = 0; position < desired.length; position += 1) {
+      const node = desired[position];
+      if (column.children[position] !== node) {
+        column.insertBefore(node, column.children[position] || null);
       }
     }
     for (const block of existingBlocks.values()) {
@@ -583,7 +604,8 @@ function dragTargetFromPointer(clientX, clientY, state) {
   const snappedMinutes = Math.round((rawTop / PX_PER_MINUTE) / SNAP_MINUTES) * SNAP_MINUTES;
   const minute = clamp(snappedMinutes, 0, MINUTES_PER_DAY - SNAP_MINUTES);
   const dayIndex = Number(best.column.dataset.dayIndex || 0);
-  return { column: best.column, dayIndex, minute };
+  const date = localDateAtMinute(addDays(weekStart, dayIndex), minute);
+  return date ? { column: best.column, dayIndex, minute, date } : null;
 }
 
 function updatePreview(target, state) {
@@ -636,10 +658,14 @@ function beginDrag(event) {
       afterRender: refreshSelectedEntryEditor
     });
   };
+  gesture.cancel = (cancelEvent) => {
+    if (!ownsGesturePointer(gesture, cancelEvent.pointerId, "move")) return;
+    cancelGesture(gesture);
+  };
   block.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveDrag);
   window.addEventListener("pointerup", gesture.finish);
-  window.addEventListener("pointercancel", gesture.finish);
+  window.addEventListener("pointercancel", gesture.cancel);
 }
 
 function resizeTargetFromPointer(clientX, clientY) {
@@ -653,7 +679,8 @@ function resizeTargetFromPointer(clientX, clientY) {
     MINUTES_PER_DAY
   );
   const dayIndex = Number(best.column.dataset.dayIndex || 0);
-  const date = addMinutes(addDays(weekStart, dayIndex), minute);
+  const date = localDateAtMinute(addDays(weekStart, dayIndex), minute);
+  if (!date) return null;
   return { column: best.column, dayIndex, minute, date };
 }
 
@@ -672,10 +699,17 @@ function clearGesture(state, moveHandler, sourceClass) {
   gesture = null;
   window.removeEventListener("pointermove", moveHandler);
   window.removeEventListener("pointerup", state.finish);
-  window.removeEventListener("pointercancel", state.finish);
+  window.removeEventListener("pointercancel", state.cancel || state.finish);
   state.block.classList.remove(sourceClass);
   state.preview?.remove();
   return true;
+}
+
+function cancelGesture(state) {
+  if (!state || gesture !== state) return;
+  clearGesture(state, state.kind === "move" ? moveDrag : moveResize,
+    state.kind === "move" ? "drag-source" : "resize-source");
+  setStatus("Gesture cancelled", "ready");
 }
 
 function beginResize(event) {
@@ -707,10 +741,14 @@ function beginResize(event) {
       afterRender: refreshSelectedEntryEditor
     });
   };
+  gesture.cancel = (cancelEvent) => {
+    if (!ownsGesturePointer(gesture, cancelEvent.pointerId, "resize")) return;
+    cancelGesture(gesture);
+  };
   handle.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", moveResize);
   window.addEventListener("pointerup", gesture.finish);
-  window.addEventListener("pointercancel", gesture.finish);
+  window.addEventListener("pointercancel", gesture.cancel);
 }
 
 function moveResize(event) {
@@ -734,6 +772,7 @@ function moveResize(event) {
   if (gesture.edge === "bottom" && target.date < earliestEnd) {
     target.date = snapDateToGrid(earliestEnd, "up");
   }
+  if (!target.date) return;
 
   const targetDay = dayIndexInWeek(weekStart, target.date);
   if (targetDay >= 0 && targetDay < DAY_COUNT) {
@@ -810,7 +849,7 @@ async function endDrag() {
     state.block.dataset.skipClick = "";
   }, 0);
 
-  const newStart = addMinutes(addDays(weekStart, state.target.dayIndex), state.target.minute);
+  const newStart = state.target.date;
   const changes = moveEntryChanges(state.entry, { start_at: newStart.toISOString() }, state.durationMs);
 
   const undo = {
@@ -990,118 +1029,23 @@ async function changeWeek(nextStart) {
   setStatus("Ready", "synced");
 }
 
-function requestIssueId(task) {
-  const taskLabel = task || "(No task)";
-  while (true) {
-    const value = window.prompt(`Enter the numeric Jira issue ID for Task “${taskLabel}”. It will be remembered for later weeks.`);
-    if (value === null) return null;
-    const issueId = normalizeTempoIssueId(value);
-    if (issueId) return issueId;
-    window.alert("The issue ID must be a positive whole number.");
-  }
-}
-
-function calendarError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
 async function sendDisplayedWeekToTempo() {
-  const selection = currentDaySelection();
-  // Checked before the permission prompt so an empty selection cannot make the
-  // browser ask for Tempo access on behalf of a send with nothing in it.
-  if (selection.noneSelected) {
-    setStatus(NO_DAYS_SELECTED_MESSAGE);
-    return;
-  }
-
-  let permissionGranted;
-  try {
-    permissionGranted = await platform.requestOptionalHostPermission(TEMPO_HOST_PERMISSION);
-  } catch {
-    throw calendarError(ERROR_CODE.TEMPO_PERMISSION_MISSING, "Tempo host permission request failed");
-  }
-  if (!permissionGranted) {
-    throw calendarError(ERROR_CODE.TEMPO_PERMISSION_MISSING, "Tempo host permission was not granted");
-  }
-
-  const token = String(await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "")).trim();
-  const authorAccountId = String(await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, "")).trim();
-  if (!token || !authorAccountId) {
-    throw calendarError(ERROR_CODE.TEMPO_CONFIG_MISSING, "Enter the Tempo API token and author account ID in Options first");
-  }
-
-  const weekEnd = addDays(weekStart, DAY_COUNT);
-  const entries = renderedEntries.map((entry) => ({ ...entry }));
-  let taskIssueIds = normalizeTempoTaskIssueIds(
-    await getSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, {})
-  );
-  let prepared = prepareTempoWeek(entries, {
-    periodStart: weekStart,
-    periodEnd: weekEnd,
-    authorAccountId,
-    taskIssueIds,
-    includedDays: selection.includedDays
-  });
-
-  for (const task of prepared.missingTasks) {
-    const issueId = requestIssueId(task);
-    if (!issueId) {
-      setStatus("Tempo send cancelled; no worklogs were sent");
-      return;
-    }
-    taskIssueIds[task] = issueId;
-  }
-  if (prepared.missingTasks.length) {
-    taskIssueIds = await mutateSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, (current) => ({
-      ...normalizeTempoTaskIssueIds(current),
-      ...taskIssueIds
-    }));
-    prepared = prepareTempoWeek(entries, {
-      periodStart: weekStart,
-      periodEnd: weekEnd,
-      authorAccountId,
-      taskIssueIds,
-      includedDays: selection.includedDays
-    });
-  }
-
-  if (!prepared.totalWorklogs) {
-    setStatus(prepared.skippedRunning
-      ? "No completed worklogs to send; running timers were skipped"
-      : `No worklogs to send for ${selection.scopeLabel}`);
-    return;
-  }
-
-  const skipped = prepared.skippedRunning
-    ? ` ${prepared.skippedRunning} running timer${prepared.skippedRunning === 1 ? " will" : "s will"} be skipped.`
-    : "";
-  const confirmed = window.confirm(
-    `Send ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} from ${selection.scopeLabel} to Tempo?${skipped}\n\nSending the same ${selection.repeatScopeLabel} again creates duplicates in Tempo.`
-  );
-  if (!confirmed) {
-    setStatus("Tempo send cancelled; no worklogs were sent");
-    return;
-  }
-
-  setStatus(`Sending ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} to Tempo...`);
-  let response;
-  try {
-    response = await platform.sendRuntimeMessage({
-      type: TEMPO_UPLOAD_MESSAGE,
-      groups: prepared.groups
-    });
-  } catch {
-    throw calendarError(ERROR_CODE.TEMPO_NETWORK, "Tempo background request failed");
-  }
-  if (!response?.ok) {
-    throw calendarError(response?.error?.code || ERROR_CODE.TEMPO_NETWORK, "Tempo background request failed");
-  }
-  const result = response.result;
-  setStatus(`Sent ${result.sentWorklogs} worklog${result.sentWorklogs === 1 ? "" : "s"} to Tempo`);
-  setTempoDaySelectionActive(false);
+  return tempoController.send();
 }
+
+const tempoController = createTempoController({
+  getSnapshot: () => ({
+    weekStart: new Date(weekStart),
+    weekEnd: addDays(weekStart, DAY_COUNT),
+    entries: renderedEntries.map((entry) => ({ ...entry }))
+  }),
+  currentSelection: () => currentDaySelection(),
+  getSetting,
+  mutateSetting,
+  platform,
+  setStatus,
+  setSelectionActive: setTempoDaySelectionActive
+});
 
 function sendWholeWeekToTempo(button) {
   setTempoDaySelectionActive(false);

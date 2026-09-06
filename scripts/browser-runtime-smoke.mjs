@@ -25,6 +25,7 @@ function freePort() {
 async function waitFor(fetchUrl, label) {
   let lastError;
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (globalThis.__smokeProcessFailure) throw new Error(globalThis.__smokeProcessFailure);
     try {
       const response = await fetch(fetchUrl);
       if (response.ok) return response;
@@ -693,16 +694,28 @@ const artifactsDirectory = path.join(root, "web-ext-artifacts");
 await mkdir(artifactsDirectory, { recursive: true });
 const temporaryDirectory = await mkdtemp(path.join(artifactsDirectory, ".browser-runtime-"));
 const xpiPath = path.join(temporaryDirectory, "extension.xpi");
-const port = await freePort();
-const baseUrl = `http://127.0.0.1:${port}`;
+let baseUrl = "";
 let sessionId = "";
 let driver;
 let driverOutput = "";
 
 try {
+  const check = async (command, label) => {
+    try { await execFileAsync(command, ["--version"], { windowsHide: true }); }
+    catch { throw new Error(`${label} is unavailable. Set ${label === "geckodriver" ? "GECKODRIVER_BIN" : "FIREFOX_BINARY"} or install it before running browser smoke.`); }
+  };
+  await check(driverBin, "geckodriver");
+  await check(firefoxBinary || "firefox", "Firefox");
+  await check("zip", "zip");
+  const port = await freePort();
+  baseUrl = `http://127.0.0.1:${port}`;
   await packageExtension(xpiPath);
   driver = spawn(driverBin, ["--port", String(port), "--allow-system-access"], { stdio: ["ignore", "ignore", "pipe"] });
-  driver.stderr.on("data", (chunk) => { driverOutput += String(chunk); });
+  driver.stderr.on("data", (chunk) => { driverOutput = `${driverOutput}${String(chunk)}`.slice(-32 * 1024); });
+  driver.on("error", (error) => { globalThis.__smokeProcessFailure = `Could not start geckodriver: ${error.message}`; });
+  driver.on("exit", (code, signal) => {
+    if (!sessionId && !globalThis.__smokeProcessFailure) globalThis.__smokeProcessFailure = `geckodriver exited before readiness (code ${code ?? "unknown"}, signal ${signal || "none"}).`;
+  });
   await waitFor(`${baseUrl}/status`, "geckodriver");
 
   const capabilities = {

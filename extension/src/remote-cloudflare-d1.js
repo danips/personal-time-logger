@@ -1,7 +1,9 @@
-import { getSetting } from "./db.js";
+import { getAllSettings } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import {
   createRemoteApiClient,
+  chunkByEncodedBytes,
+  parseAppendAcknowledgements,
   normalizeRemoteApiBaseUrl,
   parseRemoteSnapshot,
   parseRemoteVersion,
@@ -16,6 +18,7 @@ const LABEL = "Cloudflare Worker + D1";
 const ENTRY_REF_KIND = "cloudflare-d1-row";
 const CONFIG_REF_KIND = "cloudflare-d1-config-row";
 const CHUNK_SIZE = 15;
+const MAX_REQUEST_BYTES = 480 * 1024;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -52,8 +55,13 @@ export function createCloudflareD1ApiClient(options = {}) {
 }
 
 async function configuredClient(options = {}) {
-  const baseUrl = options.baseUrl ?? await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, DEFAULT_CLOUDFLARE_D1_API_BASE_URL);
-  const token = options.token ?? await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, "");
+  if (options.client) return options.client;
+  if (options.baseUrl !== undefined && options.token !== undefined) {
+    return createCloudflareD1ApiClient(options);
+  }
+  const settings = await getAllSettings();
+  const baseUrl = options.baseUrl ?? settings[SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL] ?? DEFAULT_CLOUDFLARE_D1_API_BASE_URL;
+  const token = options.token ?? settings[SETTING_KEY.CLOUDFLARE_D1_API_TOKEN] ?? "";
   return createCloudflareD1ApiClient({ ...options, baseUrl, token });
 }
 
@@ -64,14 +72,18 @@ function health(data) {
   });
 }
 
-function ref(kind, version) {
-  return { kind, version: parseRemoteVersion(version) };
+function sizedChunks(values, envelopeKey, encode) {
+  const result = [];
+  for (const countChunk of chunksForCount(values)) result.push(...chunkByEncodedBytes(countChunk, {
+    maxBytes: MAX_REQUEST_BYTES, envelopeKey, encode
+  }));
+  return result;
 }
 
-async function chunks(values, callback) {
-  for (let index = 0; index < values.length; index += CHUNK_SIZE) {
-    await callback(values.slice(index, index + CHUNK_SIZE));
-  }
+function chunksForCount(values) {
+  const result = [];
+  for (let index = 0; index < values.length; index += CHUNK_SIZE) result.push(values.slice(index, index + CHUNK_SIZE));
+  return result;
 }
 
 export const cloudflareD1Provider = Object.freeze({
@@ -102,29 +114,35 @@ export const cloudflareD1Provider = Object.freeze({
 
   async appendEntries(entries, options = {}) {
     const result = [];
-    await chunks(entries, async (chunk) => {
-      const data = await (await configuredClient(options)).append(chunk.map(persistedEntry));
-      if (!Array.isArray(data.entries)) throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, "The Cloudflare Worker append response is invalid.");
-      result.push(...data.entries.map((record) => ({ id: String(record.id), ref: ref(ENTRY_REF_KIND, record.version) })));
-    });
+    const client = await configuredClient(options);
+    for (const chunk of sizedChunks(entries, "entries", persistedEntry)) {
+      const data = await client.append(chunk.map(persistedEntry));
+      result.push(...parseAppendAcknowledgements(data.entries, chunk.map((entry) => entry.id), ENTRY_REF_KIND));
+    }
     const byId = new Map(result.map((record) => [record.id, record]));
     return entries.map((entry) => byId.get(entry.id));
   },
 
   async updateEntries(updates, options = {}) {
-    await chunks(updates, async (chunk) => {
-      await (await configuredClient(options)).update(chunk.map(({ entry, expectedRef }) => ({
+    const client = await configuredClient(options);
+    for (const chunk of sizedChunks(updates, "updates", ({ entry, expectedRef }) => ({
+      entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
+    }))) {
+      await client.update(chunk.map(({ entry, expectedRef }) => ({
         entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
       })));
-    });
+    }
   },
 
   async deleteEntries(preconditions, options = {}) {
-    await chunks(preconditions, async (chunk) => {
-      await (await configuredClient(options)).delete(chunk.map(({ id, expectedRef }) => ({
+    const client = await configuredClient(options);
+    for (const chunk of sizedChunks(preconditions, "preconditions", ({ id, expectedRef }) => ({
+      id, expectedVersion: parseRemoteVersion(expectedRef?.version)
+    }))) {
+      await client.delete(chunk.map(({ id, expectedRef }) => ({
         id, expectedVersion: parseRemoteVersion(expectedRef?.version)
       })));
-    });
+    }
   },
 
   async updateConfig(key, value, updatedAt, { expectedRef, ...options } = {}) {

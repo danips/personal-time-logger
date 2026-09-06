@@ -1,5 +1,5 @@
-import { allocateEntry, allocateEntryByLocalDay } from "./time-allocation.js";
-import { localDateKey } from "./time.js";
+import { allocateEntry, entryInterval } from "./time-allocation.js";
+import { addDays, localDateKey, startOfLocalDay } from "./time.js";
 
 export const SHORT_ANOMALY_SECONDS = 60;
 export const LONG_SESSION_SECONDS = 6 * 60 * 60;
@@ -31,12 +31,23 @@ function label(value, fallback) {
   return text(value) || fallback;
 }
 
+function identityKey(value, missingKey) {
+  const normalized = text(value);
+  return normalized ? `value:${normalized}` : missingKey;
+}
+
 function compareLabels(left, right) {
   return left.localeCompare(right, undefined, { sensitivity: "base" }) || left.localeCompare(right);
 }
 
 function compareSessions(left, right) {
   return left.start - right.start || left.end - right.end || identity(left.entry).localeCompare(identity(right.entry));
+}
+
+function maximum(values) {
+  let result = 0;
+  for (const value of values) result = Math.max(result, Number(value) || 0);
+  return result;
 }
 
 export function comparisonDelta(current, previous) {
@@ -66,8 +77,17 @@ export function sessionsForPeriod(entries, period, { now = new Date() } = {}) {
 
 function loggedDays(entries, period, now) {
   const days = new Set();
+  const periodStart = startOfLocalDay(period.start);
+  const periodEndDay = startOfLocalDay(period.end);
+  const periodEnd = period.end > periodEndDay ? addDays(periodEndDay, 1) : periodEndDay;
   for (const entry of entries || []) {
-    for (const allocation of allocateEntryByLocalDay(entry, { now })) {
+    const interval = entryInterval(entry, { now });
+    if (!interval) continue;
+    let dayStart = interval.start > periodStart ? startOfLocalDay(interval.start) : periodStart;
+    const lastDay = interval.end < periodEnd ? interval.end : periodEnd;
+    for (; dayStart < lastDay; dayStart = addDays(dayStart, 1)) {
+      const allocation = allocateEntry(entry, dayStart, addDays(dayStart, 1), { now });
+      if (!allocation) continue;
       const start = allocation.start > period.start ? allocation.start : period.start;
       const end = allocation.end < period.end ? allocation.end : period.end;
       if (end > start) days.add(localDateKey(start));
@@ -87,7 +107,7 @@ export function aggregatePeriod(sessions, { entries = [], period, now = new Date
     sessionCount: sessions.length,
     averageActualSessionSeconds: actual.length ? actual.reduce((sum, value) => sum + value, 0) / actual.length : 0,
     medianActualSessionSeconds: median(actual),
-    longestActualSessionSeconds: actual.length ? Math.max(...actual) : 0
+    longestActualSessionSeconds: maximum(actual)
   };
 }
 
@@ -103,15 +123,19 @@ function pairedRows(currentRows, previousRows, decorate) {
 function projectMaps(sessions) {
   const projects = new Map();
   for (const session of sessions) {
+    const projectKey = identityKey(session.entry.project, "missing-project");
+    const taskKey = identityKey(session.entry.task, "missing-task");
     const projectLabel = label(session.entry.project, NO_PROJECT);
     const taskLabel = label(session.entry.task, NO_TASK);
-    let project = projects.get(projectLabel);
+    let project = projects.get(projectKey);
     if (!project) {
       project = { label: projectLabel, seconds: 0, tasks: new Map() };
-      projects.set(projectLabel, project);
+      projects.set(projectKey, project);
     }
     project.seconds += session.effectiveSeconds;
-    project.tasks.set(taskLabel, (project.tasks.get(taskLabel) || 0) + session.effectiveSeconds);
+    const task = project.tasks.get(taskKey) || { label: taskLabel, seconds: 0 };
+    task.seconds += session.effectiveSeconds;
+    project.tasks.set(taskKey, task);
   }
   return projects;
 }
@@ -119,20 +143,20 @@ function projectMaps(sessions) {
 export function aggregateProjects(currentSessions, previousSessions, totalEffectiveSeconds) {
   const currentProjects = projectMaps(currentSessions);
   const previousProjects = projectMaps(previousSessions);
-  return pairedRows(currentProjects, previousProjects, (projectLabel, current, previous) => {
+  return pairedRows(currentProjects, previousProjects, (projectKey, current, previous) => {
     const currentSeconds = current?.seconds || 0;
     const previousSeconds = previous?.seconds || 0;
     const tasks = pairedRows(current?.tasks || new Map(), previous?.tasks || new Map(),
-      (taskLabel, taskCurrent, taskPrevious) => ({
-        label: taskLabel,
-        currentSeconds: taskCurrent || 0,
-        previousSeconds: taskPrevious || 0,
-        share: totalEffectiveSeconds ? (taskCurrent || 0) / totalEffectiveSeconds : 0,
-        delta: comparisonDelta(taskCurrent || 0, taskPrevious || 0)
+      (taskKey, taskCurrent, taskPrevious) => ({
+        label: taskCurrent?.label || taskPrevious?.label || (taskKey === "missing-task" ? NO_TASK : taskKey.slice(6)),
+        currentSeconds: taskCurrent?.seconds || 0,
+        previousSeconds: taskPrevious?.seconds || 0,
+        share: totalEffectiveSeconds ? (taskCurrent?.seconds || 0) / totalEffectiveSeconds : 0,
+        delta: comparisonDelta(taskCurrent?.seconds || 0, taskPrevious?.seconds || 0)
       }))
       .sort((left, right) => right.currentSeconds - left.currentSeconds || compareLabels(left.label, right.label));
     return {
-      label: projectLabel,
+      label: current?.label || previous?.label || (projectKey === "missing-project" ? NO_PROJECT : projectKey.slice(6)),
       currentSeconds,
       previousSeconds,
       share: totalEffectiveSeconds ? currentSeconds / totalEffectiveSeconds : 0,
@@ -208,10 +232,10 @@ export function fragmentationMetrics(sessions) {
     const gapSeconds = Math.max(0, (current.start - previous.end) / 1000);
     if (gapSeconds > SWITCH_GAP_SECONDS) continue;
     switchEligibleTransitions += 1;
-    const previousProject = label(previous.entry.project, NO_PROJECT);
-    const currentProject = label(current.entry.project, NO_PROJECT);
-    const previousTask = label(previous.entry.task, NO_TASK);
-    const currentTask = label(current.entry.task, NO_TASK);
+    const previousProject = identityKey(previous.entry.project, "missing-project");
+    const currentProject = identityKey(current.entry.project, "missing-project");
+    const previousTask = identityKey(previous.entry.task, "missing-task");
+    const currentTask = identityKey(current.entry.task, "missing-task");
     if (previousProject !== currentProject) projectSwitches += 1;
     if (previousProject !== currentProject || previousTask !== currentTask) taskSwitches += 1;
   }
@@ -220,7 +244,7 @@ export function fragmentationMetrics(sessions) {
     sessionCount: sorted.length,
     averageActualSessionSeconds: actual.length ? actual.reduce((sum, value) => sum + value, 0) / actual.length : 0,
     medianActualSessionSeconds: median(actual),
-    longestActualSessionSeconds: actual.length ? Math.max(...actual) : 0,
+    longestActualSessionSeconds: maximum(actual),
     switchEligibleTransitions,
     projectSwitches,
     taskSwitches,
@@ -256,18 +280,30 @@ export function detectAnomalies(sessions, { now = new Date() } = {}) {
     if (!entry.end_at && activeSeconds >= STALE_ACTIVE_SECONDS) anomalies.push(anomaly(session, "stale_active", "Active timer has been running for at least 8 hours."));
   }
 
-  const active = [];
-  for (const session of sorted) {
-    for (let index = active.length - 1; index >= 0; index -= 1) {
-      if (active[index].end <= session.start) active.splice(index, 1);
+  let overlapCount = 0;
+  if (sorted.length <= 100) {
+    const active = [];
+    for (const session of sorted) {
+      for (let index = active.length - 1; index >= 0; index -= 1) {
+        if (active[index].end <= session.start) active.splice(index, 1);
+      }
+      overlapCount += active.length;
+      for (const other of active) {
+        const ids = [identity(other.entry), identity(session.entry)].sort();
+        const first = ids[0] === identity(other.entry) ? other : session;
+        anomalies.push(anomaly(first, "overlap", "Session overlaps another entry.", ids[1]));
+      }
+      active.push(session);
     }
-    for (const other of active) {
-      const ids = [identity(other.entry), identity(session.entry)].sort();
-      const first = ids[0] === identity(other.entry) ? other : session;
-      anomalies.push(anomaly(first, "overlap", "Session overlaps another entry.", ids[1]));
-    }
-    active.push(session);
+  } else {
+    // For dense reports count overlaps with an event sweep; do not create
+    // O(n²) pair records merely to render a list.
+    const events = sorted.flatMap((session) => [[session.start, 1], [session.end, -1]])
+      .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+    let active = 0;
+    for (const [, type] of events) { if (type < 0) active -= 1; else { overlapCount += active; active += 1; } }
   }
+  anomalies.overlapCount = overlapCount;
 
   return anomalies.sort((left, right) => (ANOMALY_ORDER[left.type] ?? 99) - (ANOMALY_ORDER[right.type] ?? 99)
     || right.start - left.start || left.entryId.localeCompare(right.entryId)
@@ -295,6 +331,7 @@ export function buildAnalyticsReport(entries, { primary, comparison, now = new D
     projects: aggregateProjects(primarySessions, comparisonSessions, primaryMetrics.totalEffectiveSeconds),
     descriptions: aggregateDescriptions(primarySessions, comparisonSessions, primaryMetrics.totalEffectiveSeconds),
     fragmentation,
-    anomalies
+    anomalies,
+    overlapCount: anomalies.overlapCount || 0
   };
 }

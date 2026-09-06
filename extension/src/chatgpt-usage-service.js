@@ -39,7 +39,7 @@ function dependencies(overrides = {}) {
         return next;
       }
       : mutateSetting),
-    mutateSettings: overrides.mutateSettings || mutateSettings,
+    mutateSettings: overrides.mutateSettings || (!overrides.getSetting && !overrides.setSetting && !overrides.removeSetting ? mutateSettings : null),
     now: overrides.now || (() => Date.now()),
     language: overrides.language || globalThis.navigator?.language || "en-US"
   };
@@ -97,12 +97,15 @@ function findAccessToken(value, depth = 0) {
   return null;
 }
 
-async function fetchWithTimeout(fetchImpl, url, options) {
+async function fetchWithTimeout(fetchImpl, url, options, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetchImpl(url, { ...options, signal: controller.signal });
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    return consume ? await consume(response) : response;
   } catch (error) {
+    if (error instanceof UsageError) throw error;
+    if (controller.signal.aborted) throw usageError("network_error", "The ChatGPT usage request timed out", { timed_out: true });
     throw usageError("network_error", "The ChatGPT usage request could not reach the service", { cause: error });
   } finally {
     clearTimeout(timer);
@@ -145,14 +148,12 @@ export async function requestCurrentChatGptUsage(overrides = {}) {
   const deps = dependencies(overrides);
   if (typeof deps.fetch !== "function") throw usageError("network_error", "Fetch is unavailable");
 
-  const sessionResponse = await fetchWithTimeout(deps.fetch, AUTH_SESSION_URL, {
+  const session = await fetchWithTimeout(deps.fetch, AUTH_SESSION_URL, {
     method: "GET",
     credentials: "include",
     cache: "no-store",
     redirect: "follow"
-  });
-  await throwForResponse(sessionResponse);
-  const session = await readChatGptJson(sessionResponse);
+  }, async (response) => { await throwForResponse(response); return readChatGptJson(response); });
   const accessToken = findAccessToken(session);
   if (!accessToken) throw usageError("sign_in_required", "Sign in to ChatGPT in Firefox");
 
@@ -167,15 +168,13 @@ export async function requestCurrentChatGptUsage(overrides = {}) {
   };
   if (accountId) headers["chatgpt-account-id"] = accountId;
 
-  const usageResponse = await fetchWithTimeout(deps.fetch, USAGE_URL, {
+  const body = await fetchWithTimeout(deps.fetch, USAGE_URL, {
     method: "GET",
     credentials: "include",
     cache: "no-store",
     redirect: "follow",
     headers
-  });
-  await throwForResponse(usageResponse);
-  const body = await readChatGptJson(usageResponse);
+  }, async (response) => { await throwForResponse(response); return readChatGptJson(response); });
   return normalizeUsageResponse(body, { collectedAt: new Date(deps.now()).toISOString() });
 }
 
@@ -195,18 +194,29 @@ export async function refreshChatGptUsage(overrides = {}) {
       throw usageError("consent_required", "Confirm session-token use before refreshing usage");
     }
 
-    const current = await getChatGptUsageState(overrides);
-    const retryAfterMs = Number(current.last_error?.retry_after_seconds || 0) * 1000;
-    const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, retryAfterMs);
-    if (!overrides.ignoreCooldown && deps.now() - current.last_attempt_at < cooldownMs) {
-      return { kind: "skipped", reason: "cooldown", state: current };
-    }
-
     const attemptedAt = deps.now();
-    await deps.mutateSetting(CHATGPT_USAGE_STATE_KEY, (value) => ({
-      ...normalizeChatGptUsageState(value),
-      last_attempt_at: attemptedAt
-    }));
+    let generation;
+    let current;
+    if (deps.mutateSettings) {
+      const claim = await deps.mutateSettings([
+        CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION
+      ], (settings) => {
+        if (!settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) throw usageError("consent_required", "Confirm session-token use before refreshing usage");
+        const state = normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY));
+        const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, Number(state.last_error?.retry_after_seconds || 0) * 1000);
+        if (!overrides.ignoreCooldown && attemptedAt - state.last_attempt_at < cooldownMs) return { skipped: true, state };
+        generation = Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0);
+        settings.set(CHATGPT_USAGE_STATE_KEY, { ...state, last_attempt_at: attemptedAt });
+        return { skipped: false, state };
+      });
+      current = claim.state;
+      if (claim.skipped) return { kind: "skipped", reason: "cooldown", state: current };
+    } else {
+      current = await getChatGptUsageState(overrides);
+      const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, Number(current.last_error?.retry_after_seconds || 0) * 1000);
+      if (!overrides.ignoreCooldown && attemptedAt - current.last_attempt_at < cooldownMs) return { kind: "skipped", reason: "cooldown", state: current };
+      await deps.mutateSetting(CHATGPT_USAGE_STATE_KEY, (value) => ({ ...normalizeChatGptUsageState(value), last_attempt_at: attemptedAt }));
+    }
 
     try {
       const snapshot = await requestCurrentChatGptUsage({ ...overrides, now: deps.now, fetch: deps.fetch, language: deps.language });
@@ -215,7 +225,13 @@ export async function refreshChatGptUsage(overrides = {}) {
         last_attempt_at: attemptedAt,
         last_error: null
       };
-      await deps.setSetting(CHATGPT_USAGE_STATE_KEY, state);
+      if (deps.mutateSettings) {
+        await deps.mutateSettings([CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
+          if (Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) !== generation
+            || !settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) return;
+          settings.set(CHATGPT_USAGE_STATE_KEY, state);
+        });
+      } else await deps.setSetting(CHATGPT_USAGE_STATE_KEY, state);
       return { kind: "refreshed", state };
     } catch (error) {
       const safeError = error instanceof UsageError ? error : usageError("service_error", "ChatGPT usage refresh failed");
@@ -225,11 +241,13 @@ export async function refreshChatGptUsage(overrides = {}) {
         occurred_at: new Date(deps.now()).toISOString(),
         retry_after_seconds: Number.isFinite(safeError.retry_after_seconds) ? safeError.retry_after_seconds : null
       };
-      await deps.mutateSetting(CHATGPT_USAGE_STATE_KEY, (value) => ({
-        ...normalizeChatGptUsageState(value),
-        last_attempt_at: attemptedAt,
-        last_error: failure
-      }));
+      if (deps.mutateSettings) {
+        await deps.mutateSettings([CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
+          if (Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) !== generation
+            || !settings.get(CHATGPT_SESSION_TOKEN_CONSENT_KEY)) return;
+          settings.set(CHATGPT_USAGE_STATE_KEY, { ...normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY)), last_attempt_at: attemptedAt, last_error: failure });
+        });
+      } else await deps.mutateSetting(CHATGPT_USAGE_STATE_KEY, (value) => ({ ...normalizeChatGptUsageState(value), last_attempt_at: attemptedAt, last_error: failure }));
       throw safeError;
     }
   })().finally(() => {
@@ -242,8 +260,9 @@ export async function clearChatGptUsageData(overrides = {}) {
   const deps = dependencies(overrides);
   const keys = [CHATGPT_USAGE_STATE_KEY, CHATGPT_SESSION_TOKEN_CONSENT_KEY];
   if (overrides.mutateSettings || (!overrides.getSetting && !overrides.setSetting && !overrides.removeSetting)) {
-    await deps.mutateSettings(keys, (settings) => {
+    await deps.mutateSettings([...keys, SETTING_KEY.CHATGPT_USAGE_GENERATION], (settings) => {
       for (const key of keys) settings.delete(key);
+      settings.set(SETTING_KEY.CHATGPT_USAGE_GENERATION, Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) + 1);
     });
     return;
   }

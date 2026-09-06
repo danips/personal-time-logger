@@ -1,4 +1,4 @@
-import { addDays, startOfLocalDay, startOfLocalWeek } from "./time.js";
+import { addDays, fromLocalInputValue, startOfLocalDay, startOfLocalWeek } from "./time.js";
 import { allocateEntry, entryInterval } from "./time-allocation.js";
 
 export const DAY_COUNT = 7;
@@ -79,14 +79,27 @@ export function snapDateToGrid(date, direction) {
   const snapped = direction === "up"
     ? Math.ceil(minutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES
     : Math.floor(minutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES;
-  return addMinutes(day, snapped);
+  return localDateAtMinute(day, snapped);
 }
 
-/** Duration a drag preserves, never shorter than one grid slot. */
+/** Convert a civil wall-clock coordinate without elapsed-time DST drift. */
+export function localDateAtMinute(day, minute) {
+  if (minute === MINUTES_PER_DAY) return addDays(startOfLocalDay(day), 1);
+  const start = startOfLocalDay(day);
+  const total = Math.max(0, Math.min(MINUTES_PER_DAY - 1, minute));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  const text = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`
+    + `T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`;
+  const parsed = fromLocalInputValue(text);
+  return parsed.kind === "instant" ? new Date(parsed.iso) : null;
+}
+
+/** Duration a completed drag preserves exactly; visual hit targets are separate. */
 export function durationMsForDrag(entry) {
   const start = new Date(entry.start_at);
   const end = entry.end_at ? new Date(entry.end_at) : new Date();
-  return Math.max(SNAP_MINUTES * MINUTE_MS, end.getTime() - start.getTime());
+  return Math.max(0, end.getTime() - start.getTime());
 }
 
 export function actualDurationSeconds(rawStart, rawEnd) {
@@ -116,6 +129,7 @@ function effectiveEnd(entry, rawStart, rawEnd) {
 export function buildSegments(entries, weekStart) {
   const weekEnd = addDays(weekStart, DAY_COUNT);
   const days = Array.from({ length: DAY_COUNT }, () => []);
+  const clockChangeEntries = [];
 
   for (const entry of entries) {
     const interval = entryInterval(entry);
@@ -126,6 +140,26 @@ export function buildSegments(entries, weekStart) {
     const effectiveSeconds = effectiveDurationSeconds(entry, entryStart, actualEnd);
     const displaySeconds = actualDurationSeconds(entryStart, displayEnd);
     if (entryStart >= weekEnd || displayEnd <= weekStart) continue;
+
+    const entryDay = dayIndexInWeekLocal(weekStart, entryStart);
+    const sameCivilDay = entryDay >= 0 && isSameLocalDate(entryStart, actualEnd);
+    const wallStart = minutesSinceStartOfDay(entryStart);
+    const wallEnd = minutesSinceStartOfDay(actualEnd);
+    if (actualEnd > entryStart && sameCivilDay && wallEnd < wallStart) {
+      const dayStart = startOfLocalDay(addDays(weekStart, entryDay));
+      const allocation = allocateEntry(entry, dayStart, addDays(dayStart, 1), { now: actualEnd });
+      clockChangeEntries.push({
+        entry,
+        dayIndex: entryDay,
+        start: entryStart,
+        end: actualEnd,
+        elapsedSeconds: actualDurationSeconds(entryStart, actualEnd),
+        totalSeconds: allocation?.effectiveSeconds || 0,
+        startOffset: offsetLabel(entryStart),
+        endOffset: offsetLabel(actualEnd)
+      });
+      continue;
+    }
 
     for (let index = 0; index < DAY_COUNT; index += 1) {
       const dayStart = addDays(weekStart, index);
@@ -159,8 +193,22 @@ export function buildSegments(entries, weekStart) {
       });
     }
   }
-
+  days.clockChangeEntries = clockChangeEntries;
   return days;
+}
+
+function dayIndexInWeekLocal(weekStart, date) {
+  for (let index = 0; index < DAY_COUNT; index += 1) {
+    if (isSameLocalDate(date, addDays(weekStart, index))) return index;
+  }
+  return -1;
+}
+
+function offsetLabel(date) {
+  const minutes = -date.getTimezoneOffset();
+  const sign = minutes >= 0 ? "+" : "-";
+  const absolute = Math.abs(minutes);
+  return `UTC${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
 }
 
 function layoutGroup(group) {
@@ -206,5 +254,9 @@ export function layoutSegments(segments) {
 }
 
 export function dailyTotalsFromSegments(segmentsByDay) {
-  return segmentsByDay.map((segments) => segments.reduce((total, segment) => total + segment.totalSeconds, 0));
+  const totals = segmentsByDay.map((segments) => segments.reduce((total, segment) => total + segment.totalSeconds, 0));
+  for (const special of segmentsByDay.clockChangeEntries || []) {
+    totals[special.dayIndex] += special.totalSeconds;
+  }
+  return totals;
 }

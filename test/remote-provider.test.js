@@ -188,7 +188,7 @@ describe("MySQL API client", () => {
       platformApi,
       fetchImpl: async (_url, options) => {
         requestBody = JSON.parse(options.body);
-        return { ok: true, status: 200, async text() { return JSON.stringify({ entries: [] }); } };
+        return { ok: true, status: 200, async text() { return JSON.stringify({ entries: [{ id: localEntry.id, version: 1 }] }); } };
       }
     });
     assert.equal(requestBody.entries[0].dirty, undefined);
@@ -247,12 +247,12 @@ describe("Google provider adapter", () => {
       assert.deepEqual(entryRef, {
         kind: "google-sheet-row",
         rowIndex: 2,
-        fingerprint: entryToRow(entry).join("\u0000")
+        fingerprint: JSON.stringify(entryToRow(entry))
       });
       assert.deepEqual(configRef, {
         kind: "google-config-row",
         rowIndex: 2,
-        fingerprint: ["duration_multiplier", "1.5", entry.updated_at].join("\u0000")
+        fingerprint: JSON.stringify(["duration_multiplier", "1.5", entry.updated_at])
       });
       assert.equal(snapshot.rowMap, undefined);
       assert.equal(snapshot.configRows, undefined);

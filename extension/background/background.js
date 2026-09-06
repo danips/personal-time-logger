@@ -1,4 +1,4 @@
-import { getSetting, setSetting } from "../src/db.js";
+import { getActiveEntries, getSetting, setSetting } from "../src/db.js";
 import { clearRemoteReadMarker, nextSyncDelayMinutes, syncNow } from "../src/sync.js";
 import {
   MIN_SYNC_INTERVAL_SECONDS,
@@ -12,6 +12,8 @@ import { platform } from "../src/platform.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
 import { ERROR_CODE } from "../src/error-codes.js";
+import { updateActiveIcon } from "../src/icon.js";
+import { onEntriesChanged } from "../src/events.js";
 import {
   SYNC_REQUEST_MESSAGE,
   UPDATE_CHECK_MESSAGE,
@@ -23,6 +25,13 @@ import {
   tempoXhrRequest
 } from "../src/tempo.js";
 const UPDATE_CHECK_MINUTES = 24 * 60;
+
+async function refreshToolbarIndicator() {
+  const active = await getActiveEntries();
+  await updateActiveIcon(active.length > 0);
+}
+
+onEntriesChanged(() => { void refreshToolbarIndicator(); });
 
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
@@ -80,6 +89,7 @@ async function runRequestedSync(message) {
       // The existing heartbeat remains armed if its due time cannot be updated.
     }
     await scheduleHeartbeat();
+    await refreshToolbarIndicator().catch(() => {});
   }
 }
 
@@ -193,6 +203,7 @@ async function handleInstalled({ reason }) {
     }).catch(() => {});
   } finally {
     await scheduleHeartbeat();
+    await refreshToolbarIndicator().catch(() => {});
   }
 }
 
@@ -224,7 +235,7 @@ async function uploadTempoWorklogs(message, sender) {
     const code = TEMPO_ERROR_CODES.has(error?.code)
       ? error.code
       : ERROR_CODE.TEMPO_NETWORK;
-    return { ok: false, error: { code } };
+    return { ok: false, error: { code, acknowledgedWorklogs: error.acknowledgedWorklogs || 0, requestCount: error.requestCount || 0, currentRequestOutcome: error.currentRequestOutcome || "unknown" } };
   }
 }
 
@@ -239,3 +250,4 @@ platform.onRuntimeMessage((message, sender) => {
 void scheduleHeartbeat();
 void scheduleUpdateCheck();
 void runUpdateCheck();
+void refreshToolbarIndicator();

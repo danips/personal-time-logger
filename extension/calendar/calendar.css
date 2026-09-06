@@ -418,6 +418,34 @@ textarea {
   background-color: rgba(11, 87, 208, 0.05);
 }
 
+.clock-change-area {
+  position: absolute;
+  z-index: 3;
+  top: 6px;
+  left: 4px;
+  right: 4px;
+  display: grid;
+  gap: 4px;
+  padding: 4px;
+  border: 1px dashed var(--review-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--review) 82%, transparent);
+}
+
+.clock-change-area strong {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.clock-change-entry {
+  min-height: 28px;
+  padding: 3px 5px;
+  border-color: var(--review-border);
+  font-size: 10px;
+  text-align: left;
+  white-space: normal;
+}
+
 .entry-block,
 .drag-preview {
   position: absolute;

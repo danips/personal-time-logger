@@ -35,9 +35,15 @@ final class Http
         if (!preg_match('/\Aapplication\/json(?:\s*;|\s*\z)/i', $contentType)) {
             throw new ApiException(400, 'INVALID_REQUEST', 'The request must use JSON content type.');
         }
-        $raw = file_get_contents('php://input');
-        if ($raw === false || $raw === '' || strlen($raw) > 2_000_000) {
-            throw new ApiException(400, 'INVALID_JSON', 'The request body must be a JSON object.');
+        $maxBytes = 2_000_000;
+        $declaredLength = isset($_SERVER['CONTENT_LENGTH']) ? (int) $_SERVER['CONTENT_LENGTH'] : 0;
+        if ($declaredLength > $maxBytes) {
+            throw new ApiException(413, 'INVALID_REQUEST', 'The request body is too large.');
+        }
+        $stream = fopen('php://input', 'rb');
+        $raw = $stream === false ? false : stream_get_contents($stream, $maxBytes + 1);
+        if ($raw === false || $raw === '' || strlen($raw) > $maxBytes) {
+            throw new ApiException(strlen((string) $raw) > $maxBytes ? 413 : 400, strlen((string) $raw) > $maxBytes ? 'INVALID_REQUEST' : 'INVALID_JSON', 'The request body must be a JSON object.');
         }
         try {
             $body = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);

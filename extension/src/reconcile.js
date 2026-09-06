@@ -1,5 +1,6 @@
 import { getAllEntries, mutateEntryState, mutateSettings, StorageConflictError } from "./db.js";
-import { SHEET_HEADERS, entryToRow, normalizeEntry } from "./entries.js";
+import { entryToRow, normalizeEntry, SHEET_HEADERS } from "./entries.js";
+import { entryFingerprint as canonicalEntryFingerprint } from "./fingerprints.js";
 import { notifyEntriesChanged } from "./events.js";
 import { getActiveRemoteProvider, getRemoteProviderCapabilities } from "./remote-provider.js";
 import { nowIso, uuid } from "./time.js";
@@ -22,13 +23,15 @@ async function activeProvider(provider) {
 }
 
 export function entryFingerprint(entry) {
-  return entryToRow(entry).join("\u0000");
+  return canonicalEntryFingerprint(entry);
 }
 
-function presentExpectation(revision) {
-  return revision === undefined
-    ? { kind: "present" }
-    : { kind: "present", revision: Number(revision) };
+function presentExpectation(revision, fingerprint) {
+  return {
+    kind: "present",
+    ...(revision === undefined ? {} : { revision: Number(revision) }),
+    ...(fingerprint ? { fingerprint: String(fingerprint) } : {})
+  };
 }
 
 function remoteExpectation(remoteEntry, fingerprint) {
@@ -55,11 +58,12 @@ export function normalizeReconciliationCommand(input, { batch = false } = {}) {
   }
 
   const localRevision = action === "keepLocal" ? input.expectedRevision : input.expectedLocalRevision;
+  const localFingerprint = input.expectedLocalFingerprint;
   const local = action === "keepLocal"
-    ? presentExpectation(localRevision)
+    ? presentExpectation(localRevision, localFingerprint)
     : localRevision === undefined
       ? { kind: "absent" }
-      : presentExpectation(localRevision);
+      : presentExpectation(localRevision, localFingerprint);
   const expectedFingerprint = input.expectedRemoteFingerprint
     ?? (remoteEntry ? entryFingerprint(remoteEntry) : "");
   return {
@@ -279,6 +283,12 @@ function assertLocalExpectation(existing, command) {
       actualRevision: Number(existing.revision || 0)
     });
   }
+  if (command.local.fingerprint && entryFingerprint(existing) !== command.local.fingerprint) {
+    throw new StorageConflictError("Entry content changed since reconciliation", {
+      id: command.id,
+      reason: "fingerprint_mismatch"
+    });
+  }
 }
 
 function assertRemoteExpectation(current, command) {
@@ -354,12 +364,13 @@ function applyReconciliationCommand(command, { entries, settings, remoteEntry = 
  * revision stay put, so choosing a side never looks like a fresh edit to the
  * other devices.
  */
-export async function keepLocal(id, remoteEntry = null, { expectedRevision } = {}) {
+export async function keepLocal(id, remoteEntry = null, { expectedRevision, expectedLocalFingerprint } = {}) {
   const command = normalizeReconciliationCommand({
     action: "keepLocal",
     id,
     remoteEntry,
-    expectedRevision
+    expectedRevision,
+    expectedLocalFingerprint
   });
   const entry = await mutateEntryState({
     entryIds: [command.id],
@@ -448,6 +459,7 @@ async function verifyReconciliationRemote(command, { interactiveAuth = false, pr
  */
 export async function keepRemote(remoteEntry, {
   expectedLocalRevision,
+  expectedLocalFingerprint,
   expectedRemoteFingerprint = entryFingerprint(remoteEntry),
   provider
 } = {}) {
@@ -456,6 +468,7 @@ export async function keepRemote(remoteEntry, {
     id: remoteEntry.id,
     remoteEntry,
     expectedLocalRevision,
+    expectedLocalFingerprint,
     expectedRemoteFingerprint
   });
   const verifiedRemote = await verifyReconciliationRemote(command, { provider });
@@ -475,6 +488,7 @@ export async function keepRemote(remoteEntry, {
  */
 export async function deleteEverywhere(id, remoteEntry = null, {
   expectedLocalRevision,
+  expectedLocalFingerprint,
   expectedRemoteFingerprint = remoteEntry ? entryFingerprint(remoteEntry) : "",
   provider
 } = {}) {
@@ -483,6 +497,7 @@ export async function deleteEverywhere(id, remoteEntry = null, {
     id,
     remoteEntry,
     expectedLocalRevision,
+    expectedLocalFingerprint,
     expectedRemoteFingerprint
   });
   const verifiedRemote = await verifyReconciliationRemote(command, { provider });

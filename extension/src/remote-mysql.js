@@ -1,7 +1,9 @@
-import { getSetting } from "./db.js";
+import { getAllSettings } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import {
   createRemoteApiClient,
+  chunkByEncodedBytes,
+  parseAppendAcknowledgements,
   normalizeRemoteApiBaseUrl,
   parseRemoteSnapshot,
   parseRemoteVersion,
@@ -15,6 +17,11 @@ export const DEFAULT_MYSQL_API_BASE_URL = "https://time-api.cordoceo.com";
 const PROVIDER_LABEL = "MySQL API";
 const ENTRY_REF_KIND = "mysql-row";
 const CONFIG_REF_KIND = "mysql-config-row";
+const MAX_REQUEST_BYTES = 1_900_000;
+
+function sizedChunks(values, envelopeKey, encode) {
+  return chunkByEncodedBytes(values, { maxBytes: MAX_REQUEST_BYTES, envelopeKey, encode });
+}
 
 export function normalizeMysqlApiBaseUrl(value, options = {}) {
   return normalizeRemoteApiBaseUrl(value, {
@@ -40,8 +47,13 @@ export function createMysqlApiClient(options = {}) {
 }
 
 async function configuredClient(options = {}) {
-  const baseUrl = options.baseUrl ?? await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
-  const token = options.token ?? await getSetting(SETTING_KEY.MYSQL_API_TOKEN, "");
+  if (options.client) return options.client;
+  if (options.baseUrl !== undefined && options.token !== undefined) {
+    return createMysqlApiClient(options);
+  }
+  const settings = await getAllSettings();
+  const baseUrl = options.baseUrl ?? settings[SETTING_KEY.MYSQL_API_BASE_URL] ?? DEFAULT_MYSQL_API_BASE_URL;
+  const token = options.token ?? settings[SETTING_KEY.MYSQL_API_TOKEN] ?? "";
   return createMysqlApiClient({ ...options, baseUrl, token });
 }
 
@@ -51,10 +63,6 @@ function requireMysqlHealth(data) {
     validateHealth: (health) => typeof health.mysql === "string"
       && /^8\.(?:[4-9]|[1-9]\d+)$/.test(health.mysql)
   });
-}
-
-function ref(kind, version) {
-  return { kind, version: parseRemoteVersion(version) };
 }
 
 export const mysqlProvider = Object.freeze({
@@ -89,23 +97,29 @@ export const mysqlProvider = Object.freeze({
 
   async appendEntries(entries, options = {}) {
     if (!entries.length) return [];
-    const data = await (await configuredClient(options)).append(entries.map(persistedEntry));
-    if (!Array.isArray(data.entries)) throw Object.assign(new Error("The MySQL API append response is invalid."), { code: ERROR_CODE.REMOTE_API_INCOMPATIBLE });
-    return data.entries.map((record) => ({ id: String(record.id), ref: ref(ENTRY_REF_KIND, record.version) }));
+    const client = await configuredClient(options);
+    const result = [];
+    for (const chunk of sizedChunks(entries, "entries", persistedEntry)) {
+      const data = await client.append(chunk.map(persistedEntry));
+      result.push(...parseAppendAcknowledgements(data.entries, chunk.map((entry) => entry.id), ENTRY_REF_KIND));
+    }
+    return entries.map((entry) => result.find((record) => record.id === entry.id));
   },
 
   async updateEntries(updates, options = {}) {
     if (!updates.length) return;
-    await (await configuredClient(options)).update(updates.map(({ entry, expectedRef }) => ({
+    const client = await configuredClient(options);
+    for (const chunk of sizedChunks(updates, "updates", ({ entry, expectedRef }) => ({
       entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
-    })));
+    }))) await client.update(chunk.map(({ entry, expectedRef }) => ({ entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version) })));
   },
 
   async deleteEntries(preconditions, options = {}) {
     if (!preconditions.length) return;
-    await (await configuredClient(options)).delete(preconditions.map(({ id, expectedRef }) => ({
-      id, expectedVersion: parseRemoteVersion(expectedRef?.version)
-    })));
+    const client = await configuredClient(options);
+    for (const chunk of sizedChunks(preconditions, "preconditions", ({ id, expectedRef }) => ({ id, expectedVersion: parseRemoteVersion(expectedRef?.version) }))) {
+      await client.delete(chunk.map(({ id, expectedRef }) => ({ id, expectedVersion: parseRemoteVersion(expectedRef?.version) })));
+    }
   },
 
   async updateConfig(key, value, updatedAt, { expectedRef, ...options } = {}) {

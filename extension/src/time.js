@@ -94,27 +94,30 @@ export function fromLocalInputValue(value) {
     return { kind: "invalid", reason: "format" };
   }
   const [, year, month, dateOfMonth, hours, minutes, seconds = "0"] = match;
-  const normalized = `${year}-${month.padStart(2, "0")}-${dateOfMonth.padStart(2, "0")}`
-    + `T${hours.padStart(2, "0")}:${minutes.padStart(2, "0")}:${seconds.padStart(2, "0")}`;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return { kind: "invalid", reason: "format" };
   const numericYear = Number(year);
   const numericMonth = Number(month);
   const numericDateOfMonth = Number(dateOfMonth);
   const numericHours = Number(hours);
   const numericMinutes = Number(minutes);
   const numericSeconds = Number(seconds);
-  if (date.getFullYear() !== numericYear || date.getMonth() + 1 !== numericMonth
-    || date.getDate() !== numericDateOfMonth || date.getHours() !== numericHours
-    || date.getMinutes() !== numericMinutes || date.getSeconds() !== numericSeconds) {
-    return { kind: "invalid", reason: "nonexistent" };
+  const wanted = [numericYear, numericMonth, numericDateOfMonth, numericHours, numericMinutes, numericSeconds];
+  const matches = [];
+  const seenOffsets = new Set();
+  // A bounded sample discovers both one-hour and non-hour offset changes.
+  const wallMs = Date.UTC(wanted[0], wanted[1] - 1, wanted[2], wanted[3], wanted[4], wanted[5]);
+  for (let delta = -48 * 60; delta <= 48 * 60; delta += 15) {
+    seenOffsets.add(new Date(wallMs + delta * 60_000).getTimezoneOffset());
   }
-  const localText = (candidate) => toLocalInputValue(candidate.toISOString());
-  if (localText(new Date(date.getTime() - 3600_000)) === normalized
-    || localText(new Date(date.getTime() + 3600_000)) === normalized) {
-    return { kind: "invalid", reason: "ambiguous" };
+  for (const offset of seenOffsets) {
+    const candidate = new Date(wallMs + offset * 60_000);
+    if (candidate.getFullYear() === wanted[0] && candidate.getMonth() + 1 === wanted[1]
+      && candidate.getDate() === wanted[2] && candidate.getHours() === wanted[3]
+      && candidate.getMinutes() === wanted[4] && candidate.getSeconds() === wanted[5]
+      && !matches.some((item) => item.getTime() === candidate.getTime())) matches.push(candidate);
   }
-  return { kind: "instant", iso: date.toISOString() };
+  if (!matches.length) return { kind: "invalid", reason: "nonexistent" };
+  if (matches.length > 1) return { kind: "invalid", reason: "ambiguous" };
+  return { kind: "instant", iso: matches[0].toISOString() };
 }
 
 export function bindMinuteRollover(input) {

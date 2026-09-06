@@ -5,10 +5,20 @@ export const SYNC_ALARM = "timelogger-sync";
 export const UPDATE_CHECK_ALARM = "timelogger-update-check";
 export const NEXT_DUE_KEY = SETTING_KEY.BACKGROUND_SYNC_DUE_AT;
 export const MIN_SYNC_INTERVAL_SECONDS = 30;
+export const DEFAULT_SYNC_INTERVAL_SECONDS = 60;
+
+export function normalizeSyncInterval(value, { allowBlank = true } = {}) {
+  if (allowBlank && value === "") return { valid: true, value: DEFAULT_SYNC_INTERVAL_SECONDS };
+  const interval = Number(value);
+  if (!Number.isSafeInteger(interval) || interval < MIN_SYNC_INTERVAL_SECONDS) {
+    return { valid: false, value: DEFAULT_SYNC_INTERVAL_SECONDS, field: "interval",
+      message: `Enter a whole-number sync interval of at least ${MIN_SYNC_INTERVAL_SECONDS} seconds.` };
+  }
+  return { valid: true, value: interval };
+}
 
 export function syncAlarmMinutes(intervalSeconds) {
-  const configured = Number(intervalSeconds) || 60;
-  const seconds = Math.max(MIN_SYNC_INTERVAL_SECONDS, configured);
+  const seconds = normalizeSyncInterval(intervalSeconds).value;
   // Browser alarms are minute-granular, so anything faster is one minute.
   return Math.max(1, Math.round(seconds / 60));
 }

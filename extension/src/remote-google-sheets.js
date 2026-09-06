@@ -13,6 +13,7 @@ import {
   updateRemoteEntries
 } from "./sheets.js";
 import { SETTING_KEY } from "./setting-keys.js";
+import { entryFingerprint } from "./fingerprints.js";
 
 const ENTRY_REF_KIND = "google-sheet-row";
 const CONFIG_REF_KIND = "google-config-row";
@@ -45,7 +46,8 @@ function mapSnapshot(snapshot) {
   const entryRefs = new Map();
   for (const entry of snapshot.entries) {
     const rowIndex = snapshot.rowMap.get(entry.id);
-    if (rowIndex) entryRefs.set(entry.id, entryRef(rowIndex, snapshotEntryFingerprint(entry)));
+    const fingerprint = snapshot.rowFingerprints?.get(entry.id) || entryFingerprint(entry);
+    if (rowIndex) entryRefs.set(entry.id, entryRef(rowIndex, fingerprint));
   }
 
   const duplicates = (snapshot.duplicates || []).map((duplicate) => {
@@ -165,22 +167,3 @@ export const googleSheetsProvider = Object.freeze({
     settings.set(SETTING_KEY.SPREADSHEET_ID, readySpreadsheetBinding(binding, spreadsheetId));
   }
 });
-
-function snapshotEntryFingerprint(entry) {
-  return [
-    entry.id,
-    entry.project,
-    entry.task,
-    entry.description,
-    entry.start_at,
-    entry.end_at,
-    entry.duration_seconds,
-    entry.status,
-    entry.created_at,
-    entry.updated_at,
-    entry.deleted_at,
-    entry.device_id,
-    entry.revision,
-    entry.multiply
-  ].join("\u0000");
-}

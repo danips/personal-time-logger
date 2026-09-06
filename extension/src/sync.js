@@ -6,7 +6,7 @@ import {
   pruneExpiredReconciliationIntents,
   RECONCILIATION_INTENTS_KEY
 } from "./reconcile.js";
-import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry } from "./entries.js";
+import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry, normalizeMultiplierText } from "./entries.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { addDays, nowIso, uuid } from "./time.js";
@@ -375,7 +375,9 @@ export async function pullRemoteEntries(local, remoteEntries, pushedIds = new Se
         // A previously absent entry that appeared during the network read is a
         // local write, not permission to import over it. Likewise, do not
         // overwrite an entry that was edited or deleted after the snapshot.
-        if (!observed ? Boolean(current) : !current || Number(current.revision || 0) !== Number(observed.revision || 0)) {
+        if (!observed ? Boolean(current) : !current
+          || Number(current.revision || 0) !== Number(observed.revision || 0)
+          || entryFingerprint(current) !== entryFingerprint(observed)) {
           continue;
         }
         if (current && !isRemoteNewer(remote, current)) continue;
@@ -606,29 +608,38 @@ async function syncConfig(remoteConfig, configRefs, { interactiveAuth, lease, pr
   const remote = remoteConfig[MULTIPLIER_KEY];
   const remoteUpdatedAt = remote ? String(remote.updated_at || "") : "";
   const remoteValue = remote ? String(remote.value || "") : "";
-  const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
-  const localValue = String(await getSetting(MULTIPLIER_KEY, "1"));
+  const normalizedRemote = remoteValue ? normalizeMultiplierText(remoteValue) : "";
+  if (remote && (!normalizedRemote || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(remoteUpdatedAt)
+    || new Date(remoteUpdatedAt).getTime() > Date.now())) {
+    return { conflict: true, changed: false };
+  }
+  const localPair = await mutateSettings([MULTIPLIER_KEY, MULTIPLIER_UPDATED_KEY], (settings) => ({
+    value: String(settings.get(MULTIPLIER_KEY) || "1"),
+    updatedAt: String(settings.get(MULTIPLIER_UPDATED_KEY) || "")
+  }));
+  const localUpdatedAt = localPair.updatedAt;
+  const localValue = localPair.value;
 
   if (remoteUpdatedAt && remoteUpdatedAt > localUpdatedAt) {
     await lease?.assert();
-    await mutateSettings([MULTIPLIER_KEY, MULTIPLIER_UPDATED_KEY, MULTIPLIER_SYNCED_KEY], (settings) => {
+    const applied = await mutateSettings([MULTIPLIER_KEY, MULTIPLIER_UPDATED_KEY, MULTIPLIER_SYNCED_KEY], (settings) => {
       // A newer local save that landed after the snapshot must win and be
       // pushed on the following cycle instead of being overwritten piecemeal.
       if (String(settings.get(MULTIPLIER_UPDATED_KEY) || "") > remoteUpdatedAt) return false;
-      settings.set(MULTIPLIER_KEY, remoteValue);
+      settings.set(MULTIPLIER_KEY, normalizedRemote);
       settings.set(MULTIPLIER_UPDATED_KEY, remoteUpdatedAt);
       settings.set(MULTIPLIER_SYNCED_KEY, remoteUpdatedAt);
       return true;
     });
-    return false;
+    return { changed: Boolean(applied), pulled: Boolean(applied) };
   }
 
-  if (!localUpdatedAt) return false;
-  if (remoteUpdatedAt === localUpdatedAt && remoteValue !== localValue) return false;
-  if (remoteUpdatedAt === localUpdatedAt && remoteValue === localValue) {
+  if (!localUpdatedAt) return { changed: false };
+  if (remoteUpdatedAt === localUpdatedAt && normalizedRemote !== normalizeMultiplierText(localValue)) return { conflict: true, changed: false };
+  if (remoteUpdatedAt === localUpdatedAt && normalizedRemote === normalizeMultiplierText(localValue)) {
     await lease?.assert();
     await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
-    return false;
+    return { changed: false };
   }
 
   await lease?.assert();
@@ -638,7 +649,7 @@ async function syncConfig(remoteConfig, configRefs, { interactiveAuth, lease, pr
   });
   await lease?.assert();
   await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
-  return true;
+  return { changed: true, pushed: true };
 }
 
 async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
@@ -808,7 +819,7 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
       pushedIds
     });
     phase = "config";
-    const configPushed = await syncConfig(snapshot.config, snapshot.configRefs, { interactiveAuth, lease, provider });
+    const configOutcome = await syncConfig(snapshot.config, snapshot.configRefs, { interactiveAuth, lease, provider });
     // Backfills spreadsheets created before the marker existed, once.
     await lease.assert();
     const markerWritten = await provider.ensureAppMarker(snapshot.config, snapshot.configRefs, { interactiveAuth });
@@ -816,17 +827,25 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
 
     // Our own writes bump modifiedTime, so it is re-read to avoid a needless
     // download next cycle. If Drive lags, the gate simply opens once more.
-    const wroteRemotely = pushedIds.size > 0 || purged > 0 || configPushed || markerWritten;
+    const wroteRemotely = pushedIds.size > 0 || purged > 0 || configOutcome.changed || markerWritten;
     phase = "remote_marker";
-    const nextModified = wroteRemotely || !modifiedTime
-      ? await provider.getChangeToken({ interactiveAuth })
-      : modifiedTime;
+    // API snapshots carry the exact consumed token. Google Drive metadata is
+    // not a compare-and-swap marker, so leave its gate open after a cycle.
+    const nextModified = provider.id === "google-sheets"
+      ? ""
+      : wroteRemotely
+        ? await provider.getChangeToken({ interactiveAuth })
+        : snapshot.changeToken;
     await lease.assert();
     await setSetting(changeTokenKey, nextModified || "");
     // Preserve the old marker for installations upgraded during this refactor.
     if (changeTokenKey === REMOTE_CHANGE_TOKEN_KEY) await setSetting(LEGACY_REMOTE_MODIFIED_KEY, nextModified || "");
 
     phase = "complete";
+    const reviewCount = (snapshot.quarantined?.length || 0)
+      + snapshot.entries.filter((remote) => hasEqualTimestampConflict(remote, local.get(remote.id))).length
+      + [...local.values()].filter((entry) => entry.status === "needs_review").length
+      + (configOutcome.conflict ? 1 : 0);
     const changed = wroteRemotely
       || pulled > 0
       || conflictChanges.length > 0
@@ -837,8 +856,8 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
     await recordCycleActivity({ changed, force });
     if (changed) notifyEntriesChanged({ action: "sync" });
     return {
-      status: conflictChanges.length ? "needs review" : "synced",
-      warning: conflictChanges.length ? "multiple active timers flagged" : "",
+      status: reviewCount ? "needs review" : "synced",
+      warning: reviewCount ? `${reviewCount} item${reviewCount === 1 ? "" : "s"} need review` : "",
       syncedAt: timestamp,
       changed
     };

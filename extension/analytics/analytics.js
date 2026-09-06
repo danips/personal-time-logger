@@ -22,6 +22,8 @@ let descriptionsExpanded = false;
 let eventsBound = false;
 let unsubscribeEntries = null;
 let refreshGeneration = 0;
+let anomaliesExpanded = false;
+let refreshTimer = null;
 
 function setStatus(message, state = "ready") {
   const status = $("#statusLine");
@@ -153,8 +155,10 @@ function renderFragmentation({ fragmentation }) {
 }
 
 function renderAnomalies({ anomalies }) {
-  $("#anomalyCount").textContent = String(anomalies.length);
-  replaceChildren($("#anomalyRows"), anomalies.map((anomaly) => {
+  const visible = anomaliesExpanded ? anomalies : anomalies.slice(0, 100);
+  const total = anomalies.length < 100 ? anomalies.length : anomalies.length + Math.max(0, (anomalies.overlapCount || 0) - anomalies.filter(({ type }) => type === "overlap").length);
+  $("#anomalyCount").textContent = String(total);
+  replaceChildren($("#anomalyRows"), visible.map((anomaly) => {
     const row = element("article", "anomaly-row");
     const title = element("div");
     title.append(element("div", "anomaly-type", anomaly.type.replaceAll("_", " ")),
@@ -162,7 +166,10 @@ function renderAnomalies({ anomalies }) {
     row.append(title, element("div", "", `${anomaly.project} / ${anomaly.task}`), element("div", "", anomaly.message));
     return row;
   }));
-  $("#anomaliesEmpty").hidden = anomalies.length > 0;
+  $("#anomaliesEmpty").hidden = total > 0;
+  const loadMore = $("#loadMoreAnomalies");
+  loadMore.hidden = anomaliesExpanded || anomalies.length <= 100;
+  loadMore.textContent = `Load more (${anomalies.length - 100} remaining)`;
 }
 
 function renderDescriptions() {
@@ -206,12 +213,14 @@ function resolveSelectedPeriod() {
 
 async function refresh() {
   const generation = ++refreshGeneration;
-  const period = selectedPeriod || resolveSelectedPeriod();
+  const now = new Date();
+  const currentPreset = [ANALYTICS_PERIOD_PRESET.THIS_WEEK, ANALYTICS_PERIOD_PRESET.THIS_MONTH, ANALYTICS_PERIOD_PRESET.THIS_YEAR, ANALYTICS_PERIOD_PRESET.LAST_30_DAYS].includes($("#periodPreset").value);
+  const period = currentPreset ? resolveAnalyticsPeriod($("#periodPreset").value, { now }) : (selectedPeriod || resolveSelectedPeriod());
   const earliest = period.primary.start < period.comparison.start ? period.primary.start : period.comparison.start;
   const latest = period.primary.end > period.comparison.end ? period.primary.end : period.comparison.end;
   setStatus("Loading…", "pending");
   const entries = await getEntriesIntersecting(earliest, latest);
-  const report = buildAnalyticsReport(entries, { ...period, now: new Date() });
+  const report = buildAnalyticsReport(entries, { ...period, now });
   if (generation !== refreshGeneration) return;
   selectedPeriod = period;
   $("#primaryRange").textContent = period.primary.label;
@@ -250,6 +259,7 @@ function bindEvents() {
     descriptionsExpanded = !descriptionsExpanded;
     renderDescriptions();
   });
+  $("#loadMoreAnomalies").addEventListener("click", () => { anomaliesExpanded = true; renderAnomalies(latestReport); });
   $("#projectRows").addEventListener("click", (event) => {
     const toggle = event.target.closest(".project-toggle");
     if (!toggle) return;
@@ -261,6 +271,7 @@ function bindEvents() {
     }
   });
   unsubscribeEntries = onEntriesChanged(() => {
+    anomaliesExpanded = false;
     void runPageTask({
       page: "analytics",
       phase: "entries-changed",
@@ -268,7 +279,12 @@ function bindEvents() {
       onError(error) { setStatus(error.message || "Could not refresh analytics", "error"); }
     });
   });
+  globalThis.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void refresh();
+  });
+  refreshTimer = setInterval(() => { if (!document.hidden) void refresh(); }, 60_000);
   globalThis.addEventListener("pagehide", () => {
+    clearInterval(refreshTimer);
     unsubscribeEntries?.();
     unsubscribeEntries = null;
   }, { once: true });

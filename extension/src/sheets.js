@@ -7,6 +7,7 @@ import { platform } from "./platform.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { SETTING_KEY } from "./setting-keys.js";
+import { rawRowFingerprint } from "./fingerprints.js";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
@@ -108,7 +109,7 @@ function entryRowCells(row) {
 }
 
 export function rowFingerprint(row) {
-  return entryRowCells(row).join("\u0000");
+  return rawRowFingerprint(entryRowCells(row));
 }
 
 function decodeRemoteRow(row, rowIndex) {
@@ -536,7 +537,7 @@ function rowsToConfig(rows) {
       value: row[1],
       updated_at: updatedAt
     };
-    configRows.set(key, { rowIndex: index + 2, expectedFingerprint: row.slice(0, 3).join("\u0000") });
+    configRows.set(key, { rowIndex: index + 2, expectedFingerprint: JSON.stringify(row.slice(0, 3)) });
   });
   return { config, configRows };
 }
@@ -637,9 +638,9 @@ async function readSnapshotOnce(spreadsheetId, { interactiveAuth }) {
   const data = await apiFetch(`/${spreadsheetId}/values:batchGet?${query}`, {}, { interactiveAuth });
   if (!Array.isArray(data.valueRanges)) throw codedError("API_ERROR", "Google Sheets returned an invalid snapshot");
 
-  const { entries, rowMap, duplicates, quarantined } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
+  const { entries, rowMap, rowFingerprints, duplicates, quarantined } = rowsToEntries(valuesForRange(data.valueRanges, SHEET_NAME));
   const { config, configRows } = rowsToConfig(valuesForRange(data.valueRanges, CONFIG_SHEET_NAME));
-  return { entries, rowMap, duplicates, quarantined, config, configRows };
+  return { entries, rowMap, rowFingerprints, duplicates, quarantined, config, configRows };
 }
 
 /**
@@ -682,8 +683,10 @@ export function rowsToEntries(rows) {
   const byId = new Map();
   const quarantined = [];
   cells.slice(1).forEach((row, index) => {
-    if (!row[0]) return;
     const rowIndex = index + 2;
+    // An all-empty row is harmless padding from the Values API. A populated
+    // row without an identity is recoverable data and must be visible.
+    if (row.every((cell) => !cell)) return;
     const decoded = decodeRemoteRow(row, rowIndex);
     if (!decoded.entry) {
       quarantined.push(decoded.quarantine);
@@ -696,6 +699,7 @@ export function rowsToEntries(rows) {
 
   const entries = [];
   const rowMap = new Map();
+  const rowFingerprints = new Map();
   const duplicates = [];
   for (const records of byId.values()) {
     const winner = records.reduce((best, candidate) => (
@@ -703,6 +707,7 @@ export function rowsToEntries(rows) {
     ));
     entries.push(winner.entry);
     rowMap.set(winner.entry.id, winner.rowIndex);
+    rowFingerprints.set(winner.entry.id, rowFingerprint(cells[winner.rowIndex - 1]));
     if (records.length > 1) {
       const rows = records.map(({ rowIndex }) => ({
         id: winner.entry.id,
@@ -721,7 +726,7 @@ export function rowsToEntries(rows) {
     }
   }
 
-  return { entries, rowMap, duplicates, quarantined };
+  return { entries, rowMap, rowFingerprints, duplicates, quarantined };
 }
 
 function appendedRowSpan(data) {

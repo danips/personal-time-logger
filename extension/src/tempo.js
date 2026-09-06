@@ -25,12 +25,17 @@ export function normalizeTempoIssueId(value) {
 
 export function normalizeTempoTaskIssueIds(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const normalized = {};
+  const normalized = new Map();
   for (const [task, issueId] of Object.entries(value)) {
     const validIssueId = normalizeTempoIssueId(issueId);
-    if (validIssueId) normalized[String(task).trim()] = validIssueId;
+    if (!validIssueId) continue;
+    const key = String(task).trim();
+    if (normalized.has(key) && normalized.get(key) !== validIssueId) {
+      throw tempoError(ERROR_CODE.CONFIG_INVALID, `Tempo mappings contain conflicting entries for “${key}”.`);
+    }
+    normalized.set(key, validIssueId);
   }
-  return normalized;
+  return Object.fromEntries(normalized);
 }
 
 /** Accepts any iterable of local civil-date keys, ignoring unusable members. */
@@ -95,7 +100,7 @@ export function prepareTempoWeek(entries, {
     }
 
     const task = String(entry.task ?? "").trim();
-    const issueId = mappings[task];
+    const issueId = Object.hasOwn(mappings, task) ? mappings[task] : "";
     if (!issueId) {
       missingTasks.add(task);
       continue;
@@ -212,7 +217,11 @@ export async function sendTempoWorklogs(groups, {
         });
       } catch (error) {
         if (error?.code === ERROR_CODE.TEMPO_NETWORK) throw error;
-        throw tempoError(ERROR_CODE.TEMPO_NETWORK, "Tempo request could not complete");
+        throw Object.assign(tempoError(ERROR_CODE.TEMPO_NETWORK, "Tempo request could not complete; inspect Tempo before resending."), {
+          acknowledgedWorklogs: sentWorklogs,
+          requestCount,
+          currentRequestOutcome: "unknown"
+        });
       }
       requestCount += 1;
       if (!response.ok) {

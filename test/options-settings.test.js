@@ -61,11 +61,12 @@ describe("Options settings save plan", () => {
     }
   });
 
-  it("normalizes the accepted form domain", () => {
+  it("rejects a below-minimum form interval", () => {
     assert.deepEqual(normalizeOptionsSettings({ interval: "20", multiplier: "1,25" }), {
-      valid: true,
-      interval: 30,
-      multiplier: "1.250"
+      valid: false,
+      field: "interval",
+      value: 60,
+      message: "Enter a whole-number sync interval of at least 30 seconds."
     });
   });
 

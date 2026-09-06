@@ -46,21 +46,25 @@ async function getTab(tabId) {
 
 async function openOrFocusExtensionPage(path) {
   const url = rawApi.runtime.getURL(path);
+  const identity = url.split("#", 1)[0];
   if (!rawApi.tabs || !rawApi.tabs.create) {
     throw new Error("Browser tabs API is unavailable");
   }
 
   try {
     if (rawApi.tabs.query && rawApi.tabs.update) {
-      const existing = await apiCall(rawApi.tabs.query, rawApi.tabs, { url });
+      const existing = await apiCall(rawApi.tabs.query, rawApi.tabs, { url: `${identity}*` });
       const tab = Array.isArray(existing)
-        ? existing.find((candidate) => Number.isInteger(candidate?.id))
+        ? existing.find((candidate) => Number.isInteger(candidate?.id)
+          && (!candidate.url || String(candidate.url).split("#", 1)[0] === identity))
         : null;
       if (tab) {
         if (rawApi.windows?.update && Number.isInteger(tab.windowId)) {
           await apiCall(rawApi.windows.update, rawApi.windows, tab.windowId, { focused: true });
         }
-        return apiCall(rawApi.tabs.update, rawApi.tabs, tab.id, { active: true });
+        const update = { active: true };
+        if (tab.url && tab.url !== url) update.url = url;
+        return apiCall(rawApi.tabs.update, rawApi.tabs, tab.id, update);
       }
     }
     return await apiCall(rawApi.tabs.create, rawApi.tabs, { url });
@@ -74,8 +78,9 @@ export const platform = {
     return rawApi.runtime.getURL(path);
   },
 
-  async openOptionsPage() {
-    if (rawApi.tabs?.create) return openOrFocusExtensionPage("options/options.html");
+  async openOptionsPage(section = "") {
+    const suffix = section ? `#${String(section).replace(/^#/, "")}` : "";
+    if (rawApi.tabs?.create) return openOrFocusExtensionPage(`options/options.html${suffix}`);
     if (!rawApi.runtime.openOptionsPage) return;
     if (usesPromiseApi) return rawApi.runtime.openOptionsPage();
     return callbackOrPromiseApi(rawApi.runtime.openOptionsPage, rawApi.runtime);

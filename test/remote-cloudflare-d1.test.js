@@ -69,9 +69,11 @@ describe("Cloudflare Worker + D1 provider", () => {
       Array.from({ length: CHUNK_SIZE + 1 }, (_, index) => fixture(`failure-${index}`)),
       {
         baseUrl: "https://my-worker.workers.dev", token: "synthetic-token", platformApi,
-        fetchImpl: async () => {
+        fetchImpl: async (_url, options) => {
           calls += 1;
-          return calls === 1 ? ok({ entries: [] }) : { ok: false, status: 500, async text() { return JSON.stringify({ error: { code: "API_ERROR", message: "secret" } }); } };
+          return calls === 1
+            ? ok({ entries: JSON.parse(options.body).entries.map((entry, index) => ({ id: entry.id, version: index + 1 })) })
+            : { ok: false, status: 500, async text() { return JSON.stringify({ error: { code: "API_ERROR", message: "secret" } }); } };
         }
       }
     ), { code: "API_ERROR" });

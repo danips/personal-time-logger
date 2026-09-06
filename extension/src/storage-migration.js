@@ -133,11 +133,15 @@ function mapConfig(snapshot) {
   return new Map(canonicalConfig(snapshot.config).map(([key, value, updatedAt]) => [key, { value, updated_at: updatedAt }]));
 }
 
-function compareTarget(source, target) {
+function compareTarget(source, target, state = {}) {
+  const ownedEntries = state.owned_entries || {};
   const sourceEntries = mapEntries(source);
   const targetEntries = mapEntries(target);
   for (const [id, entry] of targetEntries) {
-    if (!sourceEntries.has(id) || !sameEntry(sourceEntries.get(id), entry)) {
+    const targetFingerprint = JSON.stringify(canonicalEntry(entry));
+    if (!sourceEntries.has(id) || (!sameEntry(sourceEntries.get(id), entry)
+      && ownedEntries[id]?.target_fingerprint !== targetFingerprint
+      && ownedEntries[id]?.fingerprint !== targetFingerprint)) {
       throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `The migration target contains unrelated entry data (${id}).`);
     }
   }
@@ -146,7 +150,13 @@ function compareTarget(source, target) {
   const targetConfig = mapConfig(target);
   for (const [key, value] of targetConfig) {
     const expected = sourceConfig.get(key);
-    if (!expected || expected.value !== value.value || expected.updated_at !== value.updated_at) {
+    const owned = state.owned_config?.[key];
+    const ownedAllows = owned && (
+      (owned.target_value === value.value && owned.target_updated_at === value.updated_at)
+      || (owned.value === value.value && owned.updated_at === value.updated_at)
+    );
+    if ((!expected || expected.value !== value.value || expected.updated_at !== value.updated_at)
+      && !ownedAllows) {
       throw migrationError(ERROR_CODE.MIGRATION_TARGET_CONFLICT, `The migration target contains unrelated configuration (${key}).`);
     }
   }
@@ -181,7 +191,13 @@ function progressState(state, patch) {
 }
 
 async function saveState(state) {
-  await setSetting(SETTING_KEY.STORAGE_MIGRATION_STATE, state);
+  await mutateSettings([SETTING_KEY.STORAGE_MIGRATION_STATE], (settings) => {
+    const current = settings.get(SETTING_KEY.STORAGE_MIGRATION_STATE);
+    if (isActiveState(current) && current.migration_id !== state.migration_id) {
+      throw migrationError(ERROR_CODE.MIGRATION_IN_PROGRESS, "Another migration owns the shared migration state.");
+    }
+    settings.set(SETTING_KEY.STORAGE_MIGRATION_STATE, state);
+  });
   return state;
 }
 
@@ -220,34 +236,73 @@ async function prepareTarget(provider, lease, options) {
 }
 
 async function seedTarget(source, target, targetSnapshot, state, { lease, options }) {
-  const comparison = compareTarget(source, targetSnapshot);
+  const comparison = compareTarget(source, targetSnapshot, state);
+  const ownedEntries = state.owned_entries || {};
   const missingEntries = source.entries.filter((entry) => !comparison.targetEntries.has(entry.id));
+  const ownedChangedEntries = source.entries.filter((entry) => comparison.targetEntries.has(entry.id)
+    && !sameEntry(entry, comparison.targetEntries.get(entry.id))
+    && ownedEntries[entry.id]?.fingerprint === JSON.stringify(canonicalEntry(comparison.targetEntries.get(entry.id))));
   const missingConfig = [...comparison.sourceConfig]
     .filter(([key]) => !comparison.targetConfig.has(key));
+  const ownedChangedConfig = [...comparison.sourceConfig]
+    .filter(([key, value]) => {
+      const targetValue = comparison.targetConfig.get(key);
+      const owned = state.owned_config?.[key];
+      return targetValue
+        && (targetValue.value !== value.value || targetValue.updated_at !== value.updated_at)
+        && owned?.target_value === targetValue.value
+        && owned?.target_updated_at === targetValue.updated_at;
+    });
+  const configWrites = [...missingConfig, ...ownedChangedConfig];
 
   await saveState(progressState(state, {
     phase: "seeding",
     total_entries: source.entries.length,
     total_config: comparison.sourceConfig.size,
-    completed_entries: source.entries.length - missingEntries.length,
-    completed_config: comparison.sourceConfig.size - missingConfig.length
+    completed_entries: source.entries.length - missingEntries.length - ownedChangedEntries.length,
+    completed_config: comparison.sourceConfig.size - configWrites.length
   }));
 
   for (let offset = 0; offset < missingEntries.length; offset += MIGRATION_BATCH_SIZE) {
     await lease.assert();
-    await target.appendEntries(missingEntries.slice(offset, offset + MIGRATION_BATCH_SIZE), options);
+    const chunk = missingEntries.slice(offset, offset + MIGRATION_BATCH_SIZE);
+    const acknowledgements = await target.appendEntries(chunk, options);
+    chunk.forEach((entry, index) => { state.owned_entries = state.owned_entries || {}; state.owned_entries[entry.id] = { fingerprint: JSON.stringify(canonicalEntry(entry)), ref: acknowledgements[index]?.ref || null }; });
     await saveState(progressState(state, {
       phase: "seeding",
-      completed_entries: source.entries.length - missingEntries.length + Math.min(offset + MIGRATION_BATCH_SIZE, missingEntries.length)
+      completed_entries: source.entries.length - missingEntries.length - ownedChangedEntries.length + Math.min(offset + MIGRATION_BATCH_SIZE, missingEntries.length)
     }));
   }
 
-  for (const [key, value] of missingConfig) {
+  for (const entry of ownedChangedEntries) {
     await lease.assert();
-    await target.updateConfig(key, value.value, value.updated_at, options);
+    const targetEntry = comparison.targetEntries.get(entry.id);
+    state.owned_entries[entry.id] = {
+      fingerprint: JSON.stringify(canonicalEntry(entry)),
+      target_fingerprint: JSON.stringify(canonicalEntry(targetEntry)),
+      ref: targetSnapshot.entryRefs?.get(entry.id) || null
+    };
+    await saveState(progressState(state, { phase: "seeding" }));
+    await target.updateEntries([{ entry, expectedRef: targetSnapshot.entryRefs?.get(entry.id) }], options);
+    state.owned_entries[entry.id] = { fingerprint: JSON.stringify(canonicalEntry(entry)), ref: targetSnapshot.entryRefs?.get(entry.id) || null };
+    await saveState(progressState(state, { phase: "seeding" }));
+  }
+
+  for (const [configIndex, [key, value]] of configWrites.entries()) {
+    await lease.assert();
+    state.owned_config = state.owned_config || {};
+    state.owned_config[key] = {
+      value: value.value,
+      updated_at: value.updated_at,
+      target_value: comparison.targetConfig.get(key)?.value,
+      target_updated_at: comparison.targetConfig.get(key)?.updated_at
+    };
+    await saveState(progressState(state, { phase: "seeding" }));
+    await target.updateConfig(key, value.value, value.updated_at, { ...options, expectedRef: targetSnapshot.configRefs?.get(key) });
+    state.owned_config[key] = { value: value.value, updated_at: value.updated_at };
     await saveState(progressState(state, {
       phase: "seeding",
-      completed_config: comparison.sourceConfig.size - missingConfig.length + 1
+      completed_config: comparison.sourceConfig.size - configWrites.length + configIndex + 1
     }));
   }
 
@@ -537,6 +592,15 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
         return finishMigration(postSwitch || state);
       }
     } catch (error) {
+      const durable = await readState().catch(() => null);
+      if (durable?.phase === "post_switch") {
+        // The backend switch is durable. Preserve that recovery phase even if
+        // the first post-switch sync failed; retry must finalize, never pretend
+        // the active dataset was rolled back.
+        state = progressState(durable, { error_code: String(error?.code || "MIGRATION_POST_SWITCH_FAILED") });
+        await saveState(state);
+        throw error;
+      }
       state = progressState(state, { attempt, error_code: String(error?.code || "MIGRATION_FAILED") });
       if (error?.code === ERROR_CODE.MIGRATION_SOURCE_CHANGED && attempt < MAX_STABILIZATION_ATTEMPTS) {
         state = progressState(state, { phase: "source_changed" });

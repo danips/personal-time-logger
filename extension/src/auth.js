@@ -225,13 +225,15 @@ async function signInDevice(config, { onDeviceCode } = {}) {
   return saved.tokenData;
 }
 
-async function refreshToken({ force = false } = {}) {
+async function refreshToken({ force = false, rejectedAccessToken = "" } = {}) {
   if (refreshInFlight && force && !refreshInFlightForced) {
-    return refreshInFlight.then(() => refreshTokenOnce({ force: true }));
+    return refreshInFlight.then((result) => result?.access_token !== rejectedAccessToken
+      ? result
+      : refreshTokenOnce({ force: true, rejectedAccessToken }));
   }
   if (!refreshInFlight) {
     refreshInFlightForced = force;
-    const pending = refreshTokenOnce({ force }).finally(() => {
+    const pending = refreshTokenOnce({ force, rejectedAccessToken }).finally(() => {
       if (refreshInFlight === pending) {
         refreshInFlight = null;
         refreshInFlightForced = false;
@@ -246,7 +248,7 @@ function refreshLockHolder() {
   return `refresh-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
 }
 
-async function refreshTokenOnce({ force }) {
+async function refreshTokenOnce({ force, rejectedAccessToken = "" }) {
   const config = await getConfig();
   const configError = authConfigError(config);
   if (configError) throw configError;
@@ -259,6 +261,7 @@ async function refreshTokenOnce({ force }) {
       try {
         const tokenData = await getTokenData();
         if (!force && isUsable(tokenData)) return tokenData;
+        if (force && isUsable(tokenData) && tokenData.access_token !== rejectedAccessToken) return tokenData;
         if (!tokenData || !tokenData.refresh_token) {
           throw codedError("AUTH_EXPIRED", "Please sign in again");
         }
@@ -294,7 +297,7 @@ async function refreshTokenOnce({ force }) {
     }
 
     const tokenData = await getTokenData();
-    if (isUsable(tokenData)) return tokenData;
+    if (isUsable(tokenData) && (!force || tokenData.access_token !== rejectedAccessToken)) return tokenData;
     await sleep(TOKEN_REFRESH_POLL_MS);
   }
 
@@ -311,7 +314,7 @@ export async function getAccessToken({ interactive = false, forceRefresh = false
     if (!forceRefresh && isUsable(tokenData)) return tokenData.access_token;
 
     if (tokenData && tokenData.refresh_token) {
-      const refreshed = await refreshToken({ force: forceRefresh });
+      const refreshed = await refreshToken({ force: forceRefresh, rejectedAccessToken: tokenData.access_token });
       return refreshed.access_token;
     }
 

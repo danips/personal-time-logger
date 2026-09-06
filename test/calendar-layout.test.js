@@ -212,8 +212,8 @@ describe("durationMsForDrag", () => {
     assert.equal(durationMsForDrag(entry(at(0, 9), at(0, 10, 30))), 90 * 60 * 1000);
   });
 
-  it("never returns less than one grid slot", () => {
-    assert.equal(durationMsForDrag(entry(at(0, 9), at(0, 9, 5))), 15 * 60 * 1000);
+  it("preserves even a short completed entry exactly", () => {
+    assert.equal(durationMsForDrag(entry(at(0, 9), at(0, 9, 5))), 5 * 60 * 1000);
   });
 });
 
