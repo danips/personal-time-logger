@@ -28,4 +28,16 @@ describe("error recovery registry", () => {
     assert.equal(message.includes("token=not-safe"), false);
     assert.match(message, /Extension error/);
   });
+
+  it("renders Tempo progress without making an uncertain request look rejected", () => {
+    const message = formatError({
+      code: "TEMPO_NETWORK",
+      acknowledgedWorklogs: 50,
+      requestCount: 2,
+      currentRequestOutcome: "unknown"
+    });
+    assert.match(message, /50 worklogs were acknowledged across 2 requests/);
+    assert.match(message, /outcome is unknown/);
+    assert.match(message, /Inspect Tempo before resending/);
+  });
 });

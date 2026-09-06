@@ -90,6 +90,8 @@ let eventsBound = false;
 // another calendar edit replaces it. There is deliberately no expiry timer.
 let lastCalendarUndo = null;
 let renderGeneration = 0;
+let renderInFlight = null;
+let renderPending = false;
 let clampEditorToViewport = () => {};
 
 function setStatus(message, state = message) {
@@ -445,23 +447,48 @@ function handleViewportResize() {
   if (!$("#calendarEditOverlay").hidden) clampEditorToViewport();
 }
 
-async function render() {
-  if (gesture) return;
-  const generation = ++renderGeneration;
-  const weekEnd = addDays(weekStart, DAY_COUNT);
+async function performRender(generation, requestedWeekStart) {
+  const weekEnd = addDays(requestedWeekStart, DAY_COUNT);
   const [nextEntries, configuredStart] = await Promise.all([
-    getEntriesIntersecting(weekStart, weekEnd),
+    getEntriesIntersecting(requestedWeekStart, weekEnd),
     getSetting(SETTING_KEY.WORKDAY_START_HOUR, DEFAULT_WORKDAY_START_HOUR)
   ]);
-  if (generation !== renderGeneration) return;
+  if (
+    generation !== renderGeneration
+    || gesture
+    || weekStart.getTime() !== requestedWeekStart.getTime()
+  ) {
+    if (gesture) renderPending = true;
+    return;
+  }
   renderedEntries = nextEntries;
   const startHour = normalizeWorkdayStartHour(configuredStart);
-  const segmentsByDay = buildSegments(nextEntries, weekStart);
+  const segmentsByDay = buildSegments(nextEntries, requestedWeekStart);
   $("#weekPicker").value = isoWeekValue(weekStart);
   renderHeader(dailyTotalsFromSegments(segmentsByDay));
   renderCalendar(segmentsByDay);
   syncScrollbarGutter();
   scrollToWorkingHours(startHour.valid ? startHour.start : DEFAULT_WORKDAY_START_HOUR);
+}
+
+function render() {
+  renderGeneration += 1;
+  renderPending = true;
+  if (gesture || renderInFlight) return renderInFlight || Promise.resolve();
+
+  const run = async () => {
+    while (renderPending && !gesture) {
+      renderPending = false;
+      const generation = renderGeneration;
+      const requestedWeekStart = new Date(weekStart);
+      await performRender(generation, requestedWeekStart);
+    }
+  };
+  renderInFlight = run().finally(() => {
+    renderInFlight = null;
+    if (renderPending && !gesture) void render();
+  });
+  return renderInFlight;
 }
 
 function refreshActiveTimers() {
@@ -702,6 +729,7 @@ function clearGesture(state, moveHandler, sourceClass) {
   window.removeEventListener("pointercancel", state.cancel || state.finish);
   state.block.classList.remove(sourceClass);
   state.preview?.remove();
+  if (renderPending) void render();
   return true;
 }
 

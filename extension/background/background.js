@@ -235,7 +235,16 @@ async function uploadTempoWorklogs(message, sender) {
     const code = TEMPO_ERROR_CODES.has(error?.code)
       ? error.code
       : ERROR_CODE.TEMPO_NETWORK;
-    return { ok: false, error: { code, acknowledgedWorklogs: error.acknowledgedWorklogs || 0, requestCount: error.requestCount || 0, currentRequestOutcome: error.currentRequestOutcome || "unknown" } };
+    return {
+      ok: false,
+      error: {
+        code,
+        message: error?.message || "Tempo upload failed.",
+        acknowledgedWorklogs: error.acknowledgedWorklogs ?? 0,
+        requestCount: error.requestCount ?? 0,
+        currentRequestOutcome: error.currentRequestOutcome ?? "unknown"
+      }
+    };
   }
 }
 

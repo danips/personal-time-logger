@@ -234,7 +234,12 @@ describe("Tempo bulk upload", () => {
       }
     });
 
-    assert.deepEqual(result, { sentWorklogs: 51, requestCount: 2 });
+    assert.deepEqual(result, {
+      sentWorklogs: 51,
+      acknowledgedWorklogs: 51,
+      requestCount: 2,
+      currentRequestOutcome: "acknowledged"
+    });
     assert.deepEqual(requests.map((request) => JSON.parse(request.init.body).length), [50, 1]);
     assert.equal(requests[0].url, "https://api.tempo.io/4/worklogs/issue/10042/bulk");
     assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
@@ -256,6 +261,9 @@ describe("Tempo bulk upload", () => {
       }
     }), (error) => {
       assert.equal(error.code, "TEMPO_PARTIAL");
+      assert.equal(error.acknowledgedWorklogs, 1);
+      assert.equal(error.requestCount, 2);
+      assert.equal(error.currentRequestOutcome, "rejected");
       assert.match(error.message, /1 worklog was already sent; do not retry the whole week/);
       return true;
     });
@@ -269,6 +277,12 @@ describe("Tempo bulk upload", () => {
       fetchImpl: async () => {
         throw new TypeError("CORS request did not succeed");
       }
-    }), (error) => error.code === "TEMPO_NETWORK");
+    }), (error) => {
+      assert.equal(error.code, "TEMPO_NETWORK");
+      assert.equal(error.acknowledgedWorklogs, 0);
+      assert.equal(error.requestCount, 1);
+      assert.equal(error.currentRequestOutcome, "unknown");
+      return true;
+    });
   });
 });

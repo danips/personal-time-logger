@@ -1,8 +1,9 @@
 import { buildAnalyticsReport } from "../src/analytics.js";
 import { ANALYTICS_PERIOD_PRESET, analyticsDateInputValue, resolveAnalyticsPeriod } from "../src/analytics-period.js";
 import { getEntriesIntersecting } from "../src/db.js";
+import { recordDiagnostic } from "../src/diagnostics.js";
 import { onEntriesChanged } from "../src/events.js";
-import { runPageTask, startPage } from "../src/page-runtime.js";
+import { startPage } from "../src/page-runtime.js";
 import { addDays, formatElapsed, shortDateTime } from "../src/time.js";
 import { $ } from "../src/ui-helpers.js";
 
@@ -216,14 +217,12 @@ function resolveSelectedPeriod() {
   });
 }
 
-async function refresh() {
-  const generation = ++refreshGeneration;
+async function performRefresh(generation) {
   const now = new Date();
   const currentPreset = [ANALYTICS_PERIOD_PRESET.THIS_WEEK, ANALYTICS_PERIOD_PRESET.THIS_MONTH, ANALYTICS_PERIOD_PRESET.THIS_YEAR, ANALYTICS_PERIOD_PRESET.LAST_30_DAYS].includes($("#periodPreset").value);
   const period = currentPreset ? resolveAnalyticsPeriod($("#periodPreset").value, { now }) : (selectedPeriod || resolveSelectedPeriod());
   const earliest = period.primary.start < period.comparison.start ? period.primary.start : period.comparison.start;
   const latest = period.primary.end > period.comparison.end ? period.primary.end : period.comparison.end;
-  setStatus("Loading…", "pending");
   const entries = await getEntriesIntersecting(earliest, latest);
   const report = buildAnalyticsReport(entries, { ...period, now });
   if (generation !== refreshGeneration) return;
@@ -232,6 +231,28 @@ async function refresh() {
   $("#comparisonRange").textContent = period.comparison.label;
   renderReport(report);
   setStatus("Ready", "ready");
+}
+
+// Every trigger goes through this owner so success and failure use the same
+// generation fence. A stale failure is deliberately swallowed after the
+// current request has taken over the page; the initial request still rejects
+// so startPage can expose its Retry path.
+function requestRefresh({ initial = false } = {}) {
+  const generation = ++refreshGeneration;
+  setStatus("Loading…", "pending");
+  return performRefresh(generation).catch((error) => {
+    const current = generation === refreshGeneration;
+    if (current) setStatus(error.message || "Could not load analytics", "error");
+    if (!initial) {
+      void recordDiagnostic({
+        subsystem: "page",
+        phase: current ? "analytics.refresh" : "analytics.refresh.stale",
+        error,
+        recovery: "Retry the analytics refresh."
+      }).catch(() => {});
+    }
+    if (initial) throw error;
+  });
 }
 
 function applyPeriod() {
@@ -243,12 +264,7 @@ function applyPeriod() {
     $("#periodError").hidden = false;
     return;
   }
-  void runPageTask({
-    page: "analytics",
-    phase: "period-change",
-    task: refresh,
-    onError(error) { setStatus(error.message || "Could not load analytics", "error"); }
-  });
+  void requestRefresh();
 }
 
 function bindEvents() {
@@ -277,17 +293,12 @@ function bindEvents() {
   });
   unsubscribeEntries = onEntriesChanged(() => {
     anomaliesExpanded = false;
-    void runPageTask({
-      page: "analytics",
-      phase: "entries-changed",
-      task: refresh,
-      onError(error) { setStatus(error.message || "Could not refresh analytics", "error"); }
-    });
+    void requestRefresh();
   });
   globalThis.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void refresh();
+    if (!document.hidden) void requestRefresh();
   });
-  refreshTimer = setInterval(() => { if (!document.hidden) void refresh(); }, 60_000);
+  refreshTimer = setInterval(() => { if (!document.hidden) void requestRefresh(); }, 60_000);
   globalThis.addEventListener("pagehide", () => {
     clearInterval(refreshTimer);
     unsubscribeEntries?.();
@@ -301,7 +312,7 @@ async function init() {
   $("#customStart").value = analyticsDateInputValue(addDays(today, -6));
   bindEvents();
   selectedPeriod = resolveSelectedPeriod();
-  await refresh();
+  await requestRefresh({ initial: true });
 }
 
 startPage({ page: "analytics", title: "Analytics", init });

@@ -224,5 +224,9 @@ export function errorInfo(error) {
 
 export function userErrorMessage(error) {
   const info = errorInfo(error);
-  return `${info.title}. ${info.detail} ${info.recovery}`;
+  const progress = [ERROR_CODE.TEMPO_NETWORK, ERROR_CODE.TEMPO_API_ERROR, ERROR_CODE.TEMPO_PARTIAL].includes(error?.code)
+    && ["unknown", "rejected"].includes(error?.currentRequestOutcome)
+    ? ` ${Number(error.acknowledgedWorklogs) || 0} worklogs were acknowledged across ${Number(error.requestCount) || 0} request${Number(error.requestCount) === 1 ? "" : "s"}; the current request outcome is ${error.currentRequestOutcome}. Inspect Tempo before resending.`
+    : "";
+  return `${info.title}. ${info.detail} ${info.recovery}${progress}`;
 }

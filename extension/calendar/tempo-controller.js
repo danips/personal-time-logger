@@ -63,8 +63,18 @@ export function createTempoController({ getSnapshot, currentSelection, getSettin
       setStatus(`Sending ${prepared.totalWorklogs} worklog${prepared.totalWorklogs === 1 ? "" : "s"} to Tempo...`);
       let response;
       try { response = await platform.sendRuntimeMessage({ type: TEMPO_UPLOAD_MESSAGE, groups: prepared.groups }); }
-      catch { throw tempoError("TEMPO_NETWORK", "Tempo background request failed"); }
-      if (!response?.ok) throw Object.assign(tempoError(response?.error?.code || "TEMPO_NETWORK", "Tempo background request failed; inspect Tempo before resending."), response.error);
+      catch { throw Object.assign(tempoError("TEMPO_NETWORK", "Tempo background request failed; inspect Tempo before resending."), {
+        acknowledgedWorklogs: 0,
+        requestCount: 0,
+        currentRequestOutcome: "unknown"
+      }); }
+      if (!response?.ok) {
+        const details = response?.error || {};
+        throw Object.assign(
+          tempoError(details.code || "TEMPO_NETWORK", details.message || "Tempo background request failed; inspect Tempo before resending."),
+          details
+        );
+      }
       setStatus(`Sent ${response.result.sentWorklogs} worklog${response.result.sentWorklogs === 1 ? "" : "s"} to Tempo`);
       setSelectionActive(false);
     }

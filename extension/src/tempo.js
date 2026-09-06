@@ -194,17 +194,23 @@ export async function sendTempoWorklogs(groups, {
   wait = pause
 } = {}) {
   const bearerToken = String(token ?? "").trim();
-  if (!bearerToken) throw tempoError(ERROR_CODE.TEMPO_CONFIG_MISSING, "Enter a Tempo API token in Options");
-  if (typeof fetchImpl !== "function") throw tempoError(ERROR_CODE.TEMPO_NETWORK, "Network requests are unavailable");
-
   let sentWorklogs = 0;
   let requestCount = 0;
+  const progress = (error, currentRequestOutcome) => Object.assign(error, {
+    acknowledgedWorklogs: sentWorklogs,
+    requestCount,
+    currentRequestOutcome
+  });
+  if (!bearerToken) throw progress(tempoError(ERROR_CODE.TEMPO_CONFIG_MISSING, "Enter a Tempo API token in Options"), "not-started");
+  if (typeof fetchImpl !== "function") throw progress(tempoError(ERROR_CODE.TEMPO_NETWORK, "Network requests are unavailable"), "unknown");
+
   for (const group of groups) {
     const issueId = normalizeTempoIssueId(group?.issueId);
     if (!issueId) throw tempoError(ERROR_CODE.TEMPO_API_ERROR, "A cached Tempo issue ID is invalid");
     for (const worklogs of chunks(group.worklogs || [], TEMPO_BULK_LIMIT)) {
       if (!worklogs.length) continue;
       if (requestCount && requestIntervalMs > 0) await wait(requestIntervalMs);
+      requestCount += 1;
       let response;
       try {
         response = await fetchImpl(`${TEMPO_API_URL}/worklogs/issue/${issueId}/bulk`, {
@@ -216,26 +222,28 @@ export async function sendTempoWorklogs(groups, {
           body: JSON.stringify(worklogs)
         });
       } catch (error) {
-        if (error?.code === ERROR_CODE.TEMPO_NETWORK) throw error;
-        throw Object.assign(tempoError(ERROR_CODE.TEMPO_NETWORK, "Tempo request could not complete; inspect Tempo before resending."), {
-          acknowledgedWorklogs: sentWorklogs,
-          requestCount,
-          currentRequestOutcome: "unknown"
-        });
+        const networkError = error?.code === ERROR_CODE.TEMPO_NETWORK
+          ? error
+          : tempoError(ERROR_CODE.TEMPO_NETWORK, "Tempo request could not complete; inspect Tempo before resending.");
+        throw progress(networkError, "unknown");
       }
-      requestCount += 1;
       if (!response.ok) {
         const detail = await responseDetail(response);
         const partial = sentWorklogs
           ? ` ${sentWorklogs} worklog${sentWorklogs === 1 ? " was" : "s were"} already sent; do not retry the whole week.`
           : "";
-        throw tempoError(
+        throw progress(tempoError(
           sentWorklogs ? ERROR_CODE.TEMPO_PARTIAL : ERROR_CODE.TEMPO_API_ERROR,
           `Tempo rejected issue ${issueId} (HTTP ${response.status})${detail ? `: ${detail}` : "."}${partial}`
-        );
+        ), "rejected");
       }
       sentWorklogs += worklogs.length;
     }
   }
-  return { sentWorklogs, requestCount };
+  return {
+    sentWorklogs,
+    acknowledgedWorklogs: sentWorklogs,
+    requestCount,
+    currentRequestOutcome: requestCount ? "acknowledged" : "not-started"
+  };
 }

@@ -41,7 +41,11 @@ let auxiliaryPagesInitialized = false;
 let auxiliaryPagesInitialization = null;
 let settingsLayoutWasVisible = false;
 let syncSectionNavigation = () => {};
-const dirtyOptionFields = new Set();
+// A refresh may finish while a save is in flight, and a user may edit the same
+// field again before that save settles. Keep the local edit revision separate
+// from the last revision known to be persisted so a late save cannot clear the
+// protection for the newer draft.
+const optionDrafts = new Map();
 const CONFIG_SAVE_LOCK = "sync_lock";
 
 function backupError(code, message = "The backup operation could not complete.") {
@@ -52,13 +56,39 @@ function optionDraftKey(element) {
   return element?.closest?.("#tempoMappings")?.id || element?.id || element?.name || "";
 }
 
-function setRefreshedValue(element, value) {
-  if (!element || dirtyOptionFields.has(optionDraftKey(element))) return;
-  element.value = String(value ?? "");
+function optionDraftState(key) {
+  if (!optionDrafts.has(key)) optionDrafts.set(key, { revision: 0, acknowledgedRevision: 0 });
+  return optionDrafts.get(key);
 }
 
-function markOptionClean(...ids) {
-  ids.flat().forEach((id) => dirtyOptionFields.delete(id));
+function markOptionEdited(key) {
+  if (!key) return;
+  optionDraftState(key).revision += 1;
+}
+
+function captureOptionDrafts(keys) {
+  return new Map([...new Set(keys.flat())].filter(Boolean).map((key) => [key, optionDraftState(key).revision]));
+}
+
+function isCurrentOptionDraft(captured, key) {
+  return captured?.get(key) === optionDraftState(key).revision;
+}
+
+function acknowledgeOptionDrafts(captured) {
+  for (const [key, revision] of captured || []) {
+    const state = optionDraftState(key);
+    if (state.revision === revision) state.acknowledgedRevision = revision;
+  }
+}
+
+function isDirtyOptionDraft(key) {
+  const state = optionDraftState(key);
+  return state.revision !== state.acknowledgedRevision;
+}
+
+function setRefreshedValue(element, value) {
+  if (!element || isDirtyOptionDraft(optionDraftKey(element))) return;
+  element.value = String(value ?? "");
 }
 
 function configSaveOwner() {
@@ -168,7 +198,7 @@ function createTempoMappingRow(task = "", issueId = "") {
   removeButton.className = "compact-button";
   removeButton.textContent = "Remove";
   removeButton.addEventListener("click", () => {
-    dirtyOptionFields.add("tempoMappings");
+    markOptionEdited("tempoMappings");
     row.remove();
     updateTempoMappingsEmptyState();
   });
@@ -185,7 +215,7 @@ function updateTempoMappingsEmptyState() {
 }
 
 function renderTempoMappings(value) {
-  if (dirtyOptionFields.has("tempoMappings")) return;
+  if (isDirtyOptionDraft("tempoMappings")) return;
   const mappings = normalizeTempoTaskIssueIds(value);
   const rows = Object.entries(mappings)
     .sort(([first], [second]) => first.localeCompare(second))
@@ -211,6 +241,7 @@ async function saveTempoSettings() {
   const token = $("#tempoApiToken").value.trim();
   const authorAccountId = $("#tempoAuthorAccountId").value.trim();
   const taskIssueIds = readTempoMappings();
+  const captured = captureOptionDrafts(["tempoApiToken", "tempoAuthorAccountId", "tempoMappings"]);
   await mutateSettings([
     SETTING_KEY.TEMPO_API_TOKEN,
     SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID,
@@ -220,7 +251,7 @@ async function saveTempoSettings() {
     settings.set(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, authorAccountId);
     settings.set(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, taskIssueIds);
   });
-  markOptionClean("tempoApiToken", "tempoAuthorAccountId", "tempoMappings");
+  acknowledgeOptionDrafts(captured);
   setStatus("Tempo settings saved on this device");
 }
 
@@ -352,6 +383,7 @@ async function saveSettings() {
   }
   workdayStartInput.setCustomValidity("");
 
+  const captured = captureOptionDrafts(["syncInterval", "durationMultiplier", "workdayStartHour"]);
   const saved = await mutateSettings([
     SETTING_KEY.SYNC_INTERVAL_SECONDS,
     SETTING_KEY.DURATION_MULTIPLIER,
@@ -382,10 +414,10 @@ async function saveSettings() {
     }
     return { ...plan, workdayStartChanged };
   });
-  $("#syncInterval").value = String(next.interval);
-  multiplierInput.value = String(next.multiplier);
-  workdayStartInput.value = String(workdayStart.start);
-  markOptionClean("syncInterval", "durationMultiplier", "workdayStartHour");
+  if (isCurrentOptionDraft(captured, "syncInterval")) $("#syncInterval").value = String(next.interval);
+  if (isCurrentOptionDraft(captured, "durationMultiplier")) multiplierInput.value = String(next.multiplier);
+  if (isCurrentOptionDraft(captured, "workdayStartHour")) workdayStartInput.value = String(workdayStart.start);
+  acknowledgeOptionDrafts(captured);
 
   if (!saved.intervalChanged && !saved.multiplierSyncNeeded && !saved.workdayStartChanged) {
     setStatus("Settings unchanged");
@@ -418,8 +450,10 @@ async function saveSettings() {
 async function saveGoogleCredentials() {
   const clientId = $("#googleClientId").value.trim();
   const clientSecret = $("#googleClientSecret").value.trim();
+  const captured = captureOptionDrafts(["googleClientId", "googleClientSecret"]);
 
   const saved = await setOAuthClientCredentials(clientId, clientSecret);
+  acknowledgeOptionDrafts(captured);
   setStatus(saved.changed
     ? "Google credentials saved; this device must sign in again"
     : "Google credentials saved to Firefox Sync");
@@ -533,9 +567,10 @@ async function saveMysqlSettingsValues(rawBaseUrl, rawToken, { allowActiveChange
 }
 
 async function saveMysqlSettings() {
+  const captured = captureOptionDrafts(["mysqlApiBaseUrl", "mysqlApiToken"]);
   const { baseUrl } = await saveMysqlSettingsValues($("#mysqlApiBaseUrl").value, $("#mysqlApiToken").value);
-  $("#mysqlApiBaseUrl").value = baseUrl;
-  markOptionClean("mysqlApiBaseUrl", "mysqlApiToken");
+  if (isCurrentOptionDraft(captured, "mysqlApiBaseUrl")) $("#mysqlApiBaseUrl").value = baseUrl;
+  acknowledgeOptionDrafts(captured);
   setStatus("MySQL API settings saved on this device");
   return false;
 }
@@ -588,9 +623,10 @@ async function saveCloudflareD1SettingsValues(rawBaseUrl, rawToken, { allowActiv
 }
 
 async function saveCloudflareD1Settings() {
+  const captured = captureOptionDrafts(["cloudflareD1ApiBaseUrl", "cloudflareD1ApiToken"]);
   const { baseUrl } = await saveCloudflareD1SettingsValues($("#cloudflareD1ApiBaseUrl").value, $("#cloudflareD1ApiToken").value);
-  $("#cloudflareD1ApiBaseUrl").value = baseUrl;
-  markOptionClean("cloudflareD1ApiBaseUrl", "cloudflareD1ApiToken");
+  if (isCurrentOptionDraft(captured, "cloudflareD1ApiBaseUrl")) $("#cloudflareD1ApiBaseUrl").value = baseUrl;
+  acknowledgeOptionDrafts(captured);
   setStatus("Cloudflare D1 settings saved on this device");
   return false;
 }
@@ -739,7 +775,9 @@ function selectFirstRunProvider(providerId) {
 }
 
 async function setupGoogleClicked() {
+  const captured = captureOptionDrafts(["setupGoogleClientId", "setupGoogleClientSecret"]);
   await setOAuthClientCredentials($("#setupGoogleClientId").value, $("#setupGoogleClientSecret").value);
+  acknowledgeOptionDrafts(captured);
   setStatus("Opening Google sign-in...");
   await signIn({
     onDeviceCode(details) {
@@ -756,9 +794,13 @@ async function setupGoogleClicked() {
 }
 
 async function setupMysqlClicked(source) {
-  const { baseUrl } = await saveMysqlSettingsValues($("#setupMysqlApiBaseUrl").value, $("#setupMysqlApiToken").value, { allowActiveChange: true });
-  $("#mysqlApiBaseUrl").value = baseUrl;
-  $("#mysqlApiToken").value = $("#setupMysqlApiToken").value.trim();
+  const captured = captureOptionDrafts(["setupMysqlApiBaseUrl", "setupMysqlApiToken"]);
+  const { baseUrl, token } = await saveMysqlSettingsValues($("#setupMysqlApiBaseUrl").value, $("#setupMysqlApiToken").value, { allowActiveChange: true });
+  acknowledgeOptionDrafts(captured);
+  if (isCurrentOptionDraft(captured, "setupMysqlApiBaseUrl")) $("#setupMysqlApiBaseUrl").value = baseUrl;
+  if (isCurrentOptionDraft(captured, "setupMysqlApiToken")) $("#setupMysqlApiToken").value = token;
+  setRefreshedValue($("#mysqlApiBaseUrl"), baseUrl);
+  setRefreshedValue($("#mysqlApiToken"), token);
   $("#migrationStatus").textContent = source === "remote"
     ? "Adopting existing MySQL data..."
     : "Starting MySQL from local data...";
@@ -773,9 +815,13 @@ async function setupMysqlClicked(source) {
 }
 
 async function setupCloudflareD1Clicked(source) {
-  await saveCloudflareD1SettingsValues($("#setupCloudflareD1ApiBaseUrl").value, $("#setupCloudflareD1ApiToken").value, { allowActiveChange: true });
-  $("#cloudflareD1ApiBaseUrl").value = $("#setupCloudflareD1ApiBaseUrl").value.trim();
-  $("#cloudflareD1ApiToken").value = $("#setupCloudflareD1ApiToken").value.trim();
+  const captured = captureOptionDrafts(["setupCloudflareD1ApiBaseUrl", "setupCloudflareD1ApiToken"]);
+  const { baseUrl, token } = await saveCloudflareD1SettingsValues($("#setupCloudflareD1ApiBaseUrl").value, $("#setupCloudflareD1ApiToken").value, { allowActiveChange: true });
+  acknowledgeOptionDrafts(captured);
+  if (isCurrentOptionDraft(captured, "setupCloudflareD1ApiBaseUrl")) $("#setupCloudflareD1ApiBaseUrl").value = baseUrl;
+  if (isCurrentOptionDraft(captured, "setupCloudflareD1ApiToken")) $("#setupCloudflareD1ApiToken").value = token;
+  setRefreshedValue($("#cloudflareD1ApiBaseUrl"), baseUrl);
+  setRefreshedValue($("#cloudflareD1ApiToken"), token);
   await activateCloudflareD1Clicked(source);
   setStatus("Cloudflare Worker + D1 is ready");
   return true;
@@ -983,11 +1029,11 @@ function bindEvents() {
     highContrast: $("#highContrast").checked
   });
   for (const field of document.querySelectorAll("input, select, textarea")) {
-    field.addEventListener("input", () => dirtyOptionFields.add(optionDraftKey(field)));
-    field.addEventListener("change", () => dirtyOptionFields.add(optionDraftKey(field)));
+    field.addEventListener("input", () => markOptionEdited(optionDraftKey(field)));
+    field.addEventListener("change", () => markOptionEdited(optionDraftKey(field)));
   }
-  $("#tempoMappings").addEventListener("input", () => dirtyOptionFields.add("tempoMappings"));
-  $("#tempoMappings").addEventListener("change", () => dirtyOptionFields.add("tempoMappings"));
+  $("#tempoMappings").addEventListener("input", () => markOptionEdited("tempoMappings"));
+  $("#tempoMappings").addEventListener("change", () => markOptionEdited("tempoMappings"));
   $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
   $("#copySpreadsheetId").addEventListener("click", copySpreadsheetIdClicked);
   $("#reconnectSpreadsheet").addEventListener("click", (event) => runOptionsAction("reconnect-spreadsheet", reconnectSpreadsheetClicked, event.currentTarget));
@@ -1004,7 +1050,7 @@ function bindEvents() {
       .finally(() => { input.value = ""; });
   });
   $("#addTempoMapping").addEventListener("click", () => {
-    dirtyOptionFields.add("tempoMappings");
+    markOptionEdited("tempoMappings");
     const row = createTempoMappingRow();
     $("#tempoMappings").append(row);
     updateTempoMappingsEmptyState();
