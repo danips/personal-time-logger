@@ -379,21 +379,22 @@ function renderCalendar(segmentsByDay) {
     }
     column.className = `day-column${isSameLocalDate(addDays(weekStart, index), today) ? " today" : ""}`;
 
+    const clockChangeEntries = (segmentsByDay.clockChangeEntries || [])
+      .filter((item) => item.dayIndex === index);
     let clockChangeArea = column.querySelector(".clock-change-area");
-    if (!clockChangeArea) {
-      clockChangeArea = document.createElement("section");
-      clockChangeArea.className = "clock-change-area";
+    if (!clockChangeEntries.length) {
+      clockChangeArea?.remove();
+      clockChangeArea = null;
+    } else {
+      if (!clockChangeArea) {
+        clockChangeArea = document.createElement("section");
+        clockChangeArea.className = "clock-change-area";
+      }
       const heading = document.createElement("strong");
       heading.textContent = "Clock-change entries";
-      clockChangeArea.append(heading);
-      column.append(clockChangeArea);
+      clockChangeArea.replaceChildren(heading);
     }
-    clockChangeArea.replaceChildren(clockChangeArea.firstElementChild || (() => {
-      const heading = document.createElement("strong");
-      heading.textContent = "Clock-change entries";
-      return heading;
-    })());
-    for (const special of (segmentsByDay.clockChangeEntries || []).filter((item) => item.dayIndex === index)) {
+    for (const special of clockChangeEntries) {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "clock-change-entry";
@@ -403,7 +404,7 @@ function renderCalendar(segmentsByDay) {
       item.addEventListener("click", selectEntryFromBlock);
       clockChangeArea.append(item);
     }
-    clockChangeArea.hidden = !clockChangeArea.children.length || clockChangeArea.children.length === 1;
+    if (clockChangeArea) column.append(clockChangeArea);
 
     const segments = layoutSegments(segmentsByDay[index]);
     const existingBlocks = new Map([...column.querySelectorAll(".entry-block")]
@@ -415,7 +416,7 @@ function renderCalendar(segmentsByDay) {
       usedBlocks.add(block);
       nextBlocks.push(block);
     }
-    const desired = [clockChangeArea, ...nextBlocks];
+    const desired = [clockChangeArea, ...nextBlocks].filter(Boolean);
     for (let position = 0; position < desired.length; position += 1) {
       const node = desired[position];
       if (column.children[position] !== node) {
