@@ -9,6 +9,8 @@ import {
   setSetting
 } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
+import { canonicalEntryValues, entryFingerprint } from "./fingerprints.js";
 import { getActiveRemoteProvider, getRemoteProvider, registeredRemoteProviderIds } from "./remote-provider.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { syncNow } from "./sync.js";
@@ -27,12 +29,6 @@ const MIGRATION_PHASES = new Set([
   "complete",
   "failed"
 ]);
-
-function codedError(code, message, cause) {
-  const error = new Error(message, cause ? { cause } : undefined);
-  error.code = code;
-  return error;
-}
 
 function migrationError(code, message) {
   return codedError(code, message);
@@ -57,25 +53,6 @@ function isActiveState(state) {
     && !["complete", "failed"].includes(state.phase));
 }
 
-function canonicalEntry(entry) {
-  return [
-    entry.id,
-    entry.project,
-    entry.task,
-    entry.description,
-    entry.start_at,
-    entry.end_at,
-    entry.duration_seconds,
-    entry.status,
-    entry.created_at,
-    entry.updated_at,
-    entry.deleted_at,
-    entry.device_id,
-    entry.revision,
-    entry.multiply
-  ];
-}
-
 function canonicalConfig(config = {}) {
   return Object.entries(config)
     .filter(([key]) => key !== APP_MARKER_KEY)
@@ -87,7 +64,7 @@ export function canonicalMigrationDataset(snapshot) {
   return {
     entries: [...(snapshot.entries || [])]
       .sort((left, right) => left.id.localeCompare(right.id))
-      .map(canonicalEntry),
+      .map(canonicalEntryValues),
     config: canonicalConfig(snapshot.config)
   };
 }
@@ -126,7 +103,7 @@ function mapEntries(snapshot) {
 }
 
 function sameEntry(left, right) {
-  return JSON.stringify(canonicalEntry(left)) === JSON.stringify(canonicalEntry(right));
+  return entryFingerprint(left) === entryFingerprint(right);
 }
 
 function mapConfig(snapshot) {
@@ -138,7 +115,7 @@ function compareTarget(source, target, state = {}) {
   const sourceEntries = mapEntries(source);
   const targetEntries = mapEntries(target);
   for (const [id, entry] of targetEntries) {
-    const targetFingerprint = JSON.stringify(canonicalEntry(entry));
+    const targetFingerprint = entryFingerprint(entry);
     if (!sourceEntries.has(id) || (!sameEntry(sourceEntries.get(id), entry)
       && ownedEntries[id]?.target_fingerprint !== targetFingerprint
       && ownedEntries[id]?.fingerprint !== targetFingerprint)) {
@@ -241,7 +218,7 @@ async function seedTarget(source, target, targetSnapshot, state, { lease, option
   const missingEntries = source.entries.filter((entry) => !comparison.targetEntries.has(entry.id));
   const ownedChangedEntries = source.entries.filter((entry) => comparison.targetEntries.has(entry.id)
     && !sameEntry(entry, comparison.targetEntries.get(entry.id))
-    && ownedEntries[entry.id]?.fingerprint === JSON.stringify(canonicalEntry(comparison.targetEntries.get(entry.id))));
+    && ownedEntries[entry.id]?.fingerprint === entryFingerprint(comparison.targetEntries.get(entry.id)));
   const missingConfig = [...comparison.sourceConfig]
     .filter(([key]) => !comparison.targetConfig.has(key));
   const ownedChangedConfig = [...comparison.sourceConfig]
@@ -267,7 +244,7 @@ async function seedTarget(source, target, targetSnapshot, state, { lease, option
     await lease.assert();
     const chunk = missingEntries.slice(offset, offset + MIGRATION_BATCH_SIZE);
     const acknowledgements = await target.appendEntries(chunk, options);
-    chunk.forEach((entry, index) => { state.owned_entries = state.owned_entries || {}; state.owned_entries[entry.id] = { fingerprint: JSON.stringify(canonicalEntry(entry)), ref: acknowledgements[index]?.ref || null }; });
+    chunk.forEach((entry, index) => { state.owned_entries = state.owned_entries || {}; state.owned_entries[entry.id] = { fingerprint: entryFingerprint(entry), ref: acknowledgements[index]?.ref || null }; });
     await saveState(progressState(state, {
       phase: "seeding",
       completed_entries: source.entries.length - missingEntries.length - ownedChangedEntries.length + Math.min(offset + MIGRATION_BATCH_SIZE, missingEntries.length)
@@ -278,13 +255,13 @@ async function seedTarget(source, target, targetSnapshot, state, { lease, option
     await lease.assert();
     const targetEntry = comparison.targetEntries.get(entry.id);
     state.owned_entries[entry.id] = {
-      fingerprint: JSON.stringify(canonicalEntry(entry)),
-      target_fingerprint: JSON.stringify(canonicalEntry(targetEntry)),
+      fingerprint: entryFingerprint(entry),
+      target_fingerprint: entryFingerprint(targetEntry),
       ref: targetSnapshot.entryRefs?.get(entry.id) || null
     };
     await saveState(progressState(state, { phase: "seeding" }));
     await target.updateEntries([{ entry, expectedRef: targetSnapshot.entryRefs?.get(entry.id) }], options);
-    state.owned_entries[entry.id] = { fingerprint: JSON.stringify(canonicalEntry(entry)), ref: targetSnapshot.entryRefs?.get(entry.id) || null };
+    state.owned_entries[entry.id] = { fingerprint: entryFingerprint(entry), ref: targetSnapshot.entryRefs?.get(entry.id) || null };
     await saveState(progressState(state, { phase: "seeding" }));
   }
 

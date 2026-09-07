@@ -19,6 +19,15 @@ import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 const contract = JSON.parse(readFileSync(new URL("./fixtures/entry-contract.json", import.meta.url), "utf8"));
 
+function contractEntry(testCase) {
+  const entry = { ...contract.base, ...(testCase.overrides || {}) };
+  for (const [key, value] of Object.entries(entry)) {
+    if (value && typeof value === "object" && "repeat" in value) entry[key] = String(value.repeat).repeat(Number(value.count));
+  }
+  for (const key of testCase.omit || []) delete entry[key];
+  return { ...entry, ...(testCase.add || {}) };
+}
+
 const fixture = (over = {}) => persistedEntryFixture({ description: "Notes", ...over });
 
 describe("sheet schema", () => {
@@ -138,11 +147,12 @@ describe("row serialization", () => {
 
   it("enforces the shared remote entry contract", () => {
     assert.equal(decodePersistedEntry(contract.base).start_at, "2026-08-24T09:00:00.000Z");
-    for (const overrides of contract.invalidOverrides) {
-      assert.throws(() => decodePersistedEntry({ ...contract.base, ...overrides }), { code: "ENTRY_INVALID" });
+    for (const testCase of contract.validCases) {
+      assert.equal(decodePersistedEntry(contractEntry(testCase)).id, contract.base.id, testCase.name);
     }
-    assert.throws(() => decodePersistedEntry({ ...contract.base, project: "é".repeat(32768) }), { code: "ENTRY_INVALID" });
-    assert.throws(() => decodePersistedEntry({ ...contract.base, start_at: "2026-02-31T12:00:00Z" }), { code: "ENTRY_INVALID" });
+    for (const testCase of contract.invalidCases.filter(({ targets }) => !targets || targets.includes("extension"))) {
+      assert.throws(() => decodePersistedEntry(contractEntry(testCase)), { code: "ENTRY_INVALID" }, testCase.name);
+    }
   });
 });
 

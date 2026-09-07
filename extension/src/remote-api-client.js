@@ -1,6 +1,7 @@
 import { decodePersistedEntry } from "./entries.js";
 import { readBoundedJson } from "./bounded-json.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
 import { platform } from "./platform.js";
 import { ENTRY_FIELDS } from "./entry-contract.js";
 
@@ -9,15 +10,7 @@ export const SCHEMA_VERSION = 1;
 export const API_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 export const PERSISTED_ENTRY_FIELDS = ENTRY_FIELDS;
-const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 const requestEncoder = new TextEncoder();
-
-function codedError(code, message, cause) {
-  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
-  const error = new Error(message, cause ? { cause } : undefined);
-  error.code = code;
-  return error;
-}
 
 function labelText(providerLabel) {
   return providerLabel || "remote API";
@@ -145,7 +138,7 @@ export function createRemoteApiClient({
     } catch (error) {
       if (error?.code) throw error;
       if (controller.signal.aborted) throw codedError(ERROR_CODE.API_TIMEOUT, `The ${labelText(providerLabel)} request timed out.`);
-      throw codedError(ERROR_CODE.API_NETWORK, `The ${labelText(providerLabel)} network request failed.`, error);
+      throw codedError(ERROR_CODE.API_NETWORK, `The ${labelText(providerLabel)} network request failed.`, { cause: error });
     } finally {
       clearTimeout(timeout);
     }

@@ -1,5 +1,6 @@
 import { getSetting } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
 import { googleSheetsProvider } from "./remote-google-sheets.js";
 import { mysqlProvider } from "./remote-mysql.js";
 import { cloudflareD1Provider } from "./remote-cloudflare-d1.js";
@@ -16,15 +17,6 @@ const PROVIDERS = new Map([
   [REMOTE_PROVIDER_ID.MYSQL, mysqlProvider],
   [REMOTE_PROVIDER_ID.CLOUDFLARE_D1, cloudflareD1Provider]
 ]);
-const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
-
-function codedError(code, message) {
-  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
 /** Missing and legacy installations continue to use Google Sheets. */
 export function decodeRemoteProviderId(value) {
   const id = String(value || "").trim();

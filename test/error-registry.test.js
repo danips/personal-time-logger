@@ -2,9 +2,19 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { errorInfo, userErrorMessage } from "../extension/src/error-registry.js";
+import { ERROR_CODE } from "../extension/src/error-codes.js";
+import { ERROR_REGISTRY } from "../extension/src/error-registry.js";
 import { formatError, statusFromError } from "../extension/src/ui-helpers.js";
 
 describe("error recovery registry", () => {
+  it("gives every stable error code explicit actionable recovery", () => {
+    assert.deepEqual(Object.keys(ERROR_REGISTRY).sort(), Object.values(ERROR_CODE).sort());
+    for (const entry of Object.values(ERROR_REGISTRY)) {
+      assert.ok(entry.title);
+      assert.ok(entry.detail);
+      assert.ok(entry.recovery);
+    }
+  });
   it("maps sync failure modes to stable, actionable guidance", () => {
     for (const code of ["REMOTE_ROW_STALE", "API_TIMEOUT", "REMOTE_APPEND_CONFLICT", "SYNC_BUSY", "RECONCILIATION_PARTIAL"]) {
       const info = errorInfo({ code, message: "private server detail" });

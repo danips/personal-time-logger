@@ -5,6 +5,9 @@ import { ENTRY_FIELDS } from "../extension/src/entry-contract.js";
 import { SHEET_HEADERS } from "../extension/src/entries.js";
 import { CANONICAL_ENTRY_FIELDS } from "../extension/src/fingerprints.js";
 import { PERSISTED_ENTRY_FIELDS } from "../extension/src/remote-api-client.js";
+import { readFileSync } from "node:fs";
+
+const contract = JSON.parse(readFileSync(new URL("./fixtures/entry-contract.json", import.meta.url), "utf8"));
 
 describe("persisted entry contract", () => {
   it("owns one frozen ordered field list for every persisted projection", () => {
@@ -12,10 +15,7 @@ describe("persisted entry contract", () => {
     assert.deepEqual(SHEET_HEADERS, ENTRY_FIELDS);
     assert.deepEqual(CANONICAL_ENTRY_FIELDS, ENTRY_FIELDS);
     assert.deepEqual(PERSISTED_ENTRY_FIELDS, ENTRY_FIELDS);
-    assert.deepEqual(ENTRY_FIELDS, [
-      "id", "project", "task", "description", "start_at", "end_at", "duration_seconds",
-      "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"
-    ]);
+    assert.deepEqual(ENTRY_FIELDS, contract.fields);
   });
 
   it("keeps local-only bookkeeping outside the contract", () => {

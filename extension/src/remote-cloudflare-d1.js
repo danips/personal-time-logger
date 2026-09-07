@@ -1,16 +1,14 @@
 import { getAllSettings } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
 import {
   createRemoteApiClient,
-  chunkByEncodedBytes,
-  parseAppendAcknowledgements,
   normalizeRemoteApiBaseUrl,
   parseRemoteSnapshot,
-  parseRemoteVersion,
-  persistedEntry,
   requireRemoteHealth,
   remoteHostPermission
 } from "./remote-api-client.js";
+import { createVersionedMutationOperations } from "./remote-versioned-mutations.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 export const DEFAULT_CLOUDFLARE_D1_API_BASE_URL = "";
@@ -19,12 +17,6 @@ const ENTRY_REF_KIND = "cloudflare-d1-row";
 const CONFIG_REF_KIND = "cloudflare-d1-config-row";
 const CHUNK_SIZE = 15;
 const MAX_REQUEST_BYTES = 480 * 1024;
-
-function codedError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
 
 export function normalizeCloudflareD1ApiBaseUrl(value, { allowHttp = false } = {}) {
   const normalized = normalizeRemoteApiBaseUrl(value, {
@@ -72,14 +64,11 @@ function health(data) {
   });
 }
 
-function sizedChunks(values, envelopeKey, encode) {
-  return chunkByEncodedBytes(values, {
-    maxBytes: MAX_REQUEST_BYTES,
-    maxItems: CHUNK_SIZE,
-    envelopeKey,
-    encode
-  });
-}
+const versionedMutations = createVersionedMutationOperations({
+  configuredClient,
+  chunkOptions: { maxBytes: MAX_REQUEST_BYTES, maxItems: CHUNK_SIZE },
+  entryRefKind: ENTRY_REF_KIND
+});
 
 export const cloudflareD1Provider = Object.freeze({
   id: "cloudflare-d1",
@@ -107,49 +96,7 @@ export const cloudflareD1Provider = Object.freeze({
     });
   },
 
-  async appendEntries(entries, options = {}) {
-    const result = [];
-    const client = await configuredClient(options);
-    for (const chunk of sizedChunks(entries, "entries", persistedEntry)) {
-      const data = client.appendEncoded
-        ? await client.appendEncoded(chunk.encodedBody)
-        : await client.append(chunk.map(persistedEntry));
-      result.push(...parseAppendAcknowledgements(data.entries, chunk.map((entry) => entry.id), ENTRY_REF_KIND));
-    }
-    const byId = new Map(result.map((record) => [record.id, record]));
-    return entries.map((entry) => byId.get(entry.id));
-  },
-
-  async updateEntries(updates, options = {}) {
-    const client = await configuredClient(options);
-    for (const chunk of sizedChunks(updates, "updates", ({ entry, expectedRef }) => ({
-      entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
-    }))) {
-      if (client.updateEncoded) await client.updateEncoded(chunk.encodedBody);
-      else await client.update(chunk.map(({ entry, expectedRef }) => ({
-        entry: persistedEntry(entry), expectedVersion: parseRemoteVersion(expectedRef?.version)
-      })));
-    }
-  },
-
-  async deleteEntries(preconditions, options = {}) {
-    const client = await configuredClient(options);
-    for (const chunk of sizedChunks(preconditions, "preconditions", ({ id, expectedRef }) => ({
-      id, expectedVersion: parseRemoteVersion(expectedRef?.version)
-    }))) {
-      if (client.deleteEncoded) await client.deleteEncoded(chunk.encodedBody);
-      else await client.delete(chunk.map(({ id, expectedRef }) => ({
-        id, expectedVersion: parseRemoteVersion(expectedRef?.version)
-      })));
-    }
-  },
-
-  async updateConfig(key, value, updatedAt, { expectedRef, ...options } = {}) {
-    await (await configuredClient(options)).updateConfig({
-      key, value, updated_at: updatedAt,
-      ...(expectedRef ? { expectedVersion: parseRemoteVersion(expectedRef.version) } : {})
-    });
-  },
+  ...versionedMutations,
 
   async ensureAppMarker() {
     return false;

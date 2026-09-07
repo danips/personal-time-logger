@@ -6,6 +6,7 @@ import { nowIso } from "./time.js";
 import { platform } from "./platform.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
 import { SETTING_KEY } from "./setting-keys.js";
 import { rawRowFingerprint } from "./fingerprints.js";
 
@@ -29,15 +30,6 @@ const MAX_CANDIDATES = 25;
 const API_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 const DRIVE_GATE_RETRY_MS = 60_000;
-const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
-
-function codedError(code, message) {
-  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
 function encodeRange(range) {
   return encodeURIComponent(range);
 }

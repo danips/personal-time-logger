@@ -8,7 +8,7 @@ import {
   replaceAuthToken
 } from "./auth-session-store.js";
 import { recordDiagnostic } from "./diagnostics.js";
-import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -21,15 +21,6 @@ const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
 let refreshInFlight = null;
 let refreshInFlightForced = false;
-const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
-
-function codedError(code, message) {
-  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
 async function recordAuthDiagnostic(phase, error) {
   try {
     await recordDiagnostic({

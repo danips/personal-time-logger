@@ -10,6 +10,10 @@ const DEFAULT = {
 };
 
 export const ERROR_REGISTRY = {
+  [ERROR_CODE.DB_BLOCKED]: {
+    retryable: true, status: "database busy", title: "Local database is busy",
+    detail: "Another extension page or a browser update is holding the local database open.", recovery: "Close other Personal Time Logger pages, reload the extension, then retry."
+  },
   [ERROR_CODE.CONFIG_MISSING]: {
     retryable: false, status: "not signed in", title: "Google setup is incomplete",
     detail: "A Google OAuth client ID and secret are required.", recovery: "Open Options and save both credentials."
@@ -213,6 +217,10 @@ export const ERROR_REGISTRY = {
   [ERROR_CODE.ENTRY_INVALID]: {
     retryable: true, status: "error", title: "Entry data is invalid",
     detail: "The change does not match the time-entry format.", recovery: "Correct the entry fields and try again."
+  },
+  [ERROR_CODE.ICON_UPDATE_FAILED]: {
+    retryable: true, status: "warning", title: "Toolbar icon could not update",
+    detail: "The timer state was saved, but Firefox did not update the toolbar icon.", recovery: "Reload the extension or restart Firefox if the icon remains stale."
   }
 };
 

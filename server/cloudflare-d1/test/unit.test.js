@@ -10,6 +10,15 @@ import { entry, normalizeTimestamp } from "../src/validator.js";
 
 const contract = JSON.parse(readFileSync(new globalThis.URL("../../../test/fixtures/entry-contract.json", import.meta.url), "utf8"));
 
+function contractEntry(testCase) {
+  const value = { ...contract.base, ...(testCase.overrides || {}) };
+  for (const [key, field] of Object.entries(value)) {
+    if (field && typeof field === "object" && "repeat" in field) value[key] = String(field.repeat).repeat(Number(field.count));
+  }
+  for (const key of testCase.omit || []) delete value[key];
+  return { ...value, ...(testCase.add || {}) };
+}
+
 const token = "synthetic-worker-token";
 async function digestHex(value) {
   const bytes = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", new globalThis.TextEncoder().encode(value)));
@@ -57,9 +66,12 @@ describe("Cloudflare D1 Worker pure boundaries", () => {
   });
 
   it("enforces the shared remote entry contract", () => {
-    assert.equal(entry(contract.base).start_at, "2026-08-24T09:00:00.000Z");
-    for (const overrides of contract.invalidOverrides) {
-      assert.throws(() => entry({ ...contract.base, ...overrides }), ApiError);
+    assert.deepEqual(Object.keys(contract.base), contract.fields);
+    for (const testCase of contract.validCases) {
+      assert.equal(entry(contractEntry(testCase)).start_at, "2026-08-24T09:00:00.000Z", testCase.name);
+    }
+    for (const testCase of contract.invalidCases.filter(({ targets }) => !targets || targets.includes("server"))) {
+      assert.throws(() => entry(contractEntry(testCase)), ApiError, testCase.name);
     }
   });
 

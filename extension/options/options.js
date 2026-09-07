@@ -34,6 +34,7 @@ import {
 } from "../src/options-settings.js";
 import { storageUiState } from "../src/options-storage-ui.js";
 import { parseBackup, readPortableBackupSnapshot, restoreBackup, serializeBackup, MAX_BACKUP_BYTES } from "../src/backup.js";
+import { createProviderSetupController } from "./provider-setup-controller.js";
 
 let diagnostics = [];
 let eventsBound = false;
@@ -46,7 +47,42 @@ let syncSectionNavigation = () => {};
 // from the last revision known to be persisted so a late save cannot clear the
 // protection for the newer draft.
 const optionDrafts = new Map();
-const CONFIG_SAVE_LOCK = "sync_lock";
+function providerSetupError(code, message, cause) {
+  return Object.assign(new Error(message, cause ? { cause } : undefined), { code });
+}
+
+const providerSetup = createProviderSetupController({
+  claimLock,
+  releaseLock,
+  getSetting,
+  mutateSettings,
+  platform,
+  keys: {
+    CONFIG_SAVE_FAILED: ERROR_CODE.CONFIG_SAVE_FAILED,
+    REMOTE_PERMISSION: ERROR_CODE.REMOTE_PERMISSION,
+    REMOTE_BACKEND: SETTING_KEY.REMOTE_BACKEND,
+    REMOTE_BACKEND_ESTABLISHED: SETTING_KEY.REMOTE_BACKEND_ESTABLISHED,
+    GOOGLE_SHEETS: REMOTE_PROVIDER_ID.GOOGLE_SHEETS
+  },
+  owner: configSaveOwner,
+  activateFromLocal: activateProviderFromLocal,
+  activateFromRemote: activateProviderFromRemote
+});
+
+const mysqlSetup = Object.freeze({
+  id: REMOTE_PROVIDER_ID.MYSQL, label: "MySQL", permissionLabel: "API", connectionLabel: "MySQL API",
+  urlKey: SETTING_KEY.MYSQL_API_BASE_URL, tokenKey: SETTING_KEY.MYSQL_API_TOKEN,
+  defaultUrl: DEFAULT_MYSQL_API_BASE_URL, missingCode: ERROR_CODE.MYSQL_CONFIG_MISSING,
+  normalizeBaseUrl: normalizeMysqlApiBaseUrl, hostPermission: mysqlHostPermission, provider: mysqlProvider, error: providerSetupError,
+  formatHealth: (health) => `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, MySQL ${health.mysql}.`
+});
+const cloudflareD1Setup = Object.freeze({
+  id: REMOTE_PROVIDER_ID.CLOUDFLARE_D1, label: "Cloudflare D1", permissionLabel: "Worker", connectionLabel: "Worker",
+  urlKey: SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, tokenKey: SETTING_KEY.CLOUDFLARE_D1_API_TOKEN,
+  defaultUrl: DEFAULT_CLOUDFLARE_D1_API_BASE_URL, missingCode: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING,
+  normalizeBaseUrl: normalizeCloudflareD1ApiBaseUrl, hostPermission: cloudflareD1HostPermission, provider: cloudflareD1Provider, error: providerSetupError,
+  formatHealth: (health) => `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, storage ${health.storage}.`
+});
 
 function backupError(code, message = "The backup operation could not complete.") {
   return Object.assign(new Error(message), { code });
@@ -544,26 +580,7 @@ function renderMigration(activeBackend, migrationState) {
 }
 
 async function saveMysqlSettingsValues(rawBaseUrl, rawToken, { allowActiveChange = false } = {}) {
-  const baseUrl = normalizeMysqlApiBaseUrl(rawBaseUrl);
-  const token = String(rawToken || "").trim();
-  if (!token) throw Object.assign(new Error("Enter the MySQL API token."), { code: "MYSQL_CONFIG_MISSING" });
-  const lock = await claimLock(CONFIG_SAVE_LOCK, configSaveOwner(), 30_000);
-  if (!lock) throw Object.assign(new Error("A sync or migration is active. Wait for it to finish before changing the MySQL destination."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
-  try {
-    const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
-    const established = await getSetting(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, false);
-    const currentUrl = await getSetting(SETTING_KEY.MYSQL_API_BASE_URL, DEFAULT_MYSQL_API_BASE_URL);
-    if (!allowActiveChange && established && active === REMOTE_PROVIDER_ID.MYSQL && currentUrl && currentUrl !== baseUrl) {
-      throw Object.assign(new Error("The active MySQL destination cannot change from ordinary Save. Test the new destination, then use migration or activation."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
-    }
-    await mutateSettings([SETTING_KEY.MYSQL_API_BASE_URL, SETTING_KEY.MYSQL_API_TOKEN], (settings) => {
-      settings.set(SETTING_KEY.MYSQL_API_BASE_URL, baseUrl);
-      settings.set(SETTING_KEY.MYSQL_API_TOKEN, token);
-    });
-  } finally {
-    await releaseLock(lock);
-  }
-  return { baseUrl, token };
+  return providerSetup.save(mysqlSetup, rawBaseUrl, rawToken, { allowActiveChange });
 }
 
 async function saveMysqlSettings() {
@@ -576,50 +593,16 @@ async function saveMysqlSettings() {
 }
 
 async function testMysqlConnection() {
-  const baseUrl = normalizeMysqlApiBaseUrl($("#mysqlApiBaseUrl").value);
-  const token = $("#mysqlApiToken").value.trim();
-  if (!token) throw Object.assign(new Error("Enter the MySQL API token."), { code: "MYSQL_CONFIG_MISSING" });
-  const permissionRequest = platform.requestOptionalHostPermission(mysqlHostPermission(baseUrl));
-  $("#mysqlConnectionStatus").textContent = "Requesting the exact API host permission...";
-  let permissionGranted;
-  try {
-    permissionGranted = await Promise.race([
-      permissionRequest,
-      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Firefox did not answer the host permission request."), { code: "REMOTE_PERMISSION" })), 10_000))
-    ]);
-  } catch (error) {
-    if (error?.code) throw error;
-    throw Object.assign(new Error("Firefox could not grant the MySQL API host permission."), { code: "REMOTE_PERMISSION", cause: error });
-  }
-  if (!permissionGranted) throw Object.assign(new Error("Firefox did not grant the MySQL API host permission."), { code: "REMOTE_PERMISSION" });
-  $("#mysqlConnectionStatus").textContent = "Calling the MySQL API health endpoint...";
-  const health = await mysqlProvider.testConnection({ baseUrl, token, requestPermission: false });
-  $("#mysqlConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, MySQL ${health.mysql}.`;
+  const health = await providerSetup.test(mysqlSetup, $("#mysqlApiBaseUrl").value, $("#mysqlApiToken").value, {
+    setConnectionStatus: (value) => { $("#mysqlConnectionStatus").textContent = value; }
+  });
+  $("#mysqlConnectionStatus").textContent = mysqlSetup.formatHealth(health);
   setStatus("MySQL API connection verified");
   return false;
 }
 
 async function saveCloudflareD1SettingsValues(rawBaseUrl, rawToken, { allowActiveChange = false } = {}) {
-  const baseUrl = normalizeCloudflareD1ApiBaseUrl(rawBaseUrl);
-  const token = String(rawToken || "").trim();
-  if (!token) throw Object.assign(new Error("Enter the Cloudflare D1 API token."), { code: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING });
-  const lock = await claimLock(CONFIG_SAVE_LOCK, configSaveOwner(), 30_000);
-  if (!lock) throw Object.assign(new Error("A sync or migration is active. Wait for it to finish before changing the Cloudflare destination."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
-  try {
-    const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
-    const established = await getSetting(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, false);
-    const currentUrl = await getSetting(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, DEFAULT_CLOUDFLARE_D1_API_BASE_URL);
-    if (!allowActiveChange && established && active === REMOTE_PROVIDER_ID.CLOUDFLARE_D1 && currentUrl && currentUrl !== baseUrl) {
-      throw Object.assign(new Error("The active Cloudflare D1 destination cannot change from ordinary Save. Test the new destination, then use migration or activation."), { code: ERROR_CODE.CONFIG_SAVE_FAILED });
-    }
-    await mutateSettings([SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, SETTING_KEY.CLOUDFLARE_D1_API_TOKEN], (settings) => {
-      settings.set(SETTING_KEY.CLOUDFLARE_D1_API_BASE_URL, baseUrl);
-      settings.set(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, token);
-    });
-  } finally {
-    await releaseLock(lock);
-  }
-  return { baseUrl, token };
+  return providerSetup.save(cloudflareD1Setup, rawBaseUrl, rawToken, { allowActiveChange });
 }
 
 async function saveCloudflareD1Settings() {
@@ -632,25 +615,10 @@ async function saveCloudflareD1Settings() {
 }
 
 async function testCloudflareD1Connection() {
-  const baseUrl = normalizeCloudflareD1ApiBaseUrl($("#cloudflareD1ApiBaseUrl").value);
-  const token = $("#cloudflareD1ApiToken").value.trim();
-  if (!token) throw Object.assign(new Error("Enter the Cloudflare D1 API token."), { code: ERROR_CODE.CLOUDFLARE_D1_CONFIG_MISSING });
-  const permissionRequest = platform.requestOptionalHostPermission(cloudflareD1HostPermission(baseUrl));
-  $("#cloudflareD1ConnectionStatus").textContent = "Requesting the exact Worker host permission...";
-  let permissionGranted;
-  try {
-    permissionGranted = await Promise.race([
-      permissionRequest,
-      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Firefox did not answer the host permission request."), { code: ERROR_CODE.REMOTE_PERMISSION })), 10_000))
-    ]);
-  } catch (error) {
-    if (error?.code) throw error;
-    throw Object.assign(new Error("Firefox could not grant the Worker host permission."), { code: ERROR_CODE.REMOTE_PERMISSION, cause: error });
-  }
-  if (!permissionGranted) throw Object.assign(new Error("Firefox did not grant the Worker host permission."), { code: ERROR_CODE.REMOTE_PERMISSION });
-  $("#cloudflareD1ConnectionStatus").textContent = "Calling the Worker health endpoint...";
-  const health = await cloudflareD1Provider.testConnection({ baseUrl, token, requestPermission: false });
-  $("#cloudflareD1ConnectionStatus").textContent = `Connected: ${health.service}, API ${health.apiVersion}, schema ${health.schemaVersion}, storage ${health.storage}.`;
+  const health = await providerSetup.test(cloudflareD1Setup, $("#cloudflareD1ApiBaseUrl").value, $("#cloudflareD1ApiToken").value, {
+    setConnectionStatus: (value) => { $("#cloudflareD1ConnectionStatus").textContent = value; }
+  });
+  $("#cloudflareD1ConnectionStatus").textContent = cloudflareD1Setup.formatHealth(health);
   setStatus("Cloudflare D1 connection verified");
   return false;
 }
@@ -692,7 +660,7 @@ async function activateMysqlFromLocalClicked() {
   if (globalThis.confirm && !globalThis.confirm("This will not read Google Sheets. It will use only this Firefox profile's local data and initialize MySQL. Existing MySQL records that do not match local data will block the switch. Continue?")) return false;
   $("#migrationStatus").textContent = "Starting MySQL from local data...";
   try {
-    await activateProviderFromLocal(REMOTE_PROVIDER_ID.MYSQL, {
+    await providerSetup.activate(mysqlSetup, "local", {
       onProgress(state) {
         $("#migrationStatus").textContent = `MySQL setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
       }
@@ -716,7 +684,7 @@ async function activateMysqlFromRemoteClicked() {
   if (globalThis.confirm && !globalThis.confirm("This will not read Google Sheets. It will make the existing MySQL data the active data for this Firefox profile and import it locally. Any conflicting local entries will block the switch. Continue?")) return false;
   $("#migrationStatus").textContent = "Adopting existing MySQL data...";
   try {
-    await activateProviderFromRemote(REMOTE_PROVIDER_ID.MYSQL, {
+    await providerSetup.activate(mysqlSetup, "remote", {
       onProgress(state) {
         $("#migrationStatus").textContent = `MySQL adoption ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
       }
@@ -740,7 +708,7 @@ async function activateCloudflareD1Clicked(source) {
   const action = source === "remote" ? "adopt the existing D1 data" : "start D1 from this profile's local data";
   if (globalThis.confirm && !globalThis.confirm(`This will ${action} after full verification. The token stays in this Firefox profile. Continue?`)) return false;
   $("#migrationStatus").textContent = source === "remote" ? "Adopting existing D1 data..." : "Starting D1 from local data...";
-  await (source === "remote" ? activateProviderFromRemote : activateProviderFromLocal)(REMOTE_PROVIDER_ID.CLOUDFLARE_D1, {
+  await providerSetup.activate(cloudflareD1Setup, source, {
     onProgress(state) {
       $("#migrationStatus").textContent = `Cloudflare D1 setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
     }
@@ -804,8 +772,7 @@ async function setupMysqlClicked(source) {
   $("#migrationStatus").textContent = source === "remote"
     ? "Adopting existing MySQL data..."
     : "Starting MySQL from local data...";
-  const activate = source === "remote" ? activateProviderFromRemote : activateProviderFromLocal;
-  await activate(REMOTE_PROVIDER_ID.MYSQL, {
+  await providerSetup.activate(mysqlSetup, source, {
     onProgress(state) {
       $("#migrationStatus").textContent = `MySQL setup ${state.phase}: ${Number(state.completed_entries || 0)}/${Number(state.total_entries || 0)} entries verified.`;
     }

@@ -6,14 +6,16 @@ import {
   pruneExpiredReconciliationIntents,
   RECONCILIATION_INTENTS_KEY
 } from "./reconcile.js";
-import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry, normalizeMultiplierText } from "./entries.js";
+import { hasEqualTimestampConflict, isRemoteNewer, normalizeEntry } from "./entries.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { codedError } from "./coded-error.js";
 import { addDays, nowIso, uuid } from "./time.js";
 
 import { platform } from "./platform.js";
 import { getActiveRemoteProvider, getRemoteProvider } from "./remote-provider.js";
 import { SETTING_KEY } from "./setting-keys.js";
+import { hasPendingConfig, syncConfig } from "./sync-config.js";
 
 const MAX_BACKOFF_SECONDS = 300;
 const SYNC_LOCK_KEY = "sync_lock";
@@ -22,9 +24,6 @@ const REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.REMOTE_CHANGE_TOKEN;
 const LEGACY_REMOTE_MODIFIED_KEY = SETTING_KEY.REMOTE_MODIFIED_TIME;
 const MYSQL_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN;
 const CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN;
-const MULTIPLIER_KEY = SETTING_KEY.DURATION_MULTIPLIER;
-const MULTIPLIER_UPDATED_KEY = SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT;
-const MULTIPLIER_SYNCED_KEY = SETTING_KEY.DURATION_MULTIPLIER_SYNCED_AT;
 const IDLE_STREAK_KEY = SETTING_KEY.SYNC_IDLE_STREAK;
 // Multipliers applied to the configured interval as idle cycles accumulate.
 const IDLE_BACKOFF_STEPS = [1, 2, 5, 10];
@@ -35,7 +34,6 @@ const PULL_MUTATION_BATCH_SIZE = 250;
 // calendar page, background). Used as the sync lock holder.
 const CONTEXT_ID = uuid();
 let syncDrain = null;
-const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODE));
 
 function deferred() {
   let resolve;
@@ -45,13 +43,6 @@ function deferred() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
-}
-
-function codedError(code, message) {
-  if (!KNOWN_ERROR_CODES.has(code)) throw new TypeError(`Unknown extension error code: ${code}`);
-  const error = new Error(message);
-  error.code = code;
-  return error;
 }
 
 function providerOrDefault(provider) {
@@ -585,71 +576,6 @@ async function recoverMissingRemote(error, local, provider, { interactiveAuth, l
     lease,
     reseed: (spreadsheetId) => reseedForNewSpreadsheet(local, { lease, spreadsheetId, provider })
   }) || null;
-}
-
-/**
- * True when the local multiplier has moved since it was last exchanged with the
- * sheet. Needed so a config change is still pushed on a cycle where the remote
- * file is otherwise unchanged and the read is skipped.
- */
-async function hasPendingConfig() {
-  const localUpdatedAt = String(await getSetting(MULTIPLIER_UPDATED_KEY, "") || "");
-  if (!localUpdatedAt) return false;
-  return localUpdatedAt !== String(await getSetting(MULTIPLIER_SYNCED_KEY, "") || "");
-}
-
-/**
- * Reconciles duration_multiplier against the config rows already in the
- * snapshot, and writes only when the local value is genuinely newer. Returns
- * true when it wrote to the sheet.
- */
-async function syncConfig(remoteConfig, configRefs, { interactiveAuth, lease, provider } = {}) {
-  const remoteProvider = providerOrDefault(provider);
-  const remote = remoteConfig[MULTIPLIER_KEY];
-  const remoteUpdatedAt = remote ? String(remote.updated_at || "") : "";
-  const remoteValue = remote ? String(remote.value || "") : "";
-  const normalizedRemote = remoteValue ? normalizeMultiplierText(remoteValue) : "";
-  if (remote && (!normalizedRemote || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(remoteUpdatedAt)
-    || new Date(remoteUpdatedAt).getTime() > Date.now())) {
-    return { conflict: true, changed: false };
-  }
-  const localPair = await mutateSettings([MULTIPLIER_KEY, MULTIPLIER_UPDATED_KEY], (settings) => ({
-    value: String(settings.get(MULTIPLIER_KEY) || "1"),
-    updatedAt: String(settings.get(MULTIPLIER_UPDATED_KEY) || "")
-  }));
-  const localUpdatedAt = localPair.updatedAt;
-  const localValue = localPair.value;
-
-  if (remoteUpdatedAt && remoteUpdatedAt > localUpdatedAt) {
-    await lease?.assert();
-    const applied = await mutateSettings([MULTIPLIER_KEY, MULTIPLIER_UPDATED_KEY, MULTIPLIER_SYNCED_KEY], (settings) => {
-      // A newer local save that landed after the snapshot must win and be
-      // pushed on the following cycle instead of being overwritten piecemeal.
-      if (String(settings.get(MULTIPLIER_UPDATED_KEY) || "") > remoteUpdatedAt) return false;
-      settings.set(MULTIPLIER_KEY, normalizedRemote);
-      settings.set(MULTIPLIER_UPDATED_KEY, remoteUpdatedAt);
-      settings.set(MULTIPLIER_SYNCED_KEY, remoteUpdatedAt);
-      return true;
-    });
-    return { changed: Boolean(applied), pulled: Boolean(applied) };
-  }
-
-  if (!localUpdatedAt) return { changed: false };
-  if (remoteUpdatedAt === localUpdatedAt && normalizedRemote !== normalizeMultiplierText(localValue)) return { conflict: true, changed: false };
-  if (remoteUpdatedAt === localUpdatedAt && normalizedRemote === normalizeMultiplierText(localValue)) {
-    await lease?.assert();
-    await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
-    return { changed: false };
-  }
-
-  await lease?.assert();
-  await remoteProvider.updateConfig(MULTIPLIER_KEY, localValue, localUpdatedAt, {
-    expectedRef: configRefs.get(MULTIPLIER_KEY),
-    interactiveAuth
-  });
-  await lease?.assert();
-  await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);
-  return { changed: true, pushed: true };
 }
 
 async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {

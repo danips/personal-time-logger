@@ -1,4 +1,8 @@
 {
+  "fields": [
+    "id", "project", "task", "description", "start_at", "end_at", "duration_seconds",
+    "status", "created_at", "updated_at", "deleted_at", "device_id", "revision", "multiply"
+  ],
   "base": {
     "id": "contract-entry",
     "project": "Project",
@@ -15,11 +19,21 @@
     "revision": 1,
     "multiply": ""
   },
-  "invalidOverrides": [
-    { "start_at": "01/02/2026" },
-    { "duration_seconds": 1.5 },
-    { "device_id": "" },
-    { "end_at": "2026-08-24T08:59:59Z" },
-    { "revision": "999999999999999999999999999999999999" }
+  "validCases": [
+    { "name": "normalizes offset timestamps", "overrides": {} }
+  ],
+  "invalidCases": [
+    { "name": "missing field", "omit": ["id"] },
+    { "name": "extra field", "add": { "unrecognized": true }, "targets": ["server"] },
+    { "name": "malformed timestamp", "overrides": { "start_at": "01/02/2026" } },
+    { "name": "impossible timestamp", "overrides": { "start_at": "2026-02-31T12:00:00Z" } },
+    { "name": "fractional duration", "overrides": { "duration_seconds": 1.5 } },
+    { "name": "empty device id", "overrides": { "device_id": "" } },
+    { "name": "end before start", "overrides": { "end_at": "2026-08-24T08:59:59Z" } },
+    { "name": "unsafe revision", "overrides": { "revision": "999999999999999999999999999999999999" } },
+    { "name": "invalid status", "overrides": { "status": "running" } },
+    { "name": "multiplier precision", "overrides": { "multiply": "1.0001" } },
+    { "name": "multiplier range", "overrides": { "multiply": "5.002" } },
+    { "name": "oversized text", "overrides": { "project": { "repeat": "é", "count": 32768 } } }
   ]
 }

@@ -24,7 +24,7 @@ ChatGPT usage service ───────────────────�
 | Popup | `extension/popup/popup.js` | Start/stop/edit timers and bounded recent-history display. | Reads and writes through `extension/src/entries.js`; recent grouping is pure `extension/src/popup-recent-groups.js`; window-size controls use the page-local `extension/popup/window-size-controller.js`. |
 | Calendar | `extension/calendar/calendar.js` | Week rendering, drag/resize/edit, merge, and displayed-week Tempo upload. | Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; `extension/calendar/tempo-controller.js` captures the selected week and delegates Tempo transport to the background context. |
 | Analytics | `extension/analytics/analytics.js` | Period reports, automatic comparisons, project/task and description breakdowns, fragmentation, and anomaly display. | Queries the bounded union of current and comparison intervals once; pure period and aggregation logic lives in `extension/src/analytics-period.js` and `extension/src/analytics.js`. |
-| Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, backups, and diagnostics. | It mounts the usage and reconciliation page modules; backup parsing/serialization is in `extension/src/backup.js`; active backend and preparation target stay separate; OAuth client settings use synchronized browser storage, while tokens remain local. |
+| Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, backups, and diagnostics. | It owns page wiring and draft revisions. `extension/options/provider-setup-controller.js` owns the shared API-provider save, permission-test, and activation policy; Google OAuth/spreadsheet setup remains separate. |
 | Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
 | Usage | `extension/usage/usage.js` | Displays the current Firefox ChatGPT session's 5-hour and weekly limits. | It can run standalone or mounted in Options and delegates the fixed session-authenticated request to `extension/src/chatgpt-usage-service.js`. |
 | ChatGPT usage service | `extension/src/chatgpt-usage-service.js` | Fetches the fixed session and usage endpoints directly from the extension context. | The access token stays in memory for one request and is never persisted, logged, or sent outside ChatGPT. |
@@ -60,7 +60,9 @@ write when a conditional mutation is available.
 ## Entry, time, and remote model
 
 `extension/src/entries.js` validates and normalizes the canonical remote entry
-model. Google Sheets stores the model in the `time_entries` row order fixed by
+model. `extension/src/entry-contract.js` owns its fourteen-field ordering; the
+named cases in `test/fixtures/entry-contract.json` are the shared extension,
+Cloudflare, and PHP conformance oracle. Google Sheets stores the model in the `time_entries` row order fixed by
 `SHEET_HEADERS`:
 
 ```text
@@ -99,6 +101,13 @@ the provider contract and serializable provider metadata. The provider-neutral
 API is documented in `docs/remote-api-v1.md`. Provider capabilities
 currently control whether duplicate physical-record repair is presented.
 
+`extension/src/remote-versioned-mutations.js` owns only the identical MySQL/D1
+encoded chunking, canonical projection, acknowledgement ordering, and versioned
+mutation payloads. Identity, URL normalization, host permissions, health, and
+snapshot behavior stay in the individual adapters. Extension generic failures
+use `extension/src/coded-error.js`; domain-specific error constructors remain
+with their domains and `error-registry.js` gives every stable code an action.
+
 ## Sync, reconciliation, and fencing
 
 `syncNow()` coalesces same-context calls with one registered drain: a stronger
@@ -116,7 +125,7 @@ The sync sequence is:
 2. Flag competing active timers and ensure the active provider is ready.
 3. Use the active provider's change token as a read gate when supported; otherwise read its full remote snapshot.
 4. Push dirty updates/appends with provider-owned opaque preconditions, then acknowledge only unchanged local revisions.
-5. Pull remote changes with revision/reference checks, purge verified old tombstones, and synchronize the duration multiplier/config marker.
+5. Pull remote changes with revision/reference checks, purge verified old tombstones, and synchronize the duration multiplier/config marker through `sync-config.js`.
 6. Record backoff/diagnostics and notify pages after a completed cycle.
 
 Reconciliation records the displayed local revision and provider reference for
@@ -125,6 +134,12 @@ an explicit conflict rather than deriving an order from provider ordering.
 Google Sheets has no atomic compare-and-swap: preflight and post-write checks
 detect observable races but cannot prevent a manual edit in the request gap;
 MySQL uses API version fencing.
+
+## Boundary decisions
+
+- Shared validator seam — considered generating validators from the JSON fixture; chosen: shared named conformance data while each runtime retains its local trust-boundary validator. Revisit when a build-time generator can preserve JavaScript, Worker, and PHP diagnostics without broadening the wire contract.
+- Versioned provider helper — considered a whole-provider factory; chosen: a compact mutation helper because health, identity, configuration, and permissions differ. Revisit when another versioned provider has the same mutation contract.
+- Options controller — considered moving setup into core storage modules; chosen: a page-local descriptor controller because locks, page status, permissions, and draft callbacks are Options policy. Revisit when a non-Options context needs this workflow.
 
 ## Trust and release boundaries
 

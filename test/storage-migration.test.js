@@ -44,6 +44,14 @@ describe("storage migration canonical dataset", () => {
     assert.doesNotMatch(canonicalMigrationText({ entries: [entry("a")], config: {} }), /dirty|last_sync_at|sync_error/);
   });
 
+  it("preserves the established canonical entry serialization", () => {
+    const source = entry("fixed", { dirty: true, last_sync_at: "not-persisted", sync_error: "old" });
+    assert.equal(
+      canonicalMigrationText({ entries: [source], config: {} }),
+      '{"entries":[["fixed","Project","Task","Description","2026-08-08T09:00:00.000Z","2026-08-08T10:00:00.000Z",3600,"ok","2026-08-08T09:00:00.000Z","2026-08-08T10:00:00.000Z","","device",1,""]],"config":[]}'
+    );
+  });
+
   it("produces the same digest for equivalent provider ordering", async () => {
     const first = { entries: [entry("b"), entry("a")], config: { b: { value: "2", updated_at: "2026-08-08T11:00:00.000Z" }, a: { value: "1", updated_at: "2026-08-08T11:00:00.000Z" } } };
     const second = { entries: [entry("a"), entry("b")], config: { a: first.config.a, b: first.config.b } };
