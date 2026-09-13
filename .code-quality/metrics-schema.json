@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/personal-time-logger/code-quality-metrics.schema.json",
+  "title": "Repository code-quality metrics",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "repository", "environment", "size", "complexity", "duplication", "coverage", "git_history", "tool_status"],
+  "properties": {
+    "schema_version": { "enum": [1, 2, 3] },
+    "generated_at": { "type": "string" },
+    "repository": {
+      "type": "object",
+      "required": ["commit", "branch", "worktree_clean"],
+      "properties": {
+        "commit": { "type": "string" },
+        "branch": { "type": "string" },
+        "worktree_clean": { "type": "boolean" },
+        "worktree_clean_scope": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "environment": { "type": "object", "additionalProperties": true },
+    "size": { "type": "object", "additionalProperties": true },
+    "complexity": { "type": "object", "additionalProperties": true },
+    "duplication": { "type": ["object", "null"], "additionalProperties": true },
+    "coverage": { "type": ["object", "null"], "additionalProperties": true },
+    "git_history": { "type": "object", "additionalProperties": true },
+    "test_inventory": { "type": "object", "additionalProperties": true },
+    "tool_status": { "type": "object", "additionalProperties": true },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

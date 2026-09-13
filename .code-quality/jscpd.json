@@ -1,0 +1,17 @@
+{
+  "minLines": 5,
+  "minTokens": 50,
+  "mode": "mild",
+  "format": ["javascript", "typescript", "php"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/*.test.js",
+    "**/web-ext-artifacts/**",
+    "**/.code-quality/**"
+  ],
+  "reporters": ["json"],
+  "absolute": false
+}

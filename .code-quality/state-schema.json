@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/personal-time-logger/code-quality-state.schema.json",
+  "title": "Repository code-quality workflow state",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "workflow_status",
+    "terminal_state",
+    "mode",
+    "branch",
+    "baseline_commit",
+    "phase",
+    "correction_cycle",
+    "created_at",
+    "updated_at",
+    "next_action",
+    "tasks",
+    "history"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "workflow_status": { "enum": ["IN_PROGRESS", "TERMINAL"] },
+    "terminal_state": {
+      "type": ["string", "null"],
+      "enum": [null, "ACCEPTED", "ACCEPTED_WITH_NOTES", "NEEDS_FURTHER_WORK", "BLOCKED"]
+    },
+    "mode": { "enum": ["standard", "deep"] },
+    "branch": { "type": "string" },
+    "baseline_commit": { "type": "string", "minLength": 7 },
+    "baseline_worktree_clean": { "type": ["boolean", "null"] },
+    "phase": {
+      "enum": [
+        "INITIALIZED",
+        "PREFLIGHT",
+        "BASELINE",
+        "ANALYSIS",
+        "PLAN",
+        "IMPLEMENTATION",
+        "REVIEW",
+        "CORRECTION",
+        "FINAL_MEASUREMENT",
+        "REPORT",
+        "COMPLETE"
+      ]
+    },
+    "correction_cycle": { "type": "integer", "minimum": 0 },
+    "head_commit": { "type": ["string", "null"] },
+    "last_verified_commit": { "type": ["string", "null"] },
+    "measured_commit": { "type": ["string", "null"] },
+    "current_task": { "type": ["string", "null"] },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "next_action": { "type": ["string", "null"] },
+    "tasks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "updated_at"],
+        "properties": {
+          "status": { "enum": ["pending", "in_progress", "completed", "partial", "blocked"] },
+          "commit": { "type": ["string", "null"] },
+          "updated_at": { "type": "string" },
+          "note": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "artifacts": { "type": "object", "additionalProperties": { "type": "string" } },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at", "event"],
+        "properties": {
+          "at": { "type": "string" },
+          "event": { "type": "string" },
+          "phase": { "type": ["string", "null"] },
+          "commit": { "type": ["string", "null"] },
+          "note": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

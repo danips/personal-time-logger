@@ -5,7 +5,10 @@ export default [
   {
     ignores: [
       "node_modules/**",
-      "web-ext-artifacts/**"
+      "web-ext-artifacts/**",
+      ".code-quality/.tools/**",
+      ".code-quality/.tmp/**",
+      ".code-quality/runs/**"
     ]
   },
   js.configs.recommended,
@@ -21,7 +24,7 @@ export default [
     }
   },
   {
-    files: ["scripts/**/*.js", "scripts/**/*.mjs", "test/**/*.js", "eslint.config.js"],
+    files: ["scripts/**/*.js", "scripts/**/*.mjs", ".code-quality/scripts/**/*.mjs", "test/**/*.js", "eslint.config.js"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

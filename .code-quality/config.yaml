@@ -1,0 +1,282 @@
+schema_version: 1
+
+project:
+  name: personal-time-logger
+  type: firefox-webextension
+  primary_languages:
+    - javascript
+    - typescript
+    - php
+  runtime_target:
+    firefox_manifest_version: 3
+    node_canonical: 24
+
+
+execution:
+  canonical_surface: codex_cli
+  supported_secondary_surfaces:
+    - vscode_extension
+  require_repository_root_cwd: true
+  recommended_terminal_multiplexer: tmux
+  avoid_manual_edits_during_run: true
+  subagent_smoke_test:
+    required_before_first_real_run: true
+    repeat_after_codex_upgrade: true
+    repeat_after_agent_config_change: true
+    prompt: .code-quality/prompts/preflight-subagent-smoke.md
+    must_be_read_only: true
+
+workflow:
+  default_mode: standard
+  require_clean_worktree: true
+  commit_per_task: true
+  max_correction_cycles: 3
+  worker_concurrency: 1
+  conservative_on_uncertainty: true
+  version_run_artifacts: true
+  non_interactive_after_start: true
+  resume_in_progress_runs: true
+  checkpoint_after_each_phase: true
+  checkpoint_after_each_worker_commit: true
+  checkpoint_on_blocker: true
+  discard_interrupted_worker_changes: false
+
+roles:
+  analyst:
+    preferred_model: gpt-5.6-sol
+    reasoning_effort: high
+    may_edit_application_code: false
+  worker:
+    agent_name: refactor_worker
+    fallback_model: gpt-5.6-luna
+    reasoning_effort: high
+    may_spawn_subagents: false
+
+scope:
+  production_roots:
+    - extension
+    - server
+  supporting_code_roots:
+    - scripts
+  test_roots:
+    - test
+    - server/cloudflare-d1/test
+    - server/mysql-api/tests
+  exclude_globs:
+    - "**/node_modules/**"
+    - "**/vendor/**"
+    - "**/web-ext-artifacts/**"
+    - "**/coverage/**"
+    - "**/.code-quality/.tools/**"
+    - "**/.code-quality/.tmp/**"
+    - "**/.code-quality/runs/**"
+    - "**/*.min.js"
+    - "**/*.map"
+
+contracts:
+  protected_by_default:
+    - firefox observable behavior
+    - manifest permissions and entry points
+    - storage keys and persistence semantics
+    - IndexedDB database name, schema, indexes, and migration behavior
+    - entry/time model and duration semantics
+    - sync, lease, locking, fencing, and reconciliation semantics
+    - backup/import/export formats
+    - Google Sheets/Drive contract
+    - MySQL HTTPS API contract
+    - Cloudflare Worker/D1 contract
+    - remote-provider contract
+    - release packaging and signing inputs
+    - documented public/user-visible behavior
+  contract_changes_require_explicit_plan: true
+
+refactoring_policy:
+  dead_code: aggressive_when_proven
+  duplication: moderate
+  architecture_simplification: moderate
+  speculative_abstractions: remove_when_high_confidence
+  public_api_changes: forbidden_unless_explicit
+  new_production_dependencies: forbidden_unless_explicit
+  large_restructures: require_high_benefit_high_confidence
+  style_only_changes: exclude
+
+candidate_ranking:
+  dimensions:
+    impact: [high, medium, low]
+    confidence: [high, medium, low]
+    risk: [low, medium, high]
+  standard_auto_delegate_when:
+    impact: [high, medium]
+    confidence: [high]
+    risk: [low, medium]
+  deep_exploration:
+    enabled: true
+    max_experimental_tasks: 1
+    eligible_when:
+      impact: [high, medium]
+      confidence: [high, medium]
+      risk: [low, medium]
+    require_bounded_scope: true
+    require_full_revert_if_benefit_unclear: true
+    forbid_high_risk_experiments: true
+  otherwise: document_only
+
+deferred_candidates:
+  required_artifact: true
+  include_all_considered_not_retained: true
+  rank_by_expected_engineering_value: true
+  statuses:
+    - DOCUMENT_ONLY
+    - REJECTED
+    - DEFERRED
+    - BLOCKED_BY_ENVIRONMENT
+    - DEEP_NOT_SELECTED
+    - EXPERIMENT_REVERTED
+  deep_suitability_values: [YES, NO, CONDITIONAL]
+  empty_run_text: No deferred candidates
+  does_not_authorize_implementation: true
+
+required_checks:
+  - name: unit-tests
+    command: npm test
+  - name: cloudflare-tests
+    command: npm run test:cloudflare
+  - name: php-syntax
+    command: "find server/mysql-api -name '*.php' -print0 | xargs -0 -n1 php -l"
+  - name: mysql-api-deterministic-tests
+    command: bash server/mysql-api/tests/run.sh
+  - name: lint
+    command: npm run lint
+  - name: build-xpi
+    command: npm run build:xpi
+  - name: whitespace
+    command: git diff --check
+
+environment_dependent_checks:
+  - name: firefox-runtime-smoke
+    command: npm run test:browser
+    acceptance: required_if_environment_supports_firefox_and_geckodriver_otherwise_require_ci_evidence
+  - name: mysql-full-integration
+    command: bash server/mysql-api/tests/run.sh
+    required_when_changed_paths:
+      - server/mysql-api/**
+      - server/http-contract.mjs
+    acceptance_if_required_and_unavailable: blocked
+    acceptance_if_not_touched_and_unavailable: accepted_with_notes
+    note: Full endpoint integration requires a disposable MySQL 8.4 database and PTL_TEST_MYSQL_* environment variables.
+
+metrics:
+  mandatory_standard:
+    - physical_loc
+    - nonblank_lines
+    - file_counts
+    - cyclomatic_complexity_js
+    - cognitive_complexity_js
+    - cyclomatic_complexity_php
+    - duplication
+    - coverage_extension_unit
+    - coverage_cloudflare
+    - git_churn_12_months
+    - test_counts
+    - executed_test_counts_from_tap
+  qualitative_standard:
+    - dead_code_candidates
+    - dependency_cycles
+    - coupling_hotspots
+    - change_coupling
+    - unnecessary_abstractions
+    - trivial_wrappers
+    - single_implementation_abstractions
+    - excessive_indirection
+    - test_value
+  deep_additions:
+    - mutation_score_js
+    - targeted_php_static_analysis
+    - targeted_dependency_graph_analysis
+    - one_bounded_experimental_refactor_when_eligible
+  contextual_only:
+    - total_loc
+    - number_of_files
+    - number_of_functions
+    - number_of_classes
+    - number_of_interfaces
+
+quality_gates:
+  must_pass:
+    tests_and_required_checks: true
+    behavior_contracts: true
+  must_not_regress:
+    duplication_percentage: true
+    extension_unit_coverage_lines_percentage: true
+    cloudflare_coverage_lines_percentage_when_available: true
+    cognitive_complexity_p95: true
+    cognitive_complexity_max: true
+    cyclomatic_complexity_p95: true
+    php_cyclomatic_complexity_p95_when_available: true
+    dependency_cycles: true
+    mutation_score_when_measured: true
+  optimize:
+    - cognitive_complexity_total
+    - cyclomatic_complexity_total
+    - duplication_lines
+    - dead_code
+    - nesting
+    - coupling
+    - unnecessary_indirection
+  no_single_score_acceptance: true
+
+test_policy:
+  deletion_requires_specific_rationale: true
+  acceptable_rationales:
+    - exact_behavioral_duplicate
+    - fully_subsumed_by_stronger_parameterized_test
+    - obsolete_unreachable_behavior
+    - implementation_detail_without_behavioral_value
+    - third_party_behavior_without_project_contract_value
+  forbidden_rationales:
+    - test_is_simple
+    - test_is_long
+    - test_is_inconvenient_for_refactor
+  coverage_may_drop_without_explicit_exception: false
+  mutation_score_may_drop_when_measured: false
+
+tools:
+  isolated_install_dir: .code-quality/.tools
+  reuse_exact_cached_versions_without_install: true
+  install_timeout_ms: 180000
+  standard:
+    eslint: "10.9.1"
+    eslint_plugin_sonarjs: "4.2.0"
+    jscpd: "5.2.0"
+    c8: "12.0.0"
+  deep:
+    stryker_core: "10.0.0"
+
+artifacts:
+  run_directory: ".code-quality/runs/<YYYY-MM-DD>-<baseline-short-sha>"
+  files:
+    state: state.json
+    baseline: 00-baseline.json
+    analysis: 01-analysis.md
+    plan: 02-plan.md
+    implementation: 03-implementation.md
+    review: 04-review.md
+    final_metrics: 05-final.json
+    report: 06-report.md
+    deferred_candidates: 07-deferred-candidates.md
+
+continuity:
+  active_state: IN_PROGRESS
+  resume_same_branch_only: true
+  require_baseline_ancestor_on_resume: true
+  reuse_completed_phase_artifacts: true
+  on_ambiguous_active_runs: blocked
+  on_unmapped_dirty_application_changes: blocked
+  on_required_missing_authorization: blocked
+  on_nonessential_missing_capability: continue_with_note
+
+terminal_states:
+  - ACCEPTED
+  - ACCEPTED_WITH_NOTES
+  - NEEDS_FURTHER_WORK
+  - BLOCKED
