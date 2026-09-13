@@ -33,16 +33,8 @@
             <dd id="localCount">-</dd>
           </div>
           <div>
-            <dt>Remote records</dt>
-            <dd id="remoteRowCount">-</dd>
-          </div>
-          <div>
             <dt>Remote entries</dt>
             <dd id="remoteCount">-</dd>
-          </div>
-          <div id="duplicateSummaryMetric">
-            <dt>Duplicate remote records</dt>
-            <dd id="duplicateRowCount">-</dd>
           </div>
           <div>
             <dt>Invalid remote records</dt>
@@ -69,20 +61,6 @@
           </div>
         </div>
         <div id="differentList" class="group-list"></div>
-      </section>
-
-      <section id="duplicateSection" class="panel" aria-labelledby="duplicateHeading">
-        <div class="panel-heading">
-          <h2 id="duplicateHeading">Duplicate remote records</h2>
-          <div class="actions">
-            <button id="deleteAllDuplicates" type="button">Delete all extra rows</button>
-          </div>
-        </div>
-        <p class="note">
-          The same entry appears in more than one row. Sync uses the most recently
-          updated of them; the others are stale copies that only take up space.
-        </p>
-        <div id="duplicateList" class="group-list"></div>
       </section>
 
       <section id="quarantinedSection" class="panel" aria-labelledby="quarantinedHeading">

@@ -11,8 +11,7 @@ Background alarm ─────────────────────
 ChatGPT usage service ──────────────────────────────────────────────────┘          │                  │
                                                                                   ├── browser APIs    └── entries + settings
                                                                                   └── remote providers
-                                                                                      ├── Google Sheets / Drive APIs
-                                                                                      ├── MySQL HTTPS API
+                                                                                      ├── MySQL HTTPS API (authoritative)
                                                                                       └── Cloudflare Worker + D1 HTTPS API
 ```
 
@@ -24,7 +23,7 @@ ChatGPT usage service ───────────────────�
 | Popup | `extension/popup/popup.js` | Start/stop/edit timers, guarded deletion undo, merge preview/confirmation, actionable stale/competing-timer warnings, and bounded recent-history navigation/filtering. | Reads and writes through `extension/src/entries.js`; warning, undo, and merge actions carry expected revisions/tombstone identity; recent grouping, filtering, totals, and loaded-value suggestions are pure `extension/src/popup-recent-groups.js`; window-size controls use the page-local `extension/popup/window-size-controller.js`. |
 | Calendar | `extension/calendar/calendar.js` | Week rendering, direct completed-entry creation, keyboard/pointer drag-resize/edit, guarded deletion undo, merge/duplicate preview and confirmation, and displayed-week Tempo upload. | Completed entries use the shared editor and local entry mutation without changing active timers. The editor reports browser-local time semantics and restores entry focus after keyboard cancellation/rerender. Deletion undo and merge/duplicate confirmation use page-local session state plus guarded `extension/src/entries.js` mutations. Geometry is in `extension/src/calendar-layout.js`; allocation is in `extension/src/time-allocation.js`; `extension/calendar/tempo-controller.js` captures the selected week and delegates Tempo transport to the background context. |
 | Analytics | `extension/analytics/analytics.js` | Period reports, project/task filters, automatic comparisons, project/task and description breakdowns, fragmentation, anomaly display, and entry navigation. | Queries the bounded union of current and comparison intervals once, applies filters before building both period datasets, and preserves view state across refresh; pure period and aggregation logic lives in `extension/src/analytics-period.js` and `extension/src/analytics.js`. |
-| Options | `extension/options/options.js` | Navigated settings page for provider-aware storage, Google setup, MySQL API setup, ChatGPT usage, reconciliation, Tempo, backups, and diagnostics. | It owns page wiring and draft revisions. `extension/options/provider-setup-controller.js` owns the shared API-provider save, permission-test, and activation policy; Google OAuth/spreadsheet setup remains separate. |
+| Options | `extension/options/options.js` | Navigated settings page for MySQL/D1 storage, ChatGPT usage, reconciliation, Tempo, backups, and diagnostics. | It owns page wiring and draft revisions. `extension/options/provider-setup-controller.js` owns the shared API-provider save, permission-test, and activation policy. |
 | Reconcile | `extension/reconcile/reconcile.js` | Compare local and remote snapshots, then apply reviewed resolutions. | It can run standalone or mounted in Options; it records local choices and lets normal sync carry writes, except verified duplicate-row deletion. |
 | Usage | `extension/usage/usage.js` | Displays the current Firefox ChatGPT session's 5-hour and weekly limits. | It can run standalone or mounted in Options and delegates the fixed session-authenticated request to `extension/src/chatgpt-usage-service.js`. |
 | ChatGPT usage service | `extension/src/chatgpt-usage-service.js` | Fetches the fixed session and usage endpoints directly from the extension context. | The access token stays in memory for one request and is never persisted, logged, or sent outside ChatGPT. |
@@ -66,9 +65,9 @@ stores:
 | `time_entries` | Local-first time records, including `dirty`, tombstone, sync-error, and revision bookkeeping. Dirty records persist a derived `dirty_key: 1`; clean records omit it. | Primary ID plus indexes for active timers, dirty-entry counts, deletion, start/end time, and status. |
 | `settings` | Device-local configuration, sync/reconciliation state, locks, diagnostics, tokens, and the current ChatGPT usage snapshot. | Named keys; general extension keys live in `extension/src/setting-keys.js`. |
 
-The OAuth client ID and secret are the deliberate exception: they live in
-`browser.storage.sync` so a Firefox profile can restore the configuration.
-Access/refresh tokens stay in IndexedDB. Entry changes are broadcast through
+Provider credentials remain in IndexedDB and are never synchronized. A
+temporary removal-only compatibility scrub uses `browser.storage.sync.remove`
+for two legacy OAuth keys without reading or writing synchronized values. Entry changes are broadcast through
 `extension/src/events.js`; receiving pages re-read data instead of trusting an event
 payload as state.
 
@@ -105,8 +104,7 @@ remain untracked history requiring explicit review.
 `extension/src/entries.js` validates and normalizes the canonical remote entry
 model. `extension/src/entry-contract.js` owns its fourteen-field ordering; the
 named cases in `test/fixtures/entry-contract.json` are the shared extension,
-Cloudflare, and PHP conformance oracle. Google Sheets stores the model in the `time_entries` row order fixed by
-`SHEET_HEADERS`:
+Cloudflare, and PHP conformance oracle. API providers use this canonical model:
 
 ```text
 id, project, task, description, start_at, end_at, duration_seconds, status,
@@ -147,20 +145,12 @@ refreshes after entry-change events. All aggregation stays local; Analytics
 adds no provider calls, remote schema, permissions, telemetry, or derived-data
 storage.
 
-`extension/src/sheets.js` owns Google Sheets and Drive I/O. It requires the exact
-`time_entries` and `config` schemas on populated tabs; only empty or missing
-tabs are initialized automatically. Remote updates and deletions carry a full
-row fingerprint, re-read that row before mutation, and verify the intended
-result afterward.
-
 `extension/src/remote-provider.js` selects the active provider from
-`REMOTE_BACKEND`. `remote-google-sheets.js` adapts Sheets row references and
-fingerprints; `remote-mysql.js` adapts API version references and normalizes the
-API's nullable optional fields, and `remote-cloudflare-d1.js` adapts
+`REMOTE_BACKEND`. `remote-mysql.js` adapts API version references and normalizes
+the API's nullable optional fields, and `remote-cloudflare-d1.js` adapts
 Worker/D1 version references. Generic sync and reconciliation code uses only
 the provider contract and serializable provider metadata. The provider-neutral
-API is documented in `docs/remote-api-v1.md`. Provider capabilities
-currently control whether duplicate physical-record repair is presented.
+API is documented in `docs/remote-api-v1.md`.
 
 `extension/src/remote-versioned-mutations.js` owns only the identical MySQL/D1
 encoded chunking, canonical projection, acknowledgement ordering, and versioned
@@ -186,7 +176,7 @@ The sync sequence is:
 2. Flag competing active timers and ensure the active provider is ready.
 3. Use the active provider's change token as a read gate when supported; otherwise read its full remote snapshot.
 4. Push dirty updates/appends with provider-owned opaque preconditions, then acknowledge only unchanged local revisions.
-5. Pull remote changes with revision/reference checks, retain tombstones as deletion evidence, and synchronize the duration multiplier/config marker through `sync-config.js`.
+5. Pull remote changes with revision/reference checks, retain tombstones as deletion evidence, and synchronize the duration multiplier through `sync-config.js`.
 6. Record backoff/diagnostics and notify pages after a completed cycle.
 
 Reconciliation records the displayed local revision and provider reference for
@@ -198,9 +188,8 @@ affected, equal-time-conflict, and precondition counts, and a completed/pending/
 failed outcome is shown after a fresh comparison when execution is partial.
 Quarantined exports contain only provider/location/reason metadata and escape
 CSV text, so invalid remote payloads are not normalized into a report.
-Google Sheets has no atomic compare-and-swap: preflight and post-write checks
-detect observable races but cannot prevent a manual edit in the request gap;
-MySQL uses API version fencing.
+MySQL and Cloudflare D1 use API version fencing for remote mutations; ambiguous
+append results are confirmed by reading the provider's versioned snapshot.
 
 Options treats the active backend and the prepared migration target as separate
 identities. Storage migration persists a provider-neutral preview containing
@@ -228,7 +217,7 @@ and require an explicit reconciliation or rebootstrap decision.
 
 ## Trust and release boundaries
 
-- Google Sheets/Drive and OAuth are required only for Google operation. HTTPS origins are declared as optional so Firefox can grant a self-hosted API domain, while runtime requests still ask only for the exact configured MySQL or Cloudflare origin. Cloudflare's raw bearer token remains local to the Firefox profile, while the Worker secret is only its SHA-256 digest.
+- MySQL is the authoritative deployment and Cloudflare D1 is a supported user-owned alternative. HTTPS origins are optional so Firefox can grant a self-hosted API domain, while runtime requests ask only for the exact configured provider origin. Raw bearer tokens remain local to the Firefox profile; the Worker stores only its SHA-256 digest.
 - `chatgpt.com` is optional and isolated to the usage feature. The usage service
   performs its bounded session and usage requests directly from the extension
   context; no page-world bridge is used.

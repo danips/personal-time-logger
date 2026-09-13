@@ -35,10 +35,10 @@ describe("duration multiplier sync policy", () => {
     await local("1.250", old, "");
     const calls = [];
     const outcome = await syncConfig({}, new Map([[key, "config-ref"]]), {
-      provider: { updateConfig: async (...args) => calls.push(args) }, lease, interactiveAuth: true
+      provider: { updateConfig: async (...args) => calls.push(args) }, lease
     });
     assert.deepEqual(outcome, { changed: true, pushed: true });
-    assert.deepEqual(calls[0], [key, "1.250", old, { expectedRef: "config-ref", interactiveAuth: true }]);
+    assert.deepEqual(calls[0], [key, "1.250", old, { expectedRef: "config-ref" }]);
     assert.equal(await db.getSetting(syncedKey), old);
   });
 

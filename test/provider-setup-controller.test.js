@@ -6,8 +6,7 @@ const keys = {
   CONFIG_SAVE_FAILED: "CONFIG_SAVE_FAILED",
   REMOTE_PERMISSION: "REMOTE_PERMISSION",
   REMOTE_BACKEND: "remote_backend",
-  REMOTE_BACKEND_ESTABLISHED: "remote_backend_established",
-  GOOGLE_SHEETS: "google_sheets"
+  REMOTE_BACKEND_ESTABLISHED: "remote_backend_established"
 };
 
 function codedError(code, message, cause) {
@@ -55,6 +54,13 @@ test("provider setup saves normalized credentials and always releases its lock",
   assert.equal(settings.get("example_url"), "https://api.example");
   assert.equal(settings.get("example_token"), "token");
   assert.equal(released.length, 1);
+});
+
+test("provider setup does not treat a retired backend as the active descriptor", async () => {
+  const settings = new Map([[keys.REMOTE_BACKEND, "google-sheets"], [keys.REMOTE_BACKEND_ESTABLISHED, true]]);
+  const { api } = controller({ settings });
+  await api.save(descriptor(), "https://api.example", "token");
+  assert.equal(settings.get("example_url"), "https://api.example");
 });
 
 test("provider setup fences active destination changes and reports missing tokens", async () => {

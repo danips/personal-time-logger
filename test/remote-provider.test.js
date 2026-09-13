@@ -3,9 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { entryToRow, SHEET_HEADERS } from "../extension/src/entries.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
-import { createGoogleApiMock } from "./support/mock-google-api.js";
 import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 installFakeIndexedDB();
@@ -14,20 +12,13 @@ globalThis.browser = {
   runtime: { getURL: (path) => path },
   storage: {
     sync: {
-      async get() {
-        return {
-          google_oauth_client_id: "test-client",
-          google_oauth_client_secret: "test-secret"
-        };
-      },
-      async set() {}
+      async remove() {}
     }
   }
 };
 
 const db = await import("../extension/src/db.js");
 const providers = await import("../extension/src/remote-provider.js");
-const googleProvider = await import("../extension/src/remote-google-sheets.js");
 const mysql = await import("../extension/src/remote-mysql.js");
 
 const fixture = (over = {}) => persistedEntryFixture({
@@ -37,10 +28,18 @@ const fixture = (over = {}) => persistedEntryFixture({
 });
 
 describe("remote provider selection", () => {
-  it("defaults missing and blank settings to Google Sheets", async () => {
+  it("treats missing and blank settings as unconfigured", async () => {
     await db.setSetting("remote_backend", "");
-    assert.equal(providers.decodeRemoteProviderId(undefined), "google-sheets");
-    assert.equal((await providers.getActiveRemoteProvider()).id, "google-sheets");
+    assert.equal(providers.decodeRemoteProviderId(undefined), "");
+    assert.equal(providers.decodeRemoteProviderId("  "), "");
+    await assert.rejects(() => providers.getActiveRemoteProvider(), { code: "REMOTE_BACKEND_UNSUPPORTED" });
+  });
+
+  it("treats the retired Google Sheets value as unsupported", async () => {
+    await db.setSetting("remote_backend", "google-sheets");
+    assert.equal(providers.decodeRemoteProviderId("google-sheets"), "google-sheets");
+    assert.throws(() => providers.getRemoteProvider("google-sheets"), { code: "REMOTE_BACKEND_UNSUPPORTED" });
+    await assert.rejects(() => providers.getActiveRemoteProvider(), { code: "REMOTE_BACKEND_UNSUPPORTED" });
   });
 
   it("rejects unknown backend IDs instead of falling back", () => {
@@ -50,27 +49,12 @@ describe("remote provider selection", () => {
     );
   });
 
-  it("registers all stable provider IDs", () => {
+  it("registers exactly the supported provider IDs", () => {
     assert.equal(providers.REMOTE_PROVIDER_ID.MYSQL, "mysql");
     assert.equal(providers.REMOTE_PROVIDER_ID.CLOUDFLARE_D1, "cloudflare-d1");
-    assert.deepEqual(providers.registeredRemoteProviderIds(), ["google-sheets", "mysql", "cloudflare-d1"]);
+    assert.deepEqual(providers.registeredRemoteProviderIds(), ["mysql", "cloudflare-d1"]);
     assert.equal(providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.MYSQL).id, "mysql");
     assert.equal(providers.getRemoteProvider(providers.REMOTE_PROVIDER_ID.CLOUDFLARE_D1).id, "cloudflare-d1");
-  });
-
-  it("exposes duplicate-record capabilities with a safe default", () => {
-    assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("google-sheets")), {
-      duplicateRemoteRecords: true
-    });
-    assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("mysql")), {
-      duplicateRemoteRecords: false
-    });
-    assert.deepEqual(providers.getRemoteProviderCapabilities(providers.getRemoteProvider("cloudflare-d1")), {
-      duplicateRemoteRecords: false
-    });
-    assert.deepEqual(providers.getRemoteProviderCapabilities({ id: "future-provider" }), {
-      duplicateRemoteRecords: false
-    });
   });
 
   it("keeps the provider contract consistent across backends", () => {
@@ -78,7 +62,6 @@ describe("remote provider selection", () => {
       const provider = providers.getRemoteProvider(id);
       assert.equal(typeof provider.id, "string");
       assert.equal(typeof provider.label, "string");
-      assert.equal(Object.isFrozen(provider.capabilities), true);
       for (const method of [
         "ensureReady",
         "getChangeToken",
@@ -212,62 +195,6 @@ describe("MySQL API client", () => {
   });
 });
 
-describe("Google provider adapter", () => {
-  it("maps Google rows and config rows to opaque provider references", async () => {
-    const google = createGoogleApiMock().install();
-    try {
-      await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
-      await db.setSetting("spreadsheet_id", { state: "ready", spreadsheetId: "sheet-1" });
-      const entry = fixture();
-      google.enqueue(
-        { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values:batchGet" },
-        google.json({
-          valueRanges: [
-            { range: "time_entries!A:N", values: [SHEET_HEADERS, entryToRow(entry)] },
-            { range: "config!A:C", values: [["key", "value", "updated_at"], ["duration_multiplier", "1.5", entry.updated_at]] }
-          ]
-        })
-      );
-
-      const snapshot = await googleProvider.googleSheetsProvider.readSnapshot();
-      const entryRef = snapshot.entryRefs.get(entry.id);
-      const configRef = snapshot.configRefs.get("duration_multiplier");
-
-      assert.deepEqual(entryRef, {
-        kind: "google-sheet-row",
-        rowIndex: 2,
-        fingerprint: JSON.stringify(entryToRow(entry))
-      });
-      assert.deepEqual(configRef, {
-        kind: "google-config-row",
-        rowIndex: 2,
-        fingerprint: JSON.stringify(["duration_multiplier", "1.5", entry.updated_at])
-      });
-      assert.equal(snapshot.rowMap, undefined);
-      assert.equal(snapshot.configRows, undefined);
-      assert.equal(snapshot.duplicates.length, 0);
-
-      const configRead = { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values/config!A%3AC" };
-      google.enqueue(configRead, google.json({
-        values: [["key", "value", "updated_at"], ["duration_multiplier", "1.5", entry.updated_at]]
-      }));
-      google.enqueue({ method: "PUT", pathname: "/v4/spreadsheets/sheet-1/values/config!A2%3AC2" }, google.json({}));
-      google.enqueue(configRead, google.json({
-        values: [["key", "value", "updated_at"], ["duration_multiplier", "1.5", entry.updated_at]]
-      }));
-
-      await googleProvider.googleSheetsProvider.updateConfig(
-        "duration_multiplier",
-        "1.5",
-        entry.updated_at,
-        { expectedRef: configRef }
-      );
-    } finally {
-      google.restore();
-    }
-  });
-});
-
 describe("provider boundary", () => {
   it("keeps generic sync and reconciliation free of direct Sheets imports", () => {
     const sync = readFileSync(join(process.cwd(), "extension/src/sync.js"), "utf8");
@@ -287,7 +214,6 @@ describe("provider boundary", () => {
     assert.match(options, /id="activateMysqlFromLocal"/);
     assert.match(options, /id="activateMysqlFromRemote"/);
     assert.match(options, /id="firstRunSetup"/);
-    assert.match(options, /id="chooseGoogleSetup"/);
     assert.match(options, /id="chooseMysqlSetup"/);
     assert.match(options, /id="chooseCloudflareD1Setup"/);
     assert.match(options, /id="cloudflareD1ApiBaseUrl"/);
@@ -301,6 +227,9 @@ describe("provider boundary", () => {
     assert.match(optionsCode, /activateMysqlFromRemote/);
     assert.match(optionsCode, /REMOTE_BACKEND_ESTABLISHED/);
     assert.match(options, /not switched until verified migration succeeds/i);
+    assert.doesNotMatch(options, /\bgoogle\b|\bspreadsheet\b|\boauth\b/i);
+    assert.doesNotMatch(optionsCode, /\bgoogle\b|\bspreadsheet\b|\boauth\b/i);
+    assert.deepEqual(manifest.host_permissions, []);
     assert.ok(manifest.optional_host_permissions.includes("https://time-api.cordoceo.com/*"));
     assert.ok(manifest.optional_host_permissions.includes("https://*/*"));
     assert.ok(manifest.optional_host_permissions.includes("https://*.workers.dev/*"));

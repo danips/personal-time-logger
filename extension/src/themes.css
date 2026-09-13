@@ -233,7 +233,6 @@ html[data-theme] .theme-picker {
   background: var(--surface-raised);
 }
 
-html[data-theme] #saveGoogleCredentials,
 html[data-theme] #saveSettings,
 html[data-theme] #saveTempoSettings,
 html[data-theme] #syncButton,
@@ -292,9 +291,7 @@ html[data-theme] .status[data-status="pending"] {
 }
 
 html[data-theme] .status[data-status="error"],
-html[data-theme] .status[data-status="offline"],
-html[data-theme] .status[data-status="not signed in"],
-html[data-theme] .status[data-status="spreadsheet missing"] {
+html[data-theme] .status[data-status="offline"] {
   color: var(--danger);
 }
 

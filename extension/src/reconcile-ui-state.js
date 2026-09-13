@@ -1,11 +1,6 @@
-export function duplicateRecordsSupported(report) {
-  return report?.provider?.capabilities?.duplicateRemoteRecords === true;
-}
-
 export function reconciliationActionEligibility(report) {
   const newest = (report?.different || []).filter((item) => item?.newer === "local" || item?.newer === "remote");
   return {
-    deleteAllDuplicates: Boolean(report?.duplicates?.length),
     keepAllLocal: Boolean(report?.different?.length),
     keepAllRemote: Boolean(report?.different?.length),
     keepAllNewest: Boolean(newest.length),

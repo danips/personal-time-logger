@@ -10,11 +10,10 @@ globalThis.BroadcastChannel = undefined;
 
 const db = await import("../extension/src/db.js");
 const backup = await import("../extension/src/backup.js");
-const { protectDeletionRecovery, pullRemoteEntries, purgeDeletedEntries, pushDirtyEntries } = await import("../extension/src/sync.js");
+const { protectDeletionRecovery, pullRemoteEntries, pushDirtyEntries } = await import("../extension/src/sync.js");
 const { SETTING_KEY } = await import("../extension/src/setting-keys.js");
 
 const PROVIDERS = [
-  { id: "google-sheets", refKind: "google-sheet-row" },
   { id: "mysql", refKind: "mysql-row" },
   { id: "cloudflare-d1", refKind: "cloudflare-d1-row" }
 ];
@@ -65,7 +64,7 @@ function providerDouble(providerDefinition, remoteEntries) {
 }
 
 describe("tombstone retention investigation", () => {
-  it("reproduces post-purge outcomes for every registered provider", async () => {
+  it("retains tombstones and blocks unsafe resurrection for every API provider", async () => {
     const report = [];
 
     for (const providerDefinition of PROVIDERS) {
@@ -80,14 +79,6 @@ describe("tombstone retention investigation", () => {
       const profileA = localState([tombstone]);
       await seedEntry(db, tombstone);
 
-      const purgedA = await purgeDeletedEntries(
-        profileA,
-        [tombstone],
-        new Map([[tombstone.id, { kind: providerDefinition.refKind, version: 1 }]]),
-        [],
-        { provider }
-      );
-      assert.equal(purgedA, 0, `${providerDefinition.id}: expired tombstone should be retained`);
       assert.equal(provider.remote.has(tombstone.id), true, `${providerDefinition.id}: remote tombstone should be retained`);
       assert.equal(profileA.has(tombstone.id), true, `${providerDefinition.id}: profile A should retain its tombstone`);
 

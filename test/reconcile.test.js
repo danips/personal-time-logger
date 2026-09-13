@@ -72,25 +72,6 @@ describe("compareEntries", () => {
     assert.equal(sameTimestamp.different[0].newer, "conflict");
   });
 
-  it("separates row totals from distinct entries when rows are duplicated", () => {
-    const duplicates = [
-      { id: "entry-1", entry: fixture(), keepRowIndex: 2, extraRowIndexes: [7, 9] }
-    ];
-    const report = compareEntries([fixture()], [fixture()], duplicates);
-
-    assert.equal(report.remoteCount, 1);
-    assert.equal(report.duplicateRowCount, 2);
-    assert.equal(report.remoteRowCount, 3);
-    assert.equal(report.duplicates.length, 1);
-  });
-
-  it("defaults to no duplicates when none are supplied", () => {
-    const report = compareEntries([fixture()], [fixture()]);
-    assert.deepEqual(report.duplicates, []);
-    assert.equal(report.duplicateRowCount, 0);
-    assert.equal(report.remoteRowCount, report.remoteCount);
-  });
-
   it("handles empty sides", () => {
     const empty = compareEntries([], []);
     assert.equal(empty.localCount, 0);
@@ -99,11 +80,11 @@ describe("compareEntries", () => {
   });
 
   it("accounts for quarantined rows without offering their ids as local-only", () => {
-    const quarantined = [{ id: "entry-1", rowIndex: 4, reason: "invalid_entry" }];
-    const report = compareEntries([fixture()], [], [], quarantined);
+    const quarantined = [{ id: "entry-1", ref: { version: 4 }, reason: "invalid_entry" }];
+    const report = compareEntries([fixture()], [], quarantined);
 
     assert.deepEqual(report.quarantined, quarantined);
     assert.equal(report.localOnly.length, 0);
-    assert.equal(report.remoteRowCount, 1);
+    assert.equal(report.remoteCount, 0);
   });
 });

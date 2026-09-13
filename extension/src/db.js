@@ -599,7 +599,7 @@ export async function mutateEntryState({
 
 /**
  * Mutates the complete entry table and named settings in one transaction.
- * Reserved for intentional whole-history operations such as spreadsheet reseed.
+ * Reserved for intentional whole-history operations such as backup restore.
  */
 export async function mutateAllLocalState(settingKeys, mutator) {
   if (typeof mutator !== "function") throw new TypeError("A local-state mutator is required");

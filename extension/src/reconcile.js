@@ -1,8 +1,9 @@
 import { getAllEntries, mutateEntryState, mutateSettings, StorageConflictError } from "./db.js";
-import { entryToRow, normalizeEntry, SHEET_HEADERS } from "./entries.js";
+import { normalizeEntry } from "./entries.js";
+import { ENTRY_FIELDS } from "./entry-contract.js";
 import { entryFingerprint as canonicalEntryFingerprint } from "./fingerprints.js";
 import { notifyEntriesChanged } from "./events.js";
-import { getActiveRemoteProvider, getRemoteProviderCapabilities } from "./remote-provider.js";
+import { getActiveRemoteProvider } from "./remote-provider.js";
 import { nowIso, uuid } from "./time.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { ERROR_CODE } from "./error-codes.js";
@@ -11,7 +12,7 @@ import { SETTING_KEY } from "./setting-keys.js";
 
 // Only canonical remote fields are compared. dirty, last_sync_at and sync_error
 // are local bookkeeping, so a difference there is not a divergence.
-const COMPARED_FIELDS = SHEET_HEADERS.filter((field) => field !== "id");
+const COMPARED_FIELDS = ENTRY_FIELDS.filter((field) => field !== "id");
 export const RECONCILIATION_INTENTS_KEY = SETTING_KEY.RECONCILIATION_INTENTS;
 export const STALE_RECONCILIATION_INTENTS_KEY = SETTING_KEY.STALE_RECONCILIATION_INTENTS;
 export const RECONCILIATION_INTENT_PENDING = RECONCILIATION_INTENT_STATE.PENDING_REMOTE_PUSH;
@@ -156,13 +157,10 @@ export async function pruneExpiredReconciliationIntents({ now = Date.now() } = {
  * or pull would change.
  */
 export function fieldDifferences(localEntry, remoteEntry) {
-  const localRow = entryToRow(localEntry);
-  const remoteRow = entryToRow(remoteEntry);
-
-  return COMPARED_FIELDS.map((field) => {
-    const index = SHEET_HEADERS.indexOf(field);
-    return { field, local: localRow[index], remote: remoteRow[index] };
-  }).filter((difference) => difference.local !== difference.remote);
+  const local = normalizeEntry(localEntry);
+  const remote = normalizeEntry(remoteEntry);
+  return COMPARED_FIELDS.map((field) => ({ field, local: local[field], remote: remote[field] }))
+    .filter((difference) => difference.local !== difference.remote);
 }
 
 function newerSide(localEntry, remoteEntry) {
@@ -176,7 +174,7 @@ function newerSide(localEntry, remoteEntry) {
  * Sorts every entry into in-sync, differing, local-only, or remote-only.
  * Pure, so the classification can be exercised without touching the network.
  */
-export function compareEntries(localEntries, remoteEntries, duplicates = [], quarantined = []) {
+export function compareEntries(localEntries, remoteEntries, quarantined = []) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
   const localIds = new Set(localEntries.map((entry) => entry.id));
   const quarantinedIds = new Set(quarantined.map((item) => item.id).filter(Boolean));
@@ -207,21 +205,14 @@ export function compareEntries(localEntries, remoteEntries, duplicates = [], qua
     if (!localIds.has(remote.id) && !quarantinedIds.has(remote.id)) remoteOnly.push({ id: remote.id, remote });
   }
 
-  const duplicateRowCount = duplicates.reduce((total, item) => total + item.extraRowIndexes.length, 0);
-
   return {
     inSync,
     different,
     localOnly,
     remoteOnly,
-    duplicates,
     quarantined,
     localCount: localEntries.length,
-    // Unique ids, which is what remoteEntries holds. Duplicate rows are counted
-    // separately, otherwise the totals appear not to add up.
-    remoteCount: remoteEntries.length,
-    remoteRowCount: remoteEntries.length + duplicateRowCount + quarantined.length,
-    duplicateRowCount
+    remoteCount: remoteEntries.length
   };
 }
 
@@ -229,11 +220,11 @@ export function compareEntries(localEntries, remoteEntries, duplicates = [], qua
  * Reads both sides and compares them. Read-only: nothing is pushed, pulled, or
  * resolved until the user picks a side.
  */
-export async function loadReconciliation({ interactiveAuth = false, provider } = {}) {
+export async function loadReconciliation({ provider } = {}) {
   const remoteProvider = provider || await getActiveRemoteProvider();
   const [localEntries, snapshot] = await Promise.all([
     getAllEntries(),
-    remoteProvider.readSnapshot({ interactiveAuth })
+    remoteProvider.readSnapshot()
   ]);
 
   if (!Array.isArray(localEntries)) {
@@ -252,32 +243,14 @@ export async function loadReconciliation({ interactiveAuth = false, provider } =
     ...compareEntries(
       localEntries.map(normalizeEntry),
       snapshot.entries,
-      snapshot.duplicates || [],
       snapshot.quarantined || []
     ),
     provider: {
       id: String(remoteProvider.id || ""),
-      label: String(remoteProvider.label || remoteProvider.id || "Remote storage"),
-      capabilities: getRemoteProviderCapabilities(remoteProvider)
+      label: String(remoteProvider.label || remoteProvider.id || "Remote storage")
     },
     scannedAt: nowIso()
   };
-}
-
-/**
- * Deletes surplus physical remote rows for a duplicated id, keeping the one sync uses.
- *
- * This provider-specific repair writes directly because a duplicate physical row
- * has no local counterpart to mark and therefore nothing for normal sync to carry.
- */
-export async function deleteDuplicateRows(extraRows, { interactiveAuth = false, provider } = {}) {
-  if (!extraRows.length) return 0;
-  const remoteProvider = await activeProvider(provider);
-  await remoteProvider.deleteEntries(extraRows.map((row) => ({
-    id: row.id,
-    expectedRef: row.ref
-  })), { interactiveAuth });
-  return extraRows.length;
 }
 
 function assertLocalExpectation(existing, command) {
@@ -421,9 +394,9 @@ function normalizeBatchResolution(resolution) {
   return normalizeReconciliationCommand(resolution, { batch: true });
 }
 
-async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = false, provider } = {}) {
+async function verifyBatchRemoteResolutions(resolutions, { provider } = {}) {
   const remoteProvider = await activeProvider(provider);
-  const snapshot = await remoteProvider.readSnapshot({ interactiveAuth });
+  const snapshot = await remoteProvider.readSnapshot();
   const remoteById = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
   for (const resolution of resolutions) {
     const current = remoteById.get(resolution.id) || null;
@@ -439,7 +412,7 @@ async function verifyBatchRemoteResolutions(resolutions, { interactiveAuth = fal
  * still change after the snapshot, so the returned result is explicit per id;
  * the forced sync that follows remains responsible for the remote commit.
  */
-export async function resolveReconciliationBatch(items, { interactiveAuth = false, provider } = {}) {
+export async function resolveReconciliationBatch(items, { provider } = {}) {
   const resolutions = items.map(normalizeBatchResolution);
   if (!resolutions.length) return { results: [] };
   const ids = new Set();
@@ -448,7 +421,7 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
     ids.add(resolution.id);
   }
 
-  const remoteById = await verifyBatchRemoteResolutions(resolutions, { interactiveAuth, provider });
+  const remoteById = await verifyBatchRemoteResolutions(resolutions, { provider });
   const results = await mutateEntryState({
     entryIds: ids,
     settingKeys: [RECONCILIATION_INTENTS_KEY]
@@ -474,9 +447,9 @@ export async function resolveReconciliationBatch(items, { interactiveAuth = fals
   return { results };
 }
 
-async function verifyReconciliationRemote(command, { interactiveAuth = false, provider } = {}) {
+async function verifyReconciliationRemote(command, { provider } = {}) {
   const remoteProvider = await activeProvider(provider);
-  const snapshot = await remoteProvider.readSnapshot({ interactiveAuth });
+  const snapshot = await remoteProvider.readSnapshot();
   const current = snapshot.entries.find((entry) => entry.id === command.id) || null;
   assertRemoteExpectation(current, command);
   return current;

@@ -11,7 +11,3 @@ export function canonicalEntryValues(entry) {
 export function entryFingerprint(entry) {
   return JSON.stringify(canonicalEntryValues(entry));
 }
-
-export function rawRowFingerprint(cells) {
-  return JSON.stringify(Array.isArray(cells) ? cells : []);
-}

@@ -67,8 +67,6 @@ const versionedMutations = createVersionedMutationOperations({
 export const mysqlProvider = Object.freeze({
   id: "mysql",
   label: "MySQL 8.4",
-  capabilities: Object.freeze({ duplicateRemoteRecords: false }),
-
   async ensureReady(options = {}) {
     requireMysqlHealth(await (await configuredClient(options)).health());
     return null;
@@ -94,9 +92,5 @@ export const mysqlProvider = Object.freeze({
     });
   },
 
-  ...versionedMutations,
-
-  async ensureAppMarker() {
-    return false;
-  }
+  ...versionedMutations
 });

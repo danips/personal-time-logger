@@ -1,32 +1,15 @@
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 
-import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
+import { normalizeEntry } from "../extension/src/entries.js";
 import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
-import { createGoogleApiMock } from "./support/mock-google-api.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
-globalThis.browser = {
-  runtime: { getURL: (path) => path },
-  storage: {
-    sync: {
-      async get() {
-        return {
-          google_oauth_client_id: "test-client",
-          google_oauth_client_secret: "test-secret"
-        };
-      },
-      async set() {}
-    }
-  }
-};
 
-let db;
-let google;
-let pushDirtyEntries;
-let sheets;
+const db = await import("../extension/src/db.js");
+const { pushDirtyEntries } = await import("../extension/src/sync.js");
 
 const fixture = (over = {}) => normalizeEntry({
   id: "append-entry",
@@ -43,57 +26,57 @@ const fixture = (over = {}) => normalizeEntry({
   ...over
 });
 
-const appendPath = (request) => request.method === "POST"
-  && request.pathname.endsWith("/values/time_entries!A%3AN:append");
-const snapshotPath = { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values:batchGet" };
+const localState = (entries) => new Map(entries.map((entry) => [entry.id, entry]));
 
-function enqueueSnapshot(entries) {
-  google.enqueue(snapshotPath, google.json({
-    valueRanges: [
-      { range: "time_entries!A:N", values: [SHEET_HEADERS, ...entries.map(entryToRow)] },
-      { range: "config!A:C", values: [["key", "value", "updated_at"]] }
-    ]
-  }));
+function snapshot(entries) {
+  return {
+    entries,
+    entryRefs: new Map(entries.map((entry) => [entry.id, { kind: "mysql-entry", version: 1 }])),
+    duplicates: [],
+    quarantined: [],
+    config: {},
+    configRefs: new Map(),
+    changeToken: "v1"
+  };
 }
 
-function localState(entries) {
-  return new Map(entries.map((entry) => [entry.id, entry]));
+function createProvider({ append, reads = [] } = {}) {
+  const readQueue = [...reads];
+  const provider = {
+    id: "mysql",
+    label: "MySQL 8.4",
+    async updateEntries() {},
+    async appendEntries(entries) {
+      return append ? append(entries, provider) : entries.map((entry) => ({ id: entry.id, ref: { kind: "mysql-entry", version: 1 } }));
+    },
+    async readSnapshot() {
+      const next = readQueue.shift();
+      return typeof next === "function" ? next() : next || snapshot([]);
+    }
+  };
+  return provider;
 }
-
-before(async () => {
-  db = await import("../extension/src/db.js");
-  ({ pushDirtyEntries } = await import("../extension/src/sync.js"));
-  sheets = await import("../extension/src/sheets.js");
-  google = createGoogleApiMock().install();
-  await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
-  await sheets.setSpreadsheetId("sheet-1");
-});
-
-after(() => google.restore());
-
-beforeEach(() => {
-  google.calls.length = 0;
-});
 
 describe("append idempotency", () => {
-  it("keeps an append dirty until read-back confirms a response without a range", async () => {
-    const entry = fixture({ id: "append-missing-range" });
+  it("keeps an append dirty until read-back confirms a response without a mapping", async () => {
+    const entry = fixture({ id: "append-missing-mapping" });
     await seedEntry(db, entry);
-    google.enqueue(appendPath, google.json({ updates: {} }));
-    const readBack = google.barrier("append read-back");
-    google.enqueue(snapshotPath, readBack);
-
-    const pushedPromise = pushDirtyEntries(localState([entry]), [], new Map(), { interactiveAuth: false });
-    await readBack.waitForRequest();
+    let resolveRead;
+    let markReadStarted;
+    const readStarted = new Promise((resolve) => { markReadStarted = resolve; });
+    const readGate = new Promise((resolve) => { resolveRead = resolve; });
+    const provider = createProvider({
+      append: async () => [],
+      reads: [async () => {
+        markReadStarted();
+        return readGate;
+      }]
+    });
+    const pushedPromise = pushDirtyEntries(localState([entry]), [], new Map(), { provider });
+    await readStarted;
     assert.equal((await db.getEntry(entry.id)).dirty, true);
-    readBack.release(google.json({
-      valueRanges: [
-        { range: "time_entries!A:N", values: [SHEET_HEADERS, entryToRow(entry)] },
-        { range: "config!A:C", values: [["key", "value", "updated_at"]] }
-      ]
-    }));
+    resolveRead(snapshot([entry]));
     const pushed = await pushedPromise;
-
     assert.equal(pushed.has(entry.id), true);
     assert.equal((await db.getEntry(entry.id)).dirty, false);
   });
@@ -102,45 +85,44 @@ describe("append idempotency", () => {
     const entry = fixture({ id: "append-timeout" });
     const local = localState([entry]);
     await seedEntry(db, entry);
-    google.enqueue(appendPath, async () => {
-      enqueueSnapshot([entry]);
-      throw new Error("connection lost after the server committed the append");
+    let appendCalls = 0;
+    const provider = createProvider({
+      append: async () => {
+        appendCalls += 1;
+        throw Object.assign(new Error("connection lost after the server committed the append"), { committed: true });
+      },
+      reads: [snapshot([entry])]
     });
 
-    await assert.rejects(
-      () => pushDirtyEntries(local, [], new Map(), { interactiveAuth: false }),
-      /connection lost/
-    );
+    await assert.rejects(() => pushDirtyEntries(local, [], new Map(), { provider }), /connection lost/);
     assert.equal((await db.getEntry(entry.id)).dirty, false);
-
-    await pushDirtyEntries(local, [], new Map(), { interactiveAuth: false });
-    assert.equal(google.calls.filter(appendPath).length, 1);
+    await pushDirtyEntries(local, [], new Map(), { provider });
+    assert.equal(appendCalls, 1);
   });
 
   it("acknowledges only the confirmed prefix of a partial append response", async () => {
     const first = fixture({ id: "append-prefix-first" });
     const second = fixture({ id: "append-prefix-second" });
     await seedEntries(db, [first, second]);
-    google.enqueue(appendPath, google.json({ updates: { updatedRange: "time_entries!A2:N2" } }));
-    enqueueSnapshot([first]);
+    const provider = createProvider({
+      append: async () => [{ id: first.id, ref: { kind: "mysql-entry", version: 1 } }]
+    });
 
-    const pushed = await pushDirtyEntries(localState([first, second]), [], new Map(), { interactiveAuth: false });
-
+    const pushed = await pushDirtyEntries(localState([first, second]), [], new Map(), { provider });
     assert.equal(pushed.has(first.id), true);
     assert.equal(pushed.has(second.id), false);
     assert.equal((await db.getEntry(first.id)).dirty, false);
     assert.equal((await db.getEntry(second.id)).dirty, true);
   });
 
-  it("treats a same-id row with different contents as an append conflict", async () => {
+  it("treats a same-id record with different contents as an append conflict", async () => {
     const entry = fixture({ id: "append-conflict" });
-    const remote = fixture({ id: entry.id, task: "Manual spreadsheet edit", dirty: false });
+    const remote = fixture({ id: entry.id, task: "Manual API edit", dirty: false });
     await seedEntry(db, entry);
-    google.enqueue(appendPath, google.json({ updates: {} }));
-    enqueueSnapshot([remote]);
+    const provider = createProvider({ append: async () => [], reads: [snapshot([remote])] });
 
     await assert.rejects(
-      () => pushDirtyEntries(localState([entry]), [], new Map(), { interactiveAuth: false }),
+      () => pushDirtyEntries(localState([entry]), [], new Map(), { provider }),
       (error) => error.code === "REMOTE_APPEND_CONFLICT"
     );
     assert.equal((await db.getEntry(entry.id)).dirty, true);

@@ -1,65 +1,60 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
-import { createGoogleApiMock } from "./support/mock-google-api.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
 globalThis.browser = {
   runtime: { getURL: (path) => path },
-  storage: {
-    sync: {
-      async get() {
-        return {
-          google_oauth_client_id: "test-client",
-          google_oauth_client_secret: "test-secret"
-        };
-      },
-      async set() {}
-    }
-  }
+  storage: { sync: { async get() { return {}; }, async set() {} } }
 };
 
-const snapshotPath = { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values:batchGet" };
+const db = await import("../extension/src/db.js");
+const { syncNow } = await import("../extension/src/sync.js");
 
-let db;
-let google;
-let sheets;
-let syncNow;
+function barrier() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
 
-before(async () => {
-  db = await import("../extension/src/db.js");
-  sheets = await import("../extension/src/sheets.js");
-  ({ syncNow } = await import("../extension/src/sync.js"));
-  google = createGoogleApiMock().install();
-  await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
-  await sheets.setSpreadsheetId("sheet-1");
-});
-
-after(() => google.restore());
+function createProvider() {
+  const calls = [];
+  const gates = [barrier(), barrier()];
+  return {
+    id: "mysql",
+    label: "MySQL 8.4",
+    calls,
+    async ensureReady() { calls.push("health"); },
+    async getChangeToken() { calls.push("change-token"); return "v1"; },
+    async readSnapshot() {
+      const index = calls.filter((call) => call === "read-snapshot").length;
+      calls.push("read-snapshot");
+      await gates[index].promise;
+      throw Object.assign(new Error("API unavailable"), { code: "API_ERROR" });
+    },
+    async updateEntries() {},
+    async appendEntries() { return []; },
+    async updateConfig() {},
+    gates
+  };
+}
 
 describe("same-context sync coalescing", () => {
   it("keeps a queued stronger cycle registered while it runs", async () => {
-    const firstGate = google.barrier("first forced snapshot");
-    const secondGate = google.barrier("queued forced snapshot");
-    google.enqueue(snapshotPath, firstGate);
-    google.enqueue(snapshotPath, secondGate);
+    const provider = createProvider();
+    const first = syncNow({ provider });
+    while (!provider.calls.includes("read-snapshot")) await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = syncNow({ force: true, provider });
+    provider.gates[0].resolve();
+    while (provider.calls.filter((call) => call === "read-snapshot").length < 2) await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const first = syncNow({ force: true });
-    await firstGate.waitForRequest();
-    const second = syncNow({ force: true, interactiveAuth: true });
-    firstGate.release(google.status(500));
-    await secondGate.waitForRequest();
-
-    const third = syncNow();
+    const third = syncNow({ provider });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // The first failed snapshot probes Drive once while deciding whether the
-    // spreadsheet disappeared. A third same-context cycle would add another
-    // request while the queued second snapshot is still held.
-    assert.equal(google.calls.length, 3);
+    assert.equal(provider.calls.filter((call) => call === "read-snapshot").length, 2);
 
-    secondGate.release(google.status(500));
+    provider.gates[1].resolve();
 
     await assert.rejects(first, (error) => error.code === "API_ERROR");
     await assert.rejects(second, (error) => error.code === "API_ERROR");

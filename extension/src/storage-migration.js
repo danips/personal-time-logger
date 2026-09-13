@@ -6,7 +6,6 @@ import {
   mutateSettings,
   releaseLock,
   renewLock,
-  setSetting
 } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { codedError } from "./coded-error.js";
@@ -19,7 +18,6 @@ const SYNC_LOCK_KEY = "sync_lock";
 const MIGRATION_LOCK_TTL_MS = 120_000;
 const MIGRATION_BATCH_SIZE = 100;
 const MAX_STABILIZATION_ATTEMPTS = 3;
-const APP_MARKER_KEY = "app";
 const MIGRATION_PHASES = new Set([
   "preparing",
   "seeding",
@@ -55,7 +53,6 @@ function isActiveState(state) {
 
 function canonicalConfig(config = {}) {
   return Object.entries(config)
-    .filter(([key]) => key !== APP_MARKER_KEY)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => [key, String(value?.value ?? ""), String(value?.updated_at ?? "")]);
 }
@@ -88,12 +85,12 @@ function validateSnapshot(snapshot, role) {
   if (!snapshot || !Array.isArray(snapshot.entries) || !snapshot.config || typeof snapshot.config !== "object") {
     throw migrationError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `${role} storage returned an invalid snapshot.`);
   }
-  if (snapshot.quarantined?.length || snapshot.duplicates?.length) {
+  if (snapshot.quarantined?.length) {
     throw migrationError(
       role === "source" ? ERROR_CODE.MIGRATION_SOURCE_UNSAFE : ERROR_CODE.MIGRATION_TARGET_CONFLICT,
       role === "source"
-        ? "The source has quarantined or duplicate records that must be resolved before migration."
-        : "The target has invalid or duplicate records and cannot be used for migration."
+        ? "The source has quarantined records that must be resolved before migration."
+        : "The target has invalid records and cannot be used for migration."
     );
   }
 }
@@ -230,25 +227,16 @@ function activeSourceId(provider) {
   return provider.id;
 }
 
+async function getSupportedActiveProviderId() {
+  const activeId = String(await getSetting(SETTING_KEY.REMOTE_BACKEND, "") || "").trim();
+  return registeredRemoteProviderIds().includes(activeId) ? activeId : null;
+}
+
 async function prepareTarget(provider, lease, options) {
   if (provider.testConnection) {
     await provider.testConnection({ ...options, requestPermission: true });
   }
-  const provisioned = await provider.ensureReady({
-    ...options,
-    lease,
-    reseed: async (spreadsheetId) => {
-      // Google provisioning can leave a pending binding while it is being
-      // initialized. The target is not active yet, so a direct ready binding
-      // is safe once provisioning has returned its verified spreadsheet ID.
-      if (spreadsheetId) {
-        await setSetting(SETTING_KEY.SPREADSHEET_ID, { state: "ready", spreadsheetId: String(spreadsheetId) });
-      }
-    }
-  });
-  if (provisioned?.spreadsheetId) {
-    await setSetting(SETTING_KEY.SPREADSHEET_ID, { state: "ready", spreadsheetId: String(provisioned.spreadsheetId) });
-  }
+  await provider.ensureReady({ ...options, lease });
 }
 
 async function seedTarget(source, target, targetSnapshot, state, { lease, options }) {
@@ -323,7 +311,6 @@ async function seedTarget(source, target, targetSnapshot, state, { lease, option
   }
 
   await lease.assert();
-  await target.ensureAppMarker?.(targetSnapshot.config, targetSnapshot.configRefs, options);
 }
 
 function lockOwner(id) {
@@ -355,10 +342,8 @@ async function switchBackend(targetId, state) {
   await mutateSettings([
     SETTING_KEY.REMOTE_BACKEND,
     SETTING_KEY.REMOTE_BACKEND_ESTABLISHED,
-    SETTING_KEY.REMOTE_CHANGE_TOKEN,
     SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN,
     SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN,
-    SETTING_KEY.REMOTE_MODIFIED_TIME,
     SETTING_KEY.SYNC_BACKOFF_SECONDS,
     SETTING_KEY.SYNC_BACKOFF_UNTIL,
     SETTING_KEY.RECONCILIATION_INTENTS,
@@ -366,10 +351,8 @@ async function switchBackend(targetId, state) {
   ], (settings) => {
     settings.set(SETTING_KEY.REMOTE_BACKEND, targetId);
     settings.set(SETTING_KEY.REMOTE_BACKEND_ESTABLISHED, true);
-    settings.set(SETTING_KEY.REMOTE_CHANGE_TOKEN, "");
     settings.set(SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN, "");
     settings.set(SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN, "");
-    settings.set(SETTING_KEY.REMOTE_MODIFIED_TIME, "");
     settings.set(SETTING_KEY.SYNC_BACKOFF_SECONDS, 0);
     settings.set(SETTING_KEY.SYNC_BACKOFF_UNTIL, 0);
     settings.set(SETTING_KEY.RECONCILIATION_INTENTS, []);
@@ -404,20 +387,20 @@ async function localMigrationSnapshot() {
       updated_at: updatedAt
     };
   }
-  return { entries, config, duplicates: [], quarantined: [] };
+  return { entries, config, quarantined: [] };
 }
 
 /**
  * Starts a selected backend from this profile's local-first data without
  * contacting another remote provider.
  * This is deliberately separate from migrateStorage: the normal migration
- * must read the current remote backend, while a new profile may have no Google
- * account and still need a way to choose MySQL as its first backend.
+ * must read the current remote backend, while a new profile may have no active
+ * backend and still need a way to choose MySQL as its first backend.
  */
 export async function activateProviderFromLocal(targetProviderId, { onProgress } = {}) {
-  const active = await getActiveRemoteProvider();
   const targetId = cleanProviderId(targetProviderId);
-  if (active.id === targetId) {
+  const activeId = await getSupportedActiveProviderId();
+  if (activeId === targetId) {
     throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "That storage backend is already active.");
   }
 
@@ -470,7 +453,7 @@ export async function activateProviderFromLocal(targetProviderId, { onProgress }
       state = await switchBackend(targetId, state);
     });
 
-    await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
+    await syncNow({ force: true, migrationId: state.migration_id });
     return finishMigration(state);
   } catch (error) {
     if (!await preservePostSwitchFailure(state, error)) await failMigration(state, error);
@@ -480,20 +463,20 @@ export async function activateProviderFromLocal(targetProviderId, { onProgress }
 
 /**
  * Makes an existing remote dataset the active backend without contacting
- * Google. Local entries are checked first so an existing local edit cannot be
+ * another backend. Local entries are checked first so an existing local edit cannot be
  * silently discarded; target-only entries are then imported by the normal sync
  * pull after the backend switch.
  */
 export async function activateProviderFromRemote(targetProviderId, { onProgress } = {}) {
-  const active = await getActiveRemoteProvider();
   const targetId = cleanProviderId(targetProviderId);
-  if (active.id === targetId) {
+  const activeId = await getSupportedActiveProviderId();
+  if (activeId === targetId) {
     throw migrationError(ERROR_CODE.MIGRATION_SOURCE_UNSAFE, "That storage backend is already active.");
   }
 
   let state = {
     migration_id: migrationId(),
-    source_provider: active.id,
+    source_provider: activeId || "local",
     target_provider: targetId,
     phase: "preparing",
     attempt: 1,
@@ -527,7 +510,7 @@ export async function activateProviderFromRemote(targetProviderId, { onProgress 
       state = await switchBackend(targetId, state);
     });
 
-    await syncNow({ force: true, interactiveAuth: false, migrationId: state.migration_id });
+    await syncNow({ force: true, migrationId: state.migration_id });
     return finishMigration(state);
   } catch (error) {
     if (!await preservePostSwitchFailure(state, error)) await failMigration(state, error);
@@ -539,12 +522,12 @@ export async function getStorageMigrationState() {
   return readState();
 }
 
-export async function migrateStorage(targetProviderId, { interactiveAuth = true, onProgress } = {}) {
+export async function migrateStorage(targetProviderId, { onProgress } = {}) {
   const targetId = cleanProviderId(targetProviderId);
   let state = await readState();
   if (state?.phase === "post_switch") {
     try {
-      await syncNow({ force: true, interactiveAuth, migrationId: state.migration_id });
+      await syncNow({ force: true, migrationId: state.migration_id });
     } catch (error) {
       await preservePostSwitchFailure(state, error);
       throw error;
@@ -575,8 +558,8 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
     await saveState(state);
     onProgress?.(state);
     try {
-      await syncNow({ force: true, interactiveAuth, migrationId: state.migration_id });
-      const sourceSnapshot = await sourceProvider.readSnapshot({ interactiveAuth });
+      await syncNow({ force: true, migrationId: state.migration_id });
+      const sourceSnapshot = await sourceProvider.readSnapshot();
       validateSnapshot(sourceSnapshot, "source");
       const intents = await getSetting(SETTING_KEY.RECONCILIATION_INTENTS, []);
       if (Array.isArray(intents) && intents.length) {
@@ -592,7 +575,7 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
       await saveState(state);
 
       const result = await withMigrationLease(state.migration_id, async (lease) => {
-        const options = { interactiveAuth, lease };
+        const options = { lease };
         await prepareTarget(targetProvider, lease, options);
         await lease.assert();
         let targetSnapshot = await targetProvider.readSnapshot(options);
@@ -613,7 +596,7 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
         if (localEntries.some((entry) => entry.dirty)) {
           throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "A local entry changed during migration.");
         }
-        const finalSourceSnapshot = await sourceProvider.readSnapshot({ interactiveAuth });
+        const finalSourceSnapshot = await sourceProvider.readSnapshot();
         validateSnapshot(finalSourceSnapshot, "source");
         if (await migrationDigest(finalSourceSnapshot) !== sourceDigest) {
           throw migrationError(ERROR_CODE.MIGRATION_SOURCE_CHANGED, "The source changed during migration.");
@@ -623,7 +606,7 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
       });
       if (result) {
         const postSwitch = await readState();
-        await syncNow({ force: true, interactiveAuth, migrationId: state.migration_id });
+        await syncNow({ force: true, migrationId: state.migration_id });
         return finishMigration(postSwitch || state);
       }
     } catch (error) {

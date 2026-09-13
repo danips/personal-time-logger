@@ -75,7 +75,7 @@ async function createAlarmRemoteFixture() {
       return;
     }
     if (req.headers.authorization !== `Bearer ${token}`) {
-      response(res, 401, { error: { code: "AUTH_REQUIRED" } });
+      response(res, 401, { error: { code: "REMOTE_AUTH_REQUIRED" } });
       return;
     }
     if (req.url === "/v1/health") {
@@ -163,7 +163,8 @@ async function waitForPage(baseUrl, sessionId, selectors) {
   };`;
   let lastState = { state: "not started", fatal: "" };
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    lastState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, { script, args: [] });
+    const currentState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, { script, args: [] });
+    if (currentState) lastState = currentState;
     if (lastState.ready) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -332,12 +333,10 @@ async function exerciseOfflineBackup(baseUrl, sessionId, origin) {
         import(browser.runtime.getURL("src/backup.js"))
       ]).then(async ([db, entries, backup]) => {
         await db.mutateSettings([
-          "remote_backend", "remote_backend_established", "spreadsheet_id", "token_data"
+          "remote_backend", "remote_backend_established"
         ], (settings) => {
           settings.delete("remote_backend");
           settings.delete("remote_backend_established");
-          settings.delete("spreadsheet_id");
-          settings.delete("token_data");
         });
         const source = entries.normalizeEntry({
           id: "browser-offline-dirty",
@@ -400,6 +399,10 @@ async function exerciseOfflineBackup(baseUrl, sessionId, origin) {
   if (prepared?.error) throw new Error(`Could not prepare offline backup smoke: ${prepared.error}`);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#setup` });
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.documentElement.dataset.pageRuntime = 'reloading'; window.location.reload(); return true;",
+    args: []
+  });
   await waitForPage(baseUrl, sessionId, ["#setupExportBackup", "#setupChooseBackupFile"]);
   const firstRun = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `return {
@@ -851,6 +854,7 @@ async function exerciseSyncFreshness(baseUrl, sessionId, origin) {
         import(browser.runtime.getURL("src/setting-keys.js"))
       ]).then(async ([db, entries, settings]) => {
         const now = Date.now();
+        await db.setSetting(settings.SETTING_KEY.REMOTE_BACKEND, "mysql");
         await db.setSetting(settings.SETTING_KEY.SYNC_LAST_SUCCESS_AT, new Date(now - 3600000).toISOString());
         await db.setSetting(settings.SETTING_KEY.SYNC_LAST_STATUS, "synced");
         await db.setSetting(settings.SETTING_KEY.SYNC_BACKOFF_UNTIL, now + 60000);
@@ -882,7 +886,7 @@ async function exerciseSyncFreshness(baseUrl, sessionId, origin) {
   await waitForPage(baseUrl, sessionId, ["#syncContext", "#recentEntries"]);
   await waitForCondition(baseUrl, sessionId, "Popup sync freshness context", `
     const text = document.querySelector("#syncContext")?.textContent || "";
-    return text.includes("Provider: Google Sheets")
+    return text.includes("Provider: MySQL 8.4")
       && text.includes("Local pending: 1")
       && text.includes("Review: 1")
       && text.includes("Last remote success:")
@@ -1081,7 +1085,7 @@ async function exerciseCalendarAndOptions(baseUrl, sessionId, origin) {
     script: `
       const done = arguments[arguments.length - 1];
       import(browser.runtime.getURL("src/db.js"))
-        .then((db) => db.setSetting("remote_backend", "google-sheets"))
+        .then((db) => db.setSetting("remote_backend", "mysql"))
         .then(() => done(true), () => done(false));
     `,
     args: []
@@ -1661,37 +1665,14 @@ async function exerciseReconcileUi(baseUrl, sessionId, origin) {
         import(browser.runtime.getURL("src/reconcile-export.js"))
       ]).then(([ui, exporter]) => {
         const page = ui.paginateReconciliationItems(Array.from({ length: 121 }, (_, index) => index), { page: 1 });
-        const csv = exporter.serializeQuarantinedRecords([{ id: "smoke-invalid", rowIndex: 9, reason: "invalid" }]);
-        return { pageSize: page.items.length, pageCount: page.pageCount, csv: csv.includes("row 9") };
+        const csv = exporter.serializeQuarantinedRecords([{ id: "smoke-invalid", ref: { version: 9 }, reason: "invalid" }]);
+        return { pageSize: page.items.length, pageCount: page.pageCount, csv: csv.includes("record version 9") };
       }).then((value) => arguments[arguments.length - 1](value), () => arguments[arguments.length - 1]({}));
     `,
     args: []
   });
   if (state.pageSize !== 50 || state.pageCount !== 3 || !state.csv) {
     throw new Error(`Reconciliation bounded state/export was unavailable: ${JSON.stringify(state)}`);
-  }
-  const googleControls = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
-    script: `
-      const done = arguments[arguments.length - 1];
-      import(browser.runtime.getURL("src/db.js"))
-        .then((db) => db.setSetting("remote_backend", "google-sheets"))
-        .then(() => done(true), () => done(false));
-    `,
-    args: []
-  });
-  if (!googleControls) throw new Error("Could not prepare Google reconciliation controls.");
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/reconcile/reconcile.html` });
-  await waitForPage(baseUrl, sessionId, ["#summary", "#reconcileSearch", "#exportQuarantined", "#operationOutcome"]);
-  const renderedControls = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: `return {
-      search: document.querySelector("#reconcileSearch")?.tagName,
-      export: document.querySelector("#exportQuarantined")?.textContent,
-      outcome: document.querySelector("#operationOutcome")?.hidden
-    };`,
-    args: []
-  });
-  if (!renderedControls || renderedControls.search !== "INPUT" || renderedControls.export !== "Export locations" || renderedControls.outcome !== true) {
-    throw new Error(`Provider-aware reconciliation controls did not render: ${JSON.stringify(renderedControls)}`);
   }
 }
 
@@ -1729,8 +1710,8 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   await setBackend("mysql");
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#google-account` });
-  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#preparedRemoteBackend", "#migrationPreview", "#googleAccountNav", "#google-account"]);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#storage` });
+  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#preparedRemoteBackend", "#migrationPreview"]);
   await waitForCondition(baseUrl, sessionId, "MySQL active settings reload", `
     return document.querySelector("#activeRemoteBackend")?.textContent === "MySQL 8.4";
   `);
@@ -1738,10 +1719,6 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     script: `return {
       active: document.querySelector("#activeRemoteBackend")?.textContent,
       hash: window.location.hash,
-      accountNavHidden: document.querySelector("#googleAccountNav")?.hidden,
-      accountHidden: document.querySelector("#google-account")?.hidden,
-      spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden,
-      spreadsheetHidden: document.querySelector("#spreadsheet")?.hidden,
       mysqlFieldsHidden: document.querySelector("#mysqlStorageFields")?.hidden,
       testMysqlHidden: document.querySelector("#testMysqlConnection")?.hidden,
       prepared: document.querySelector("#preparedRemoteBackend")?.textContent,
@@ -1754,11 +1731,7 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     args: []
   });
   if (hiddenMysqlState.active !== "MySQL 8.4"
-    || hiddenMysqlState.hash !== "#appearance"
-    || !hiddenMysqlState.accountNavHidden
-    || !hiddenMysqlState.accountHidden
-    || !hiddenMysqlState.spreadsheetNavHidden
-    || !hiddenMysqlState.spreadsheetHidden
+    || hiddenMysqlState.hash !== "#storage"
     || hiddenMysqlState.mysqlFieldsHidden
     || !hiddenMysqlState.testMysqlHidden
     || hiddenMysqlState.prepared !== "Prepared backend: MySQL 8.4"
@@ -1767,51 +1740,24 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     || hiddenMysqlState.localLabel !== "Initialize from this device"
     || hiddenMysqlState.remoteLabel !== "Adopt existing MySQL data"
     || hiddenMysqlState.clearTokenLabel !== "Clear MySQL token") {
-    throw new Error(`MySQL settings did not hide Google controls safely: ${JSON.stringify(hiddenMysqlState)}`);
-  }
-
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#spreadsheet` });
-  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#spreadsheetNav", "#spreadsheet"]);
-  const hiddenSpreadsheetHash = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: "return window.location.hash;",
-    args: []
-  });
-  if (hiddenSpreadsheetHash !== "#appearance") {
-    throw new Error(`Hidden spreadsheet hash did not fall back to Appearance: ${hiddenSpreadsheetHash}`);
-  }
-  const hiddenFocusState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: `
-      const hiddenLink = document.querySelector("#googleAccountNav");
-      hiddenLink?.focus();
-      return {
-        focusedHiddenLink: document.activeElement === hiddenLink,
-        storageHeading: document.querySelector("#storageHeading")?.textContent
-      };
-    `,
-    args: []
-  });
-  if (hiddenFocusState.focusedHiddenLink || hiddenFocusState.storageHeading !== "Storage") {
-    throw new Error(`Hidden settings controls were focusable or Storage was unlabeled: ${JSON.stringify(hiddenFocusState)}`);
+    throw new Error(`MySQL settings did not render safely: ${JSON.stringify(hiddenMysqlState)}`);
   }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
       const target = document.querySelector("#remoteBackendTarget");
-      target.value = "google-sheets";
+      target.value = "cloudflare-d1";
       target.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     `,
     args: []
   });
-  await waitForCondition(baseUrl, sessionId, "Google migration-target settings", `
+  await waitForCondition(baseUrl, sessionId, "Cloudflare migration-target settings", `
     return document.querySelector("#activeRemoteBackend")?.textContent === "MySQL 8.4"
-      && document.querySelector("#preparedRemoteBackend")?.textContent === "Prepared backend: Google Sheets"
-      && !document.querySelector("#googleAccountNav")?.hidden
-      && !document.querySelector("#google-account")?.hidden
-      && !document.querySelector("#spreadsheetNav")?.hidden
-      && !document.querySelector("#spreadsheet")?.hidden
+      && document.querySelector("#preparedRemoteBackend")?.textContent === "Prepared backend: Cloudflare Worker + D1"
       && document.querySelector("#mysqlStorageFields")?.hidden
-      && document.querySelector("#testMysqlConnection")?.hidden;
+      && !document.querySelector("#cloudflareD1StorageFields")?.hidden
+      && !document.querySelector("#testCloudflareD1Connection")?.hidden;
   `);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
@@ -1824,14 +1770,12 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     args: []
   });
   await waitForCondition(baseUrl, sessionId, "MySQL migration-target settings", `
-    return document.querySelector("#googleAccountNav")?.hidden
-      && document.querySelector("#google-account")?.hidden
-      && !document.querySelector("#mysqlStorageFields")?.hidden
+    return !document.querySelector("#mysqlStorageFields")?.hidden
       && document.querySelector("#testMysqlConnection")?.hidden
       && document.querySelector("#preparedRemoteBackend")?.textContent === "Prepared backend: MySQL 8.4";
   `);
 
-  await setBackend("google-sheets");
+  await setBackend("mysql");
   const usageFixture = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
     script: `
       const done = arguments[arguments.length - 1];
@@ -1875,21 +1819,19 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html` });
-  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#googleAccountNav"]);
-  const googleActiveState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+  await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#preparedRemoteBackend", "#settingsLayout"]);
+  const mysqlActiveState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `return {
       active: document.querySelector("#activeRemoteBackend")?.textContent,
-      accountNavHidden: document.querySelector("#googleAccountNav")?.hidden,
-      spreadsheetNavHidden: document.querySelector("#spreadsheetNav")?.hidden,
       mysqlFieldsHidden: document.querySelector("#mysqlStorageFields")?.hidden,
       testMysqlHidden: document.querySelector("#testMysqlConnection")?.hidden
     };`,
     args: []
   });
-  if (googleActiveState.active !== "Google Sheets"
-    || googleActiveState.accountNavHidden
-    || googleActiveState.spreadsheetNavHidden) {
-    throw new Error(`Google-active settings did not restore Google controls: ${JSON.stringify(googleActiveState)}`);
+  if (mysqlActiveState.active !== "MySQL 8.4"
+    || mysqlActiveState.mysqlFieldsHidden
+    || !mysqlActiveState.testMysqlHidden) {
+    throw new Error(`MySQL settings did not restore supported controls: ${JSON.stringify(mysqlActiveState)}`);
   }
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
@@ -1918,7 +1860,7 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
       import(browser.runtime.getURL("src/db.js")).then(async (db) => {
         await db.setSetting("storage_migration_state", {
           migration_id: "browser-smoke-migration-preview",
-          source_provider: "google-sheets",
+          source_provider: "local",
           target_provider: "mysql",
           phase: "seeding",
           completed_entries: 3,
@@ -1952,15 +1894,36 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     `,
     args: []
   });
-  await waitForCondition(baseUrl, sessionId, "Google-active settings", `
-    return document.querySelector("#activeRemoteBackend")?.textContent === "Google Sheets"
-      && !document.querySelector("#googleAccountNav")?.hidden
-      && !document.querySelector("#spreadsheetNav")?.hidden
-      && !document.querySelector("#mysqlStorageFields")?.hidden
-      && !document.querySelector("#testMysqlConnection")?.hidden;
-  `);
-
   await setBackend("google-sheets");
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html` });
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.documentElement.dataset.pageRuntime = 'reloading'; window.location.reload(); return true;",
+    args: []
+  });
+  await waitForPage(baseUrl, sessionId, ["#firstRunSetup", "#setupProviderChoices", "#chooseMysqlSetup", "#chooseCloudflareD1Setup"]);
+  const legacyBackendState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: `return {
+      firstRunHidden: document.querySelector("#firstRunSetup")?.hidden,
+      settingsHidden: document.querySelector("#settingsLayout")?.hidden,
+      targetOptions: [...document.querySelectorAll("#remoteBackendTarget option")].map((option) => option.value),
+      googleChoice: document.querySelector("#chooseGoogleSetup"),
+      googleAccount: document.querySelector("#google-account"),
+      spreadsheet: document.querySelector("#spreadsheet"),
+      googleNetworkRequests: performance.getEntriesByType("resource")
+        .some(({ name }) => /(?:googleapis|oauth2[.]google)/i.test(name))
+    };`,
+    args: []
+  });
+  if (legacyBackendState.firstRunHidden
+    || !legacyBackendState.settingsHidden
+    || JSON.stringify(legacyBackendState.targetOptions) !== JSON.stringify(["mysql", "cloudflare-d1"])
+    || legacyBackendState.googleChoice
+    || legacyBackendState.googleAccount
+    || legacyBackendState.spreadsheet
+    || legacyBackendState.googleNetworkRequests) {
+    throw new Error(`Legacy backend did not return to explicit MySQL/D1 setup: ${JSON.stringify(legacyBackendState)}`);
+  }
+  await setBackend("mysql");
 }
 
 async function exercisePopupHistoryPagination(baseUrl, sessionId, origin) {

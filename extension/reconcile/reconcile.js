@@ -1,5 +1,4 @@
 import {
-  deleteDuplicateRows,
   deleteEverywhere,
   entryFingerprint,
   keepLocal,
@@ -11,7 +10,6 @@ import { runAction } from "../src/action-runner.js";
 import { onEntriesChanged } from "../src/events.js";
 import {
   bulkResolutionPreview,
-  duplicateRecordsSupported,
   operationOutcome,
   paginateReconciliationItems,
   reconciliationActionDisabled,
@@ -51,7 +49,6 @@ function applyControlState() {
   $("#rescanButton").disabled = busy;
   $("#syncButton").disabled = busy;
   const eligibility = reconciliationActionEligibility(report);
-  setStaticActionDisabled("#deleteAllDuplicates", eligibility.deleteAllDuplicates);
   setStaticActionDisabled("#keepAllLocal", eligibility.keepAllLocal);
   setStaticActionDisabled("#keepAllRemote", eligibility.keepAllRemote);
   setStaticActionDisabled("#keepAllNewest", eligibility.keepAllNewest);
@@ -165,37 +162,13 @@ function renderDifferent(items) {
   });
 }
 
-function renderDuplicates(items) {
-  if (!items.length) return [emptyNote("No duplicate remote records were reported.")];
-
-  return items.map((item) => {
-    const row = document.createElement("article");
-    row.className = "row";
-    const rows = [item.keepRowIndex, ...item.extraRowIndexes].sort((a, b) => a - b);
-    row.append(
-      rowHeading(item.entry, [`rows ${rows.join(", ")}`, `keeping row ${item.keepRowIndex}`]),
-      actionRow([
-        {
-          id: item.id,
-          label: `Delete ${item.extraRowIndexes.length} extra row${item.extraRowIndexes.length === 1 ? "" : "s"}`,
-          action: () => confirmDeleteRows(item.extraRows),
-          danger: true
-        }
-      ])
-    );
-    return row;
-  });
-}
-
 function renderQuarantined(items) {
   if (!items.length) return [emptyNote("No invalid remote records were reported.")];
 
   return items.map((item) => {
     const row = document.createElement("article");
     row.className = "row";
-    const reference = item.rowIndex
-      ? `row ${item.rowIndex}`
-      : item.ref?.version ? `record version ${item.ref.version}` : "unknown record";
+    const reference = item.ref?.version ? `record version ${item.ref.version}` : "unknown record";
     const heading = document.createElement("div");
     heading.className = "row-heading";
     const title = document.createElement("span");
@@ -208,22 +181,6 @@ function renderQuarantined(items) {
     );
     return row;
   });
-}
-
-/**
- * Duplicate-row deletion cannot be undone from here and touches provider storage
- * directly, so it always asks first.
- */
-async function confirmDeleteRows(rows) {
-  if (!duplicateRecordsSupported(report)) return;
-  const rowIndexes = rows.map((row) => row.rowIndex);
-  const confirmed = confirm(
-    `Delete ${rowIndexes.length} duplicate row${rowIndexes.length === 1 ? "" : "s"} from the spreadsheet?\n\n`
-    + `Row${rowIndexes.length === 1 ? "" : "s"} ${rowIndexes.join(", ")} will be removed. `
-    + "The most recently updated copy of each entry is kept. This cannot be undone from here."
-  );
-  if (!confirmed) return;
-  await deleteDuplicateRows(rows, { interactiveAuth: false });
 }
 
 function renderLocalOnly(items) {
@@ -262,8 +219,7 @@ function renderRemoteOnly(items) {
 
 function searchableText(group, item) {
   if (group === "different") return [item.id, entryTitle(item.local), item.local.project, item.local.task, item.local.description, ...(item.differences || []).flatMap((difference) => [difference.field, difference.local, difference.remote])].join(" ");
-  if (group === "duplicates") return [item.id, entryTitle(item.entry), ...(item.extraRowIndexes || [])].join(" ");
-  if (group === "quarantined") return [item.id, item.reason, item.rowIndex, item.ref?.version].join(" ");
+  if (group === "quarantined") return [item.id, item.reason, item.ref?.version].join(" ");
   if (group === "localOnly") return [item.id, entryTitle(item.local), item.local.project, item.local.task, item.local.description].join(" ");
   return [item.id, entryTitle(item.remote), item.remote.project, item.remote.task, item.remote.description].join(" ");
 }
@@ -370,8 +326,7 @@ function divergenceCount() {
   return report.different.length
     + report.localOnly.length
     + report.remoteOnly.length
-    + report.quarantined.length
-    + (report.provider?.capabilities?.duplicateRemoteRecords === true ? report.duplicateRowCount : 0);
+    + report.quarantined.length;
 }
 
 function render() {
@@ -380,20 +335,11 @@ function render() {
   $("#remoteProviderLabel").textContent = `Remote backend: ${report.provider?.label || "Remote storage"}`;
 
   $("#localCount").textContent = String(report.localCount);
-  $("#remoteRowCount").textContent = String(report.remoteRowCount);
   $("#remoteCount").textContent = String(report.remoteCount);
-  $("#duplicateRowCount").textContent = String(report.duplicateRowCount);
   $("#quarantinedCount").textContent = String(report.quarantined.length);
   $("#inSyncCount").textContent = String(report.inSync);
   $("#divergenceCount").textContent = String(divergenceCount());
 
-  const supportsDuplicateRecords = duplicateRecordsSupported(report);
-  $("#duplicateSummaryMetric").hidden = !supportsDuplicateRecords;
-  $("#duplicateSection").hidden = !supportsDuplicateRecords;
-  $("#duplicateHeading").textContent = `Duplicate remote records (${report.duplicates.length})`;
-  $("#duplicateList").replaceChildren(...(
-    supportsDuplicateRecords ? renderDuplicates(report.duplicates) : []
-  ));
   $("#quarantinedHeading").textContent = `Invalid remote records (${report.quarantined.length})`;
   $("#quarantinedList").replaceChildren(...renderQuarantined(report.quarantined));
   $("#differentHeading").textContent = `Different on each side (${report.different.length})`;
@@ -402,7 +348,6 @@ function render() {
 
   const groups = [
     ["different", report.different, renderDifferent],
-    ["duplicates", report.duplicates, renderDuplicates],
     ["quarantined", report.quarantined, renderQuarantined],
     ["localOnly", report.localOnly, renderLocalOnly],
     ["remoteOnly", report.remoteOnly, renderRemoteOnly]
@@ -422,7 +367,7 @@ async function scan({ quiet = false, manageBusy = true } = {}) {
   if (!quiet) setStatus("Comparing this device with remote storage...");
   if (manageBusy) setBusy(true);
   try {
-    report = await loadReconciliation({ interactiveAuth: false });
+    report = await loadReconciliation();
     render();
     restoreReviewViewState(reviewViewState);
     const divergences = divergenceCount();
@@ -484,7 +429,7 @@ function resolve(action, status = "Applying...", affectedCount = 1) {
 
 function resolveMany(items, affectedCount = items.length) {
   return resolve(
-    () => resolveReconciliationBatch(items, { interactiveAuth: false }),
+    () => resolveReconciliationBatch(items),
     `Prevalidating and applying ${items.length} selected entr${items.length === 1 ? "y" : "ies"}...`,
     affectedCount
   );
@@ -509,10 +454,6 @@ function bindEvents() {
   eventsBound = true;
   $("#rescanButton").addEventListener("click", () => scan());
   $("#syncButton").addEventListener("click", runSync);
-  $("#deleteAllDuplicates").addEventListener("click", () => {
-    if (!duplicateRecordsSupported(report)) return;
-    return resolve(() => confirmDeleteRows(report.duplicates.flatMap((item) => item.extraRows)));
-  });
   $("#keepAllLocal").addEventListener("click", () => {
     const commands = report.different.map((item) => ({
       action: "keepLocal",

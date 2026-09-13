@@ -14,17 +14,13 @@ export const ERROR_REGISTRY = {
     retryable: true, status: "database busy", title: "Local database is busy",
     detail: "Another extension page or a browser update is holding the local database open.", recovery: "Close other Personal Time Logger pages, reload the extension, then retry."
   },
-  [ERROR_CODE.CONFIG_MISSING]: {
-    retryable: false, status: "not signed in", title: "Google setup is incomplete",
-    detail: "A Google OAuth client ID and secret are required.", recovery: "Open Options and save both credentials."
-  },
   [ERROR_CODE.CONFIG_INVALID]: {
-    retryable: true, status: "error", title: "Google credentials are incomplete",
-    detail: "A client ID and client secret must be saved together.", recovery: "Enter both values, or clear both."
+    retryable: true, status: "error", title: "Configuration is invalid",
+    detail: "The saved configuration contains an invalid value.", recovery: "Review the relevant settings and save them again."
   },
   [ERROR_CODE.CONFIG_SAVE_FAILED]: {
-    retryable: true, status: "error", title: "Google credentials were not saved",
-    detail: "Synchronized extension storage rejected the change.", recovery: "Retry saving in Options. Sign in again if prompted."
+    retryable: true, status: "error", title: "Configuration was not saved",
+    detail: "The extension could not persist the requested settings change.", recovery: "Retry saving in Options."
   },
   [ERROR_CODE.MYSQL_CONFIG_INVALID]: {
     retryable: false, status: "error", title: "MySQL API URL is invalid",
@@ -57,46 +53,6 @@ export const ERROR_REGISTRY = {
   [ERROR_CODE.MIGRATION_TARGET_CONFLICT]: {
     retryable: false, status: "migration blocked", title: "Target storage is not empty",
     detail: "The target contains data that cannot be proven to belong to this migration.", recovery: "Use an empty target or remove the unrelated target data before retrying."
-  },
-  [ERROR_CODE.AUTH_REQUIRED]: {
-    retryable: false, status: "not signed in", title: "Google sign-in is required",
-    detail: "This device has no usable Google token.", recovery: "Open Options and sign in."
-  },
-  [ERROR_CODE.AUTH_EXPIRED]: {
-    retryable: false, status: "not signed in", title: "Google sign-in expired",
-    detail: "The saved Google authorization can no longer be refreshed.", recovery: "Open Options and sign in again."
-  },
-  [ERROR_CODE.AUTH_FAILED]: {
-    retryable: true, status: "error", title: "Google authentication failed",
-    detail: "Google did not accept the authorization request.", recovery: "Check Options credentials, then sign in again."
-  },
-  [ERROR_CODE.AUTH_STALE]: {
-    retryable: true, status: "pending", title: "Google sign-in changed",
-    detail: "A newer sign-in action superseded this one.", recovery: "Retry the current sign-in action."
-  },
-  [ERROR_CODE.SCOPE_MISSING]: {
-    retryable: false, status: "not signed in", title: "Google permission is missing",
-    detail: "The current token cannot access the required Google service.", recovery: "Open Options and sign in again."
-  },
-  [ERROR_CODE.SPREADSHEET_MISSING]: {
-    retryable: false, status: "spreadsheet missing", title: "Spreadsheet is not configured",
-    detail: "No usable spreadsheet is selected.", recovery: "Open Options to reconnect or create a replacement."
-  },
-  [ERROR_CODE.SHEET_MISSING]: {
-    retryable: true, status: "spreadsheet missing", title: "Spreadsheet layout needs repair",
-    detail: "A required sheet tab or header is missing.", recovery: "Retry sync; if it continues, use Options recovery."
-  },
-  [ERROR_CODE.SHEET_SCHEMA_UNSUPPORTED]: {
-    retryable: false, status: "spreadsheet missing", title: "Spreadsheet layout is incompatible",
-    detail: "The selected spreadsheet does not have the required time_entries columns.", recovery: "Choose a compatible spreadsheet in Options."
-  },
-  [ERROR_CODE.REMOTE_ROW_STALE]: {
-    retryable: true, status: "pending", title: "Spreadsheet changed during sync",
-    detail: "A row changed after it was verified.", recovery: "Refresh Reconcile and retry the chosen action."
-  },
-  [ERROR_CODE.REMOTE_ROW_PRECONDITION_REQUIRED]: {
-    retryable: true, status: "pending", title: "Spreadsheet row needs a fresh read",
-    detail: "The row write did not have a verified snapshot.", recovery: "Retry sync or refresh Reconcile first."
   },
   [ERROR_CODE.CONFIG_CONFLICT]: {
     retryable: false, status: "error", title: "Remote settings conflict",

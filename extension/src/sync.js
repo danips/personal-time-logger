@@ -1,4 +1,4 @@
-import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateAllLocalState, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
+import { claimLock, getAllEntries, getEntry, isLockCurrent, mutateEntries, mutateSettings, releaseLock, renewLock, setSetting, getSetting, StorageConflictError } from "./db.js";
 import { notifyEntriesChanged } from "./events.js";
 import {
   entryFingerprint,
@@ -20,8 +20,6 @@ import { hasPendingConfig, syncConfig } from "./sync-config.js";
 const MAX_BACKOFF_SECONDS = 300;
 const SYNC_LOCK_KEY = "sync_lock";
 const SYNC_LOCK_TTL_MS = 120000;
-const REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.REMOTE_CHANGE_TOKEN;
-const LEGACY_REMOTE_MODIFIED_KEY = SETTING_KEY.REMOTE_MODIFIED_TIME;
 const MYSQL_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN;
 const CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN;
 const IDLE_STREAK_KEY = SETTING_KEY.SYNC_IDLE_STREAK;
@@ -62,15 +60,12 @@ async function assertMigrationMaySync(migrationId = "") {
 function changeTokenSettingKey(provider) {
   if (provider?.id === "mysql") return MYSQL_REMOTE_CHANGE_TOKEN_KEY;
   if (provider?.id === "cloudflare-d1") return CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY;
-  return REMOTE_CHANGE_TOKEN_KEY;
+  return MYSQL_REMOTE_CHANGE_TOKEN_KEY;
 }
 
 function syncRecovery(error) {
   if (error?.code === ERROR_CODE.MIGRATION_IN_PROGRESS) {
     return "Wait for the storage migration to finish, then retry sync.";
-  }
-  if (["AUTH_REQUIRED", "AUTH_EXPIRED", "SCOPE_MISSING"].includes(error?.code)) {
-    return "Open Options and sign in again.";
   }
   if ([
     ERROR_CODE.MYSQL_CONFIG_INVALID,
@@ -83,9 +78,6 @@ function syncRecovery(error) {
     ERROR_CODE.REMOTE_API_INCOMPATIBLE
   ].includes(error?.code)) {
     return "Open Options Storage settings and verify the remote URL, token, and host permission.";
-  }
-  if (["SHEET_MISSING", "SPREADSHEET_MISSING", "SHEET_SCHEMA_UNSUPPORTED"].includes(error?.code)) {
-    return "Open Options to reconnect or replace the spreadsheet.";
   }
   if (error?.code === "SYNC_BUSY") return "Retry after the other sync finishes.";
   if (["RATE_LIMIT", "API_TIMEOUT", "API_NETWORK", "OFFLINE", "BACKOFF"].includes(error?.code)) {
@@ -172,35 +164,19 @@ function applyEntries(local, changed) {
   return changed;
 }
 
-function remoteFingerprintSets(snapshot) {
-  const fingerprints = new Map();
-  const add = (id, fingerprint) => {
-    if (!id || !fingerprint) return;
-    if (!fingerprints.has(id)) fingerprints.set(id, new Set());
-    fingerprints.get(id).add(fingerprint);
-  };
-  for (const entry of snapshot.entries) add(entry.id, entryFingerprint(entry));
-  for (const duplicate of snapshot.duplicates || []) {
-    for (const record of duplicate.records || []) {
-      add(record.entry?.id || duplicate.id, entryFingerprint(record.entry));
-    }
-  }
-  return fingerprints;
-}
-
-async function confirmAmbiguousAppends(entries, { interactiveAuth, lease, provider }) {
+async function confirmAmbiguousAppends(entries, { lease, provider }) {
   await lease?.assert();
-  const snapshot = await providerOrDefault(provider).readSnapshot({ interactiveAuth });
+  const snapshot = await providerOrDefault(provider).readSnapshot();
   await lease?.assert();
-  const remoteFingerprints = remoteFingerprintSets(snapshot);
+  const remoteById = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
   const confirmed = [];
   const conflicts = [];
 
   for (const entry of entries) {
-    const observed = remoteFingerprints.get(entry.id);
-    if (observed?.has(entryFingerprint(entry))) {
+    const observed = remoteById.get(entry.id);
+    if (observed && entryFingerprint(observed) === entryFingerprint(entry)) {
       confirmed.push({ id: entry.id, ref: snapshot.entryRefs.get(entry.id) || null });
-    } else if (observed?.size) {
+    } else if (observed) {
       conflicts.push(entry.id);
     }
   }
@@ -221,7 +197,7 @@ async function acknowledgePushedEntries(local, entries, pushedIds, { lease } = {
  * becoming a new remote record when its deletion evidence is absent. A dirty
  * live edit also cannot overwrite a retained remote tombstone without an
  * explicit reconciliation choice. Genuinely new local entries have no prior
- * sync marker and remain eligible for the append path.
+ * sync state and remain eligible for the append path.
  */
 export async function protectDeletionRecovery(local, remoteEntries, pendingBackupIds, forcedIds, { lease } = {}) {
   const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
@@ -261,13 +237,12 @@ export async function protectDeletionRecovery(local, remoteEntries, pendingBacku
 }
 
 /**
- * Writes local changes to the sheet and returns the ids that were pushed, so the
+ * Writes local changes to the remote API and returns the ids that were pushed, so the
  * pull step can skip them: the snapshot it works from predates these writes.
  * All row rewrites go in one request and all new rows in another, so the cost is
  * two calls regardless of how many entries are pending.
  */
 export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
-  interactiveAuth,
   blockedIds = new Set(),
   forcedIds = new Set(),
   lease,
@@ -303,14 +278,14 @@ export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
   }
 
   await lease?.assert();
-  await remoteProvider.updateEntries(updates, { interactiveAuth });
+  await remoteProvider.updateEntries(updates);
   await lease?.assert();
 
   let appendFailure = null;
   let appendMappings = [];
   try {
     await lease?.assert();
-    appendMappings = await remoteProvider.appendEntries(appends, { interactiveAuth });
+    appendMappings = await remoteProvider.appendEntries(appends);
     await lease?.assert();
   } catch (error) {
     await lease?.assert();
@@ -324,7 +299,7 @@ export async function pushDirtyEntries(local, remoteEntries, entryRefs, {
     try {
       recovery = await confirmAmbiguousAppends(
         appends.filter((entry) => !confirmedAppendIds.has(entry.id)),
-        { interactiveAuth, lease, provider: remoteProvider }
+        { lease, provider: remoteProvider }
       );
     } catch (error) {
       if (appendFailure) throw appendFailure;
@@ -387,8 +362,8 @@ async function clearCompletedResolutions(resolutionIds, { lease } = {}) {
     const intents = Array.isArray(settings.get(RECONCILIATION_INTENTS_KEY))
       ? settings.get(RECONCILIATION_INTENTS_KEY)
       : [];
-    // A newer choice for the same entry can be recorded while the Sheets write
-    // is in flight. Clear only the resolution this cycle actually verified.
+    // A newer choice for the same entry can be recorded while the remote
+    // mutation is in flight. Clear only the resolution this cycle verified.
     settings.set(RECONCILIATION_INTENTS_KEY, intents.filter((intent) => !resolutionIds.has(intent?.resolution_id)));
   });
 }
@@ -482,102 +457,11 @@ function isExpiredDeletion(deletedAt) {
   return Number.isFinite(time) && time < addDays(new Date(), -14).getTime();
 }
 
-export async function purgeDeletedEntries(local, remoteEntries, entryRefs, duplicates = [], {
-  blockedIds = new Set(),
-  interactiveAuth = false,
-  lease,
-  provider,
-  pushedIds = new Set()
-} = {}) {
-  // Retain the existing tombstone rows. Their canonical shape is already
-  // understood by every provider and is the only deletion evidence available
-  // to devices that reconnect after a long outage. `entryRefs`, `duplicates`,
-  // and `pushedIds` remain parameters for the provider-neutral call boundary.
-  void entryRefs;
-  void duplicates;
-  void interactiveAuth;
-  void lease;
-  void provider;
-  void pushedIds;
-  void blockedIds;
-  void remoteEntries;
-  return 0;
+async function ensureRemoteReady(provider, { lease }) {
+  return provider.ensureReady({ lease });
 }
 
-/**
- * Flags every live entry for push and forgets the read marker.
- *
- * Required whenever the spreadsheet changes. Local entries are clean after their
- * last sync, so without this the newly adopted or created sheet would receive
- * nothing and sit empty while the UI looked perfectly healthy. updated_at and
- * revision are deliberately untouched, so reconciling against a sheet that
- * already holds rows still resolves by age rather than by which side is newer.
- */
-export async function reseedForNewSpreadsheet(local, { lease, spreadsheetId, provider } = {}) {
-  const remoteProvider = providerOrDefault(provider);
-  await lease?.assert();
-  const candidateIds = new Set(local.keys());
-  const reseeded = await mutateAllLocalState([
-    RECONCILIATION_INTENTS_KEY,
-    REMOTE_CHANGE_TOKEN_KEY,
-    MYSQL_REMOTE_CHANGE_TOKEN_KEY,
-    CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY,
-    LEGACY_REMOTE_MODIFIED_KEY,
-    ...(spreadsheetId ? [SETTING_KEY.SPREADSHEET_ID] : [])
-  ], ({ entries, settings }) => {
-    const applied = [];
-    for (const id of candidateIds) {
-      const current = entries.get(id);
-      if (!current) {
-        continue;
-      }
-      if (current.dirty && !current.sync_error) continue;
-      const next = { ...current, dirty: true, sync_error: "" };
-      entries.set(id, next);
-      applied.push(next);
-    }
-    // Intent fingerprints name the previous remote snapshot. They cannot prove
-    // anything about a replacement sheet, so discard them with the reseed.
-    settings.set(RECONCILIATION_INTENTS_KEY, []);
-    settings.set(REMOTE_CHANGE_TOKEN_KEY, "");
-    settings.set(MYSQL_REMOTE_CHANGE_TOKEN_KEY, "");
-    settings.set(CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY, "");
-    settings.set(LEGACY_REMOTE_MODIFIED_KEY, "");
-    remoteProvider.applyReseedSettings?.(settings, spreadsheetId);
-    return applied;
-  });
-  applyEntries(local, reseeded);
-  return reseeded.length;
-}
-
-/**
- * Makes sure a spreadsheet is selected, adopting the most recently modified one
- * this extension created or creating one when there are none.
- */
-async function ensureRemoteReady(local, provider, { interactiveAuth, lease }) {
-  return provider.ensureReady({
-    interactiveAuth,
-    lease,
-    reseed: (spreadsheetId) => reseedForNewSpreadsheet(local, { lease, spreadsheetId, provider })
-  });
-}
-
-/**
- * Recovers from a spreadsheet that has been deleted or trashed, by detecting or
- * creating a replacement and re-seeding it from local data.
- *
- * Only acts once Drive confirms the file is actually gone, so an unreachable but
- * intact spreadsheet still reports its error rather than being silently replaced.
- */
-async function recoverMissingRemote(error, local, provider, { interactiveAuth, lease }) {
-  return provider.tryRecoverMissingRemote?.(error, {
-    interactiveAuth,
-    lease,
-    reseed: (spreadsheetId) => reseedForNewSpreadsheet(local, { lease, spreadsheetId, provider })
-  }) || null;
-}
-
-async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider: injectedProvider = null }) {
+async function runSyncCycle({ force, migrationId = "", provider: injectedProvider = null }) {
   let phase = "preflight";
   let entryCount = 0;
   await assertMigrationMaySync(migrationId);
@@ -636,54 +520,30 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider
     await pruneExpiredReconciliationIntents();
     await lease.assert();
     // A timer left running overnight stays running. Only genuinely competing
-    // timers are flagged, and that is done before the push so the markers travel
+    // timers are flagged, and that is done before the push so the state travels
     // in the same pass.
     phase = "active_timer_check";
     const conflictChanges = await markMultipleActiveTimers(local, { lease });
     // Under the sync lock, so two contexts cannot both decide none exists and
     // each create one.
-    phase = "provisioning";
-    let provisioned = await ensureRemoteReady(local, provider, { interactiveAuth, lease });
+    phase = "ensure_ready";
+    const readinessChanged = await ensureRemoteReady(provider, { lease });
 
     // Both marking passes set dirty, so either of them producing changes makes
     // hasLocalWork true and forces the read below.
     const hasLocalWork = [...local.values()].some((entry) => entry.dirty || isExpiredDeletion(entry.deleted_at))
       || await hasPendingConfig();
 
-    // Drive reports when the file last changed for a fraction of the cost of
-    // downloading it, but only when the answer can change the outcome. With work
-    // to push the read happens regardless, so asking first would just burn a
-    // request. An empty modifiedTime means Drive cannot answer, so the read
-    // happens unconditionally.
-    //
-    // A forced sync always reads. Skipping on a user's explicit request hides
-    // anything that can only be noticed by reading, such as a layout that needs
-    // migrating, and leaves the sync button reporting success without looking.
-    let modifiedTime = "";
+    // A forced sync always reads. Idle cycles can use the provider change token
+    // to avoid downloading an unchanged snapshot.
+    let changeToken = "";
     if (!hasLocalWork && !force) {
       phase = "remote_gate";
       await lease.assert();
-      modifiedTime = await provider.getChangeToken({ interactiveAuth });
+      changeToken = await provider.getChangeToken();
       await lease.assert();
-      const driveGate = provider.getChangeTokenDiagnostics?.() || {};
-      if (driveGate.unavailable || driveGate.retryAt > Date.now()) {
-        await recordDiagnostic({
-          subsystem: "sync",
-          phase: "remote_gate",
-          code: "DRIVE_GATE_UNAVAILABLE",
-          retryAt: driveGate.retryAt,
-          recovery: "Sync reads the spreadsheet directly until Drive metadata recovers."
-        });
-      }
-      const lastSeenModified = String(
-        await getSetting(
-          changeTokenKey,
-          changeTokenKey === REMOTE_CHANGE_TOKEN_KEY
-            ? await getSetting(LEGACY_REMOTE_MODIFIED_KEY, "")
-            : ""
-        ) || ""
-      );
-      if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
+      const lastSeenToken = String(await getSetting(changeTokenKey, "") || "");
+      if (changeToken && lastSeenToken && changeToken === lastSeenToken) {
         await lease.assert();
         await clearBackoff();
         const timestamp = nowIso();
@@ -692,20 +552,10 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider
       }
     }
 
-    let snapshot;
-    try {
-      phase = "remote_read";
-      await lease.assert();
-      snapshot = await provider.readSnapshot({ interactiveAuth });
-      await lease.assert();
-    } catch (error) {
-      const recovered = await recoverMissingRemote(error, local, provider, { interactiveAuth, lease });
-      if (!recovered) throw error;
-      provisioned = recovered;
-      await lease.assert();
-      snapshot = await provider.readSnapshot({ interactiveAuth });
-      await lease.assert();
-    }
+    phase = "remote_read";
+    await lease.assert();
+    const snapshot = await provider.readSnapshot();
+    await lease.assert();
 
     await lease.assert();
 
@@ -734,7 +584,6 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider
     const blockedIds = new Set([...quarantinedIds, ...recoveryBlockedIds]);
     phase = "push";
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.entryRefs, {
-      interactiveAuth,
       blockedIds,
       forcedIds: new Set(forcedResolutions.keys()),
       lease,
@@ -746,38 +595,16 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider
     await clearCompletedResolutions(completedResolutionIds, { lease });
     phase = "pull";
     const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { blockedIds, lease });
-    // Purge last: it consumes the same snapshot, and deleting rows first would
-    // let the pull re-insert what it removed.
-    phase = "purge";
-    const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.entryRefs, snapshot.duplicates, {
-      interactiveAuth,
-      blockedIds,
-      lease,
-      provider,
-      pushedIds
-    });
     phase = "config";
-    const configOutcome = await syncConfig(snapshot.config, snapshot.configRefs, { interactiveAuth, lease, provider });
-    // Backfills spreadsheets created before the marker existed, once.
-    await lease.assert();
-    const markerWritten = await provider.ensureAppMarker(snapshot.config, snapshot.configRefs, { interactiveAuth });
-    await lease.assert();
+    const configOutcome = await syncConfig(snapshot.config, snapshot.configRefs, { lease, provider });
 
-    // Our own writes bump modifiedTime, so it is re-read to avoid a needless
-    // download next cycle. If Drive lags, the gate simply opens once more.
-    const wroteRemotely = pushedIds.size > 0 || purged > 0 || configOutcome.changed || markerWritten;
-    phase = "remote_marker";
-    // API snapshots carry the exact consumed token. Google Drive metadata is
-    // not a compare-and-swap marker, so leave its gate open after a cycle.
-    const nextModified = provider.id === "google-sheets"
-      ? ""
-      : wroteRemotely
-        ? await provider.getChangeToken({ interactiveAuth })
-        : snapshot.changeToken;
+    // Refresh the provider token after our own writes to avoid an unnecessary
+    // snapshot download on the next idle cycle.
+    const wroteRemotely = pushedIds.size > 0 || configOutcome.changed;
+    phase = "remote_token";
+    const nextToken = wroteRemotely ? await provider.getChangeToken() : snapshot.changeToken;
     await lease.assert();
-    await setSetting(changeTokenKey, nextModified || "");
-    // Preserve the old marker for installations upgraded during this refactor.
-    if (changeTokenKey === REMOTE_CHANGE_TOKEN_KEY) await setSetting(LEGACY_REMOTE_MODIFIED_KEY, nextModified || "");
+    await setSetting(changeTokenKey, nextToken || "");
 
     phase = "complete";
     const reviewCount = (snapshot.quarantined?.length || 0)
@@ -787,7 +614,7 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider
     const changed = wroteRemotely
       || pulled > 0
       || conflictChanges.length > 0
-      || Boolean(provisioned);
+      || Boolean(readinessChanged);
     const timestamp = nowIso();
     await lease.assert();
     await clearBackoff();
@@ -813,14 +640,12 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider
 
 /**
  * Forgets the last seen remote modification time, so the next sync reads the
- * spreadsheet instead of trusting the gate. Called after an extension update,
- * where a new version may need to see the sheet to migrate or repair it.
+ * remote API instead of trusting the gate. Called after an extension update,
+ * where a new version may need to read a provider snapshot again.
  */
 export async function clearRemoteReadMarker() {
-  await setSetting(REMOTE_CHANGE_TOKEN_KEY, "");
   await setSetting(MYSQL_REMOTE_CHANGE_TOKEN_KEY, "");
   await setSetting(CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY, "");
-  await setSetting(LEGACY_REMOTE_MODIFIED_KEY, "");
 }
 
 /**
@@ -892,22 +717,20 @@ function startSyncDrain(options) {
   return cycle;
 }
 
-export function syncNow({ interactiveAuth = false, force = false, migrationId = "", provider = null } = {}) {
+export function syncNow({ force = false, migrationId = "", provider = null } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
   // while a user action is still syncing.
-  if (!syncDrain) return startSyncDrain({ interactiveAuth, force, migrationId, provider });
+  if (!syncDrain) return startSyncDrain({ force, migrationId, provider });
 
-  const stronger = force && !syncDrain.current.options.force
-    || interactiveAuth && !syncDrain.current.options.interactiveAuth;
+  const stronger = force && !syncDrain.current.options.force;
   if (!stronger) return syncDrain.queued?.deferred.promise || syncDrain.current.promise;
 
   const queued = syncDrain.queued || {
     deferred: deferred(),
-    options: { force: false, interactiveAuth: false, migrationId: "", provider: null }
+    options: { force: false, migrationId: "", provider: null }
   };
   queued.options = {
     force: force || queued.options.force,
-    interactiveAuth: interactiveAuth || queued.options.interactiveAuth,
     migrationId: migrationId || queued.options.migrationId,
     provider: provider || queued.options.provider
   };

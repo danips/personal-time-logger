@@ -12,6 +12,7 @@ import { platform } from "../src/platform.js";
 import { ERROR_CODE } from "../src/error-codes.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
+import { retireGoogleState } from "../src/provider-retirement.js";
 import { createToolbarIndicatorRefresher, updateActiveIcon } from "../src/icon.js";
 import { runStaleTimerReminders } from "../src/timer-reminders.js";
 import { onEntriesChanged } from "../src/events.js";
@@ -78,7 +79,7 @@ async function runBackgroundSync() {
   if (Date.now() < dueAt) return;
 
   try {
-    await syncNow({ interactiveAuth: false });
+    await syncNow();
   } catch (error) {
     // Offline, backoff, another context already syncing, missing config, and
     // expired auth are all expected here. syncNow records its own backoff and the
@@ -118,7 +119,6 @@ async function runStaleTimerReminderCycle() {
 async function runRequestedSync(message) {
   try {
     const result = await syncNow({
-      interactiveAuth: false,
       force: Boolean(message?.force)
     });
     return { ok: true, result };
@@ -249,8 +249,8 @@ platform.onUpdateAvailable(({ version } = {}) => {
   void setSetting(SETTING_KEY.UPDATE_AVAILABLE_VERSION, version).catch(() => {});
 });
 
-// A new version may need to see the spreadsheet to migrate or repair it, so the
-// read gate is cleared and the next sync brought forward.
+// A new version may need to refresh remote state, so the read gate is cleared
+// and the next sync brought forward.
 async function handleInstalled({ reason }) {
   if (reason !== "install" && reason !== "update") return;
   try {
@@ -323,7 +323,21 @@ platform.onRuntimeMessage((message, sender) => {
   });
 });
 
-void scheduleHeartbeat();
-void scheduleUpdateCheck();
-void runUpdateCheck();
-void refreshToolbarIndicatorSafely();
+async function initializeBackground() {
+  try {
+    await retireGoogleState();
+  } catch (error) {
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "provider-retirement",
+      error,
+      recovery: "Restart the extension, then review Options diagnostics."
+    }).catch(() => {});
+  }
+  await scheduleHeartbeat();
+  await scheduleUpdateCheck();
+  await runUpdateCheck();
+  await refreshToolbarIndicatorSafely();
+}
+
+void initializeBackground();

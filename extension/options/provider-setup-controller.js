@@ -7,7 +7,7 @@ export function createProviderSetupController({ claimLock, releaseLock, getSetti
     const lock = await claimLock("sync_lock", owner(), 30_000);
     if (!lock) throw descriptor.error(keys.CONFIG_SAVE_FAILED, `A sync or migration is active. Wait before changing the ${descriptor.label} destination.`);
     try {
-      const active = await getSetting(keys.REMOTE_BACKEND, keys.GOOGLE_SHEETS);
+      const active = await getSetting(keys.REMOTE_BACKEND, "");
       const established = await getSetting(keys.REMOTE_BACKEND_ESTABLISHED, false);
       const currentUrl = await getSetting(descriptor.urlKey, descriptor.defaultUrl);
       if (!allowActiveChange && established && active === descriptor.id && currentUrl && currentUrl !== baseUrl) {

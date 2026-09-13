@@ -308,7 +308,7 @@ export function parseRemoteSnapshot(data, {
   if (data.changeToken === undefined || data.changeToken === null) {
     throw codedError(ERROR_CODE.REMOTE_API_INCOMPATIBLE, `The ${labelText(providerLabel)} snapshot has no change token.`);
   }
-  return { entries, entryRefs, duplicates: [], quarantined, config, configRefs, changeToken: String(data.changeToken) };
+  return { entries, entryRefs, quarantined, config, configRefs, changeToken: String(data.changeToken) };
 }
 
 export function requireRemoteHealth(data, {

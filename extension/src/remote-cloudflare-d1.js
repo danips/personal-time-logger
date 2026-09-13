@@ -73,8 +73,6 @@ const versionedMutations = createVersionedMutationOperations({
 export const cloudflareD1Provider = Object.freeze({
   id: "cloudflare-d1",
   label: LABEL,
-  capabilities: Object.freeze({ duplicateRemoteRecords: false }),
-
   async ensureReady(options = {}) {
     health(await (await configuredClient(options)).health());
     return null;
@@ -96,11 +94,7 @@ export const cloudflareD1Provider = Object.freeze({
     });
   },
 
-  ...versionedMutations,
-
-  async ensureAppMarker() {
-    return false;
-  }
+  ...versionedMutations
 });
 
 export { CHUNK_SIZE };

@@ -62,7 +62,6 @@
       }
     ],
     "settings": [
-      { "key": "spreadsheet_id", "value": "legacy-sheet-id" },
       { "key": "device_id", "value": "device-v2" },
       { "key": "duration_multiplier", "value": "1.5" },
       { "key": "sync_backoff_seconds", "value": 30 }

@@ -2,21 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  duplicateRecordsSupported,
   bulkResolutionPreview,
   operationOutcome,
   paginateReconciliationItems,
   reconciliationActionDisabled,
   reconciliationActionEligibility
 } from "../extension/src/reconcile-ui-state.js";
-
-describe("reconciliation provider capabilities", () => {
-  it("only enables duplicate-record repair for supporting providers", () => {
-    assert.equal(duplicateRecordsSupported({ provider: { capabilities: { duplicateRemoteRecords: true } } }), true);
-    assert.equal(duplicateRecordsSupported({ provider: { capabilities: { duplicateRemoteRecords: false } } }), false);
-    assert.equal(duplicateRecordsSupported({}), false);
-  });
-});
 
 describe("reconciliation action state", () => {
   it("summarizes bulk scope and keeps equal-time conflicts visible", () => {
@@ -44,14 +35,12 @@ describe("reconciliation action state", () => {
 
   it("keeps every bulk action disabled for an empty report", () => {
     const eligibility = reconciliationActionEligibility({
-      duplicates: [],
       different: [],
       localOnly: [],
       remoteOnly: []
     });
 
     assert.deepEqual(eligibility, {
-      deleteAllDuplicates: false,
       keepAllLocal: false,
       keepAllRemote: false,
       keepAllNewest: false,
@@ -63,12 +52,10 @@ describe("reconciliation action state", () => {
 
   it("enables only the actions represented by a mixed report", () => {
     assert.deepEqual(reconciliationActionEligibility({
-      duplicates: [{}],
       different: [{ newer: "local" }, { newer: "remote" }],
       localOnly: [],
       remoteOnly: [{}]
     }), {
-      deleteAllDuplicates: true,
       keepAllLocal: true,
       keepAllRemote: true,
       keepAllNewest: true,

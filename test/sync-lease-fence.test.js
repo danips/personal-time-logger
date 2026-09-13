@@ -1,32 +1,19 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 
-import { normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
+import { normalizeEntry } from "../extension/src/entries.js";
 import { seedEntry } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
-import { createGoogleApiMock } from "./support/mock-google-api.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
 globalThis.browser = {
   runtime: { getURL: (path) => path },
-  storage: {
-    sync: {
-      async get() {
-        return {
-          google_oauth_client_id: "test-client",
-          google_oauth_client_secret: "test-secret"
-        };
-      },
-      async set() {}
-    }
-  }
+  storage: { sync: { async get() { return {}; }, async set() {} } }
 };
 
-let db;
-let google;
-let sheets;
-let syncNow;
+const db = await import("../extension/src/db.js");
+const { syncNow } = await import("../extension/src/sync.js");
 
 const entry = normalizeEntry({
   id: "lease-fence-entry",
@@ -42,35 +29,30 @@ const entry = normalizeEntry({
   dirty: true
 });
 
-const snapshotPath = { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values:batchGet" };
-const appendPath = (request) => request.method === "POST"
-  && request.pathname.endsWith("/values/time_entries!A%3AN:append");
-
-before(async () => {
-  db = await import("../extension/src/db.js");
-  sheets = await import("../extension/src/sheets.js");
-  ({ syncNow } = await import("../extension/src/sync.js"));
-  google = createGoogleApiMock().install();
-  await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
-  await sheets.setSpreadsheetId("sheet-1");
-});
-
-after(() => google.restore());
-
 describe("sync lease fencing", () => {
   it("does not acknowledge an append or release a newer lease after losing ownership", async () => {
     await seedEntry(db, entry);
-    google.enqueue(snapshotPath, google.json({
-      valueRanges: [
-        { range: "time_entries!A:N", values: [SHEET_HEADERS] },
-        { range: "config!A:C", values: [["key", "value", "updated_at"]] }
-      ]
-    }));
-    const append = google.barrier("append");
-    google.enqueue(appendPath, append);
+    let releaseAppend;
+    const appendGate = new Promise((resolve) => { releaseAppend = resolve; });
+    const provider = {
+      id: "mysql",
+      label: "MySQL 8.4",
+      async ensureReady() {},
+      async getChangeToken() { return "v1"; },
+      async readSnapshot() {
+        return { entries: [], entryRefs: new Map(), quarantined: [], config: {}, configRefs: new Map(), changeToken: "v1" };
+      },
+      async updateEntries() {},
+      async appendEntries() {
+        await appendGate;
+        return [{ id: entry.id, ref: { kind: "mysql-entry", version: 1 } }];
+      },
+      async updateConfig() {}
+    };
 
-    const sync = syncNow({ force: true });
-    await append.waitForRequest();
+    const sync = syncNow({ force: true, provider });
+    while ((await db.getSetting("sync_lock", null))?.state !== "held") await new Promise((resolve) => setTimeout(resolve, 0));
+    while (!(await db.getSetting("sync_lock", null))?.holder) await new Promise((resolve) => setTimeout(resolve, 0));
     const replacementLock = {
       state: "held",
       holder: "new-owner",
@@ -80,7 +62,7 @@ describe("sync lease fencing", () => {
       ttl_ms: 120_000
     };
     await db.setSetting("sync_lock", replacementLock);
-    append.release(google.json({ updates: { updatedRange: "time_entries!A2:N2" } }));
+    releaseAppend();
 
     await assert.rejects(sync, (error) => error.code === "SYNC_BUSY");
     assert.equal((await db.getEntry(entry.id)).dirty, true);

@@ -16,7 +16,7 @@ describe("storage migration canonical dataset", () => {
     assert.throws(() => assertLocalCompatibleWithRemote(snapshot, { entries: [], config: {} }, "Cloudflare Worker + D1"), /Cloudflare Worker \+ D1/);
   });
 
-  it("sorts entries/config and excludes provider marker and local bookkeeping", () => {
+  it("sorts entries/config and excludes local bookkeeping", () => {
     const dataset = canonicalMigrationDataset({
       entries: [entry("b", { dirty: true }), entry("a")],
       config: {
@@ -27,6 +27,7 @@ describe("storage migration canonical dataset", () => {
     });
     assert.deepEqual(dataset.entries.map(([id]) => id), ["a", "b"]);
     assert.deepEqual(dataset.config, [
+      ["app", "personal-time-logger", "2026-08-08T11:00:00.000Z"],
       ["duration_multiplier", "1.500", "2026-08-08T11:00:00.000Z"],
       ["z", "2", "2026-08-08T11:00:00.000Z"]
     ]);

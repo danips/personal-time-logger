@@ -6,8 +6,6 @@ import { durationSeconds, nowIso, uuid } from "./time.js";
 import { entryFingerprint } from "./fingerprints.js";
 import { ENTRY_FIELDS } from "./entry-contract.js";
 
-export const SHEET_HEADERS = ENTRY_FIELDS;
-
 const CREATE_FIELDS = new Set(["project", "task", "description", "multiply"]);
 const COMPLETED_CREATE_FIELDS = new Set([...CREATE_FIELDS, "start_at", "end_at", "status"]);
 const EDITABLE_FIELDS = new Set([
@@ -660,42 +658,6 @@ export async function mergeEntries(targetId, sourceId, { expectedRevisions } = {
   });
   notifyEntriesChanged({ action: "merge", ids: [result.merged.id, result.deleted.id] });
   return result;
-}
-
-export function entryToRow(entry) {
-  const normalized = decodePersistedEntry(entry);
-  return [
-    normalized.id,
-    normalized.project,
-    normalized.task,
-    normalized.description,
-    normalized.start_at,
-    normalized.end_at,
-    String(normalized.duration_seconds || 0),
-    normalized.status,
-    normalized.created_at,
-    normalized.updated_at,
-    normalized.deleted_at,
-    normalized.device_id,
-    String(normalized.revision || 1),
-    normalized.multiply
-  ];
-}
-
-export function rowToEntry(row) {
-  if (!Array.isArray(row) || row.length < SHEET_HEADERS.length) {
-    throw entryModelError("Spreadsheet row does not contain every entry field.");
-  }
-  const object = {};
-  SHEET_HEADERS.forEach((header, index) => {
-    object[header] = row[index] || "";
-  });
-  return decodePersistedEntry({
-    ...object,
-    dirty: false,
-    last_sync_at: nowIso(),
-    sync_error: ""
-  });
 }
 
 export function isRemoteNewer(remoteEntry, localEntry) {

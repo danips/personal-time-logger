@@ -2,7 +2,7 @@
 
 Current release: `0.1.76` (`v0.1.76`).
 
-A Firefox extension for local-first time tracking with Google Sheets, MySQL, or a user-owned Cloudflare Worker + D1 backend. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
+A Firefox extension for local-first time tracking with MySQL or a user-owned Cloudflare Worker + D1 backend. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
 ## What Is Included
 
@@ -12,21 +12,19 @@ A Firefox extension for local-first time tracking with Google Sheets, MySQL, or 
 - Recent entries grouped by week and day, with totals, repeated entries collapsed into expandable groups, and **Load more** for earlier weeks.
 - Weekly calendar view with movable and resizable time logs and direct displayed-week Tempo upload.
 - Local Analytics dashboard with automatic period comparison, project/task totals, session fragmentation, deterministic data-quality anomalies, and frequent descriptions.
-- Options page with left-side navigation for provider-aware storage, Google, ChatGPT usage, reconciliation, Tempo, and diagnostics settings.
+- Options page with left-side navigation for MySQL/D1 storage, ChatGPT usage, reconciliation, Tempo, and diagnostics settings.
 - Multiple-active-timer warning.
-- The Options page includes provider-aware storage controls, Google auth, sync interval, duration multiplier, calendar start hour, device ID, reconciliation, and experimental ChatGPT usage controls. Google-specific sections are shown while Google Sheets is active or selected as a migration target.
+- The Options page includes MySQL/D1 storage controls, sync interval, duration multiplier, calendar start hour, device ID, reconciliation, and experimental ChatGPT usage controls.
 - Background sync that runs while the browser is open, with no page needed.
 - IndexedDB local storage using database `timelogger_db`.
-- Google Sheets API sync with `time_entries` as the canonical remote tab.
-- MySQL 8.4 sync through an authenticated HTTPS API, with resumable verified migration between providers.
+- MySQL 8.4 is the current authoritative backend, with sync through an authenticated HTTPS API and resumable verified migration to or from D1.
 - Cloudflare Worker + D1 sync through an authenticated user-owned HTTPS API, with resumable verified migration between providers.
-- Refresh-token-capable Google device OAuth flow for Firefox.
 - Experimental ChatGPT 5-hour and weekly usage controls for the current Firefox session.
 - Unit tests over the pure logic, run with `npm test`.
 
 ## Manual backups
 
-Options provides manual JSON backup and restore. Export and local restore capture one coherent local snapshot without contacting a remote backend, so unsynchronized edits can be preserved before setup or during an outage. A follow-up sync is attempted after restore; the local restore remains committed if synchronization is unavailable. The backup includes entries and selected non-secret settings (duration multiplier, sync interval, Tempo mapping/account, window presets, and calendar start hour). OAuth credentials, API tokens, ChatGPT consent, diagnostics, locks, backend bindings, and local recovery markers are never included.
+Options provides manual JSON backup and restore. Export and local restore capture one coherent local snapshot without contacting a remote backend, so unsynchronized edits can be preserved before setup or during an outage. A follow-up sync is attempted after restore; the local restore remains committed if synchronization is unavailable. The backup includes entries and selected non-secret settings (duration multiplier, sync interval, Tempo mapping/account, window presets, and calendar start hour). API tokens, ChatGPT consent, diagnostics, locks, backend bindings, and local recovery markers are never included.
 
 Restore previews additions, identical entries, conflicts, and selected non-secret settings before committing. Existing differing entries are preserved and reported with field differences, while new entries and selected settings are restored locally. A follow-up sync is attempted; if the network is unavailable, the local restore remains committed and Options reports that synchronization is pending. JSON backups are limited to 128 MiB of UTF-8 text; chunked import and alternate recovery for larger files are not supported.
 
@@ -59,7 +57,7 @@ The page displays the percentage remaining, percentage used, reset date and coun
 1. Open `about:debugging#/runtime/this-firefox`.
 2. Click **Load Temporary Add-on**.
 3. Select `extension/manifest.json`.
-4. Open the extension options page, enter the Google OAuth client ID and secret, and sign in.
+4. Open the extension Options page and choose MySQL or Cloudflare Worker + D1 under Storage.
 
 Firefox temporary add-ons are removed when Firefox restarts. The manifest includes a stable Gecko extension ID for installed development builds.
 
@@ -74,7 +72,7 @@ The repository includes a GitHub Actions release workflow for personal distribut
 - Pushing a version tag signs and publishes that version automatically.
 - Firefox installations using the first signed build receive later versions automatically.
 
-The GitHub Pages files are publicly fetchable because Firefox's updater cannot authenticate to a private download. They do not contain the Google OAuth client ID, client secret, access token, refresh token, spreadsheet ID, or time entries. OAuth client credentials are entered once in Options and stored in Firefox synchronized extension storage; OAuth tokens stay in each local Firefox profile.
+The GitHub Pages files are publicly fetchable because Firefox's updater cannot authenticate to a private download. They do not contain API tokens, database credentials, or time entries. API tokens are entered in Options and stored only in each local Firefox profile.
 
 ### One-time setup
 
@@ -99,7 +97,7 @@ git push origin v0.1.1
 
 Watch **Actions > Release Firefox extension**. It runs the unit tests, lints the allow-listed extension files, asks Mozilla to sign an unlisted XPI, verifies that the signed XPI, source manifest, and tag have the same version, then deploys the XPI with `updates.json`, `checksums.txt`, and `provenance.json` to GitHub Pages. The release workflow also creates GitHub artifact attestations for the published release files.
 
-On every device, open `https://OWNER.github.io/REPOSITORY/` in Firefox and install the XPI. If Firefox downloads it instead, open `about:addons`, use the gear menu, choose **Install Add-on From File**, and select the downloaded XPI. Then open the extension's Options, save the Google OAuth credentials, and sign in.
+On every device, open `https://OWNER.github.io/REPOSITORY/` in Firefox and install the XPI. If Firefox downloads it instead, open `about:addons`, use the gear menu, choose **Install Add-on From File**, and select the downloaded XPI. Then open the extension's Options and configure the desired API backend.
 
 ### Publish later versions
 
@@ -116,65 +114,26 @@ Firefox periodically checks the deployed `updates.json` and installs a higher si
 
 The release package is generated from an explicit allow-list of Git-tracked files under the permitted extension directories. The packaging boundary does not independently approve every runtime file for safety, so new modules still require import and asset inspection. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. Normal Firefox installations require the Mozilla-signed XPI.
 
-## Google Cloud OAuth Setup
+## Storage setup and migration
 
-1. Go to Google Cloud Console.
-2. Create or select a project.
-3. Under **APIs & Services > Library**, enable both the **Google Sheets API** and the **Google Drive API**. Drive is used only to list the extension's own spreadsheets and to read the file's modification time.
-4. Configure the OAuth consent screen.
-5. If the app is in **Testing**, add your Google account under **Test users**.
-6. Create an OAuth client ID.
-7. Choose **TVs and Limited Input devices**.
-8. Copy the OAuth client ID and client secret.
-9. Open the installed extension's Options page.
-10. Enter the client ID and secret, click **Save Credentials**, and then click **Sign In**.
+MySQL 8.4 is the current authoritative backend. Enter its HTTPS API URL and
+device-local bearer token in Options, or configure a user-owned Cloudflare
+Worker + D1 API. New profiles explicitly choose which provider to initialize;
+the active backend is never changed merely by preparing a migration target.
 
-The extension requests two scopes: `spreadsheets`, and `drive.file` for per-file Drive access. `drive.file` covers only files this extension created, which is what lets it find its own spreadsheet and check whether the file changed before downloading it. Google's device flow accepts a fixed list of scopes; `drive.file` is on it and the broader `drive.metadata.readonly` is not.
+The extension can migrate between MySQL and D1 after verifying the local and
+remote snapshots, shared configuration, and entry counts. Migration state is
+durable and can resume after an Options page closes. Existing entries and
+tombstones remain local-first throughout setup and migration.
 
-When you click **Sign In**, the extension shows a Google device code and opens Google's device authorization page. Leave the options page open while Google authorizes the device. Device flow avoids extension redirect URI mismatch issues and stores a refresh token locally so the extension can refresh access tokens after the usual one-hour access token expires.
-
-The device-flow client ID and client secret are stored with Firefox Sync so they can be restored on another desktop Firefox device signed into the same Mozilla account with Add-ons sync enabled. Access and refresh tokens remain in the local Firefox profile and are never synchronized, so each device still requires its own Google sign-in. None of these values are included in published XPI files.
-
-### Long-Lived Sign-In With Device Flow
-
-Use this if you do not want to sign in again every hour.
-
-1. In Google Cloud Console, open **APIs & Services** > **Credentials**.
-2. Create an OAuth client ID.
-3. Choose **TVs and Limited Input devices**.
-4. Save the client ID and client secret in the extension's Options page.
-5. Reload the extension.
-6. Open Options and click **Sign In**.
-7. Enter the shown device code on Google's device authorization page.
-
-Google's device flow returns a refresh token. The extension stores that token in IndexedDB and uses it to refresh access tokens without asking you to sign in again. You still may need to sign in again if you sign out, reinstall the extension, clear extension storage, revoke the app in your Google account, or Google expires/revokes the refresh token.
-
-## Spreadsheet Setup
-
-There is nothing to configure. After you sign in, the first sync finds or creates the spreadsheet:
-
-- Drive is asked which spreadsheets this extension created. Under the `drive.file` scope that list contains only its own files, never the rest of your Drive.
-- The most recently modified candidate whose `time_entries` header matches is adopted.
-- If there are none, a spreadsheet named `Personal Time Logger` is created.
-- If the listing fails, for example because the Drive API is not enabled or the token predates the `drive.file` scope, an error is reported and nothing is created. A failed listing is never mistaken for "no spreadsheet exists".
-
-Options shows the spreadsheet as a link that opens it in Google Sheets, with its ID beside a **Copy ID** button. The ID is not editable, because detection and repair handle the cases that editing it used to cover.
-
-If the spreadsheet is deleted or moved to the trash, the next sync confirms with Drive that it is really gone, then sets up a replacement and refills it from the entries held on this device. A spreadsheet that is merely unreachable reports an error instead, so a permission problem cannot silently strand you on a second copy.
-
-The `time_entries` tab is created if missing and row 1 is kept as exactly these headers:
+The `time_entries` model contains these fourteen fields:
 
 ```text
 id, project, task, description, start_at, end_at, duration_seconds, status, created_at, updated_at, deleted_at, device_id, revision, multiply
 ```
 
-The `time_entries` tab is the canonical remote storage. Do not rename it unless you also update the code.
-
-A second tab named `config` holds settings shared between devices, currently the duration multiplier, plus a marker identifying the spreadsheet as this extension's.
-
-The `multiply` column stores the numeric multiplier value used for that entry, for example `1.5`. Existing rows without this value are treated as not multiplied.
-
-Sync reads first and only inspects the layout when a read fails. A missing tab, or a completely empty tab, can be initialized automatically. A populated tab must already have the exact supported header row; an unrecognized or cleared header stops sync without changing the sheet. Restore the header or move the data to a new spreadsheet before trying again.
+The remote API contract and version-fenced mutation behavior are documented in
+[`docs/remote-api-v1.md`](docs/remote-api-v1.md).
 
 ## Usage
 
@@ -223,19 +182,15 @@ remote backend** used by normal sync and reconciliation, plus an independent
 preparation target never changes the active backend; only a verified migration
 does that.
 
-Google Sheets is the legacy/default provider. MySQL 8.4 is configured with an
+MySQL 8.4 is the current authoritative provider. It is configured with an
 HTTPS API base URL and a device-local bearer token. Cloudflare Worker + D1 is
 configured with a `workers.dev` HTTPS URL and a device-local bearer token; the
-Worker stores only the token's SHA-256 digest. Google Account and
-Spreadsheet settings are shown when Google is active or selected as the
-preparation target, and are hidden during ordinary MySQL use without deleting
-Google credentials, tokens, or spreadsheet state.
+Worker stores only the token's SHA-256 digest.
 
-On a new installation, Options first asks whether to start with Google Sheets,
-MySQL, or Cloudflare Worker + D1. The remaining settings stay hidden until the
-selected backend has been established. MySQL and Cloudflare D1 setup can either
-adopt an existing remote dataset or initialize it from this profile's local
-data.
+On a new installation, Options asks whether to start with MySQL or Cloudflare
+Worker + D1. The remaining settings stay hidden until the selected backend has
+been established. Either provider can adopt an existing remote dataset or
+initialize it from this profile's local data.
 
 Storage migration pauses ordinary synchronization, verifies the canonical
 entries and shared configuration, and switches the active backend only after
@@ -246,16 +201,15 @@ the migration state so reopening Options can resume instead of repeating
 completed writes. The source provider and its data remain available for reverse
 migration.
 
-For a new profile that does not use Google, choose **Initialize from this
-device** for MySQL or Cloudflare D1 in Storage. This initializes the selected backend from
-that Firefox profile's local data without reading Google Sheets. Existing
-remote records that do not match the local data are rejected rather than
-overwritten.
+For a new profile, choose **Initialize from this device** for MySQL or
+Cloudflare D1 in Storage. This initializes the selected backend from that
+Firefox profile's local data. Existing remote records that do not match the
+local data are rejected rather than overwritten.
 
 If MySQL or Cloudflare D1 already contains the authoritative data, choose the
 corresponding **Adopt existing ... data** action instead. This verifies any local
 records that are already present, switches the backend, and imports remote-only
-records into the local database; it does not require Google sign-in.
+records into the local database.
 
 ### Cloudflare Worker + D1 setup
 
@@ -322,25 +276,36 @@ On sync, the extension:
 5. Pulls remote entries into IndexedDB, using last `updated_at` wins for normal edits.
 6. Retains deletion tombstones so a profile returning after a long outage can still observe the deletion.
 
-For a ready Google Sheets backend, an idle cycle normally uses one Drive change-token request before it can skip the snapshot. MySQL and Cloudflare Worker + D1 first validate backend health and then request a change token, so an idle cycle normally uses two API requests. The provider-injection regression in `test/sync-request-counts.test.js` measures the API-shaped path as two requests for idle (health plus change token), four for a dirty cycle (health, snapshot, one write, and the post-write marker), and two for a forced cycle (health plus snapshot). These are boundary counts, not latency guarantees for a live service. A timer left running overnight keeps running; it is never closed automatically.
-
-Where a valid entry ID appears in several rows, the valid row with the newest `updated_at` is selected regardless of its position, so a stale duplicate cannot overwrite a newer one. Equal timestamps do not provide a reliable ordering and duplicate rows remain visible for review. Malformed rows are quarantined instead of participating in the choice. Surplus rows are deleted only after their full row fingerprints are rechecked.
-
-Google Sheets must be treated as single-writer storage. Immediately before an existing row is rewritten or deleted, the extension asks Drive whether the file changed during preflight and stops if it did. This narrows the race window but cannot make Sheets mutations atomic, so do not edit the sheet or sync another device while a sync is running.
+MySQL and Cloudflare Worker + D1 first validate backend health and then request
+a change token, so an idle cycle normally uses two API requests. The
+provider-injection regression in `test/sync-request-counts.test.js` measures the
+API-shaped path as two requests for idle (health plus change token), four for a
+dirty cycle (health, snapshot, one write, and the post-write marker), and two
+for a forced cycle (health plus snapshot). These are boundary counts, not
+latency guarantees for a live service. A timer left running overnight keeps
+running; it is never closed automatically.
 
 Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the active provider receives the same tombstone instead of an immediate physical removal. Tombstones are retained locally and remotely as the deletion evidence used by long-offline profiles; they are not automatically purged after 14 days. A previously synchronized local entry that is absent from a remote snapshot, or an entry restored from an old backup, is held for explicit review in Reconcile rather than silently appended as a new remote entry. Only a genuinely new unsent entry with no prior synchronization evidence can take the automatic append path. A dirty edit against a retained remote tombstone is also held for an explicit choice. Clients that already purged this evidence cannot be repaired by inference from remote absence; they require user-directed reconciliation or rebootstrap.
 
 ## Reconcile Screen
 
-The ⇄ button in the popup header opens a page comparing this device with the active remote backend. It sorts every entry into identical, differing, device-only, remote-only, and (when supported) duplicated records, and summarises the totals so the two sides visibly account for each other. The page identifies the active provider and does not use the backend selected for a future migration.
+The ⇄ button in the popup header opens a page comparing this device with the
+active remote backend. It sorts every entry into identical, differing,
+device-only, remote-only, and quarantined records, and summarises the totals so
+the two sides visibly account for each other. The page identifies the active
+provider and does not use the backend selected for a future migration.
 
 Differing entries list each field with the device value beside the active remote value and a note of which copy is newer. Each row can be resolved either way, and each group has bulk actions, including keeping the newest of each.
 
-Resolutions validate the local revision and the remote fingerprint shown in the report before they change local state, then trigger a sync. Choosing a side leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit on other devices. Normal remote rewrites and deletes recheck only the affected complete records before the request; rewrites also verify those rows afterward. Providers without physical duplicate records do not show duplicate repair controls. Google Sheets has no atomic compare-and-swap. The extension checks Drive's modification time immediately before a rewrite or delete and stops when it changed during preflight, but a smaller race remains between that final check and the mutation. Deleting duplicate Google Sheet rows is the one action that writes directly to the spreadsheet, because a duplicate row has no local counterpart; it verifies every target before sending the batch.
+Resolutions validate the local revision and the remote version reference shown
+in the report before changing local state, then trigger a sync. Choosing a side
+leaves `updated_at` and `revision` untouched, so it does not read as a fresh edit
+on other devices. API rewrites and deletes use provider version fencing and
+verify the affected records after mutation.
 
 ## Known Limitations
 
-- Google Sheets is not a real database; MySQL uses the HTTPS API's relational uniqueness and version fencing.
+- MySQL is the current authoritative backend; Cloudflare Worker + D1 is the supported user-owned alternative.
 - Sync is polling-based, not real-time.
 - Popup history navigation and filters are bounded to the explicitly loaded date range; they do not search entries outside that range. Project and task suggestions come from values loaded into the current history view.
 - Conflict handling is intentionally simple.
@@ -348,11 +313,9 @@ Resolutions validate the local revision and the remote fingerprint shown in the 
 - Merging keeps the selected entry's start, multiplier, and status; it appends the other matching entry's actual elapsed time as one contiguous interval, then marks the other entry deleted locally.
 - Deleted entries remain in remote storage as tombstones indefinitely so multiple devices can converge during sync. Profiles with previously purged evidence, including those using older clients, require explicit reconciliation or rebootstrap; remote absence alone is not interpreted as permission to recreate a synchronized ID.
 - When it does read, each provider currently returns its complete canonical snapshot; the provider change token avoids that read when possible.
-- Google-specific read gating only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
 - A forgotten timer runs indefinitely until you explicitly edit or stop it; the popup warns after eight hours and provides both actions. Multiple active timers are listed there with start/device context.
-- OAuth uses Google device flow and stores personal OAuth credentials in the local Firefox extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
-- Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live Sheets or Drive.
+- Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live remote APIs.
 - No external runtime dependencies. Contributor tooling is installed from the locked npm development dependencies.
 - Manifest V3 support in Firefox can vary by version; if a browser rejects the manifest, use a current Firefox release.
 - SVG icons are in `extension/icons/`; the icon turns green when a timer is active. Replace them if you want custom branding.
@@ -393,7 +356,7 @@ benchmark plan, and the unimplemented partitioning design.
 npm test
 ```
 
-Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic Google API barriers before response, response body, and commit acknowledgement. Run `npm ci` first so the pinned static-analysis and packaging tools are available; the extension itself has no runtime npm dependencies.
+Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic API-provider barriers before response, response body, and commit acknowledgement. Run `npm ci` first so the pinned static-analysis and packaging tools are available; the extension itself has no runtime npm dependencies.
 
 The fake IndexedDB implementation is a focused test double for the transaction, cursor, FIFO, and rollback behavior covered by these tests; it is not a complete browser database implementation. Use the Firefox smoke test for browser-only IndexedDB semantics and page lifecycle behavior that the test double does not model.
 
@@ -403,7 +366,7 @@ For a Firefox WebDriver behavior smoke test, install Firefox, `geckodriver`, and
 npm run test:browser
 ```
 
-Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies Analytics and calendar rendering, exercises provider-aware Options visibility, saves Options, and checks the cross-context lock. It never contacts live Google, MySQL, or Cloudflare APIs; live Sheets/Drive behavior remains covered by deterministic mock state machines.
+Set `GECKODRIVER_BIN` or `FIREFOX_BINARY` when they are not on `PATH`. The smoke uses a temporary unsigned extension, opens every extension page, starts/stops/edits a timer, verifies Analytics and calendar rendering, exercises MySQL/D1 Options visibility, saves Options, and checks the cross-context lock. It never contacts live MySQL or Cloudflare APIs.
 
 GitHub Actions runs the Node checks and Firefox behavior smoke on every push and pull request. The release workflow also requires the Firefox smoke before signing, so either test path can block a release.
 
@@ -433,8 +396,6 @@ test/
 ```
 
 `extension/background/` holds the sync alarm, `extension/reconcile/` the comparison screen, `scripts/` the release packaging, and `test/` the unit tests. Only the contents of `extension/` are copied into a release; `test/`, `package.json`, `scripts/`, and documentation are excluded from the package.
-
-OAuth client credentials are stored in Firefox synchronized extension storage through the Options page; access and refresh tokens remain in local IndexedDB. None are part of the extension package.
 
 ## Next Improvements
 

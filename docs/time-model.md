@@ -28,9 +28,9 @@ Entries use optimistic revisions for local writes. A reconciliation choice is
 validated against the local revision and the provider's complete remote
 reference observed by the user; divergent edits remain a conflict until
 explicitly resolved. Sync mutations use the provider's concurrency mechanism
-and verify the intended result afterward. Google Sheets offers no atomic
-compare-and-swap operation, while MySQL uses API version fences. A successful
-local resolution is a durable operation rather than a synthetic timestamp bump.
+and verify the intended result afterward. MySQL and Cloudflare D1 use API
+version fences. A successful local resolution is a durable operation rather
+than a synthetic timestamp bump.
 
 ## D-04 — Displayed-week Tempo allocation
 
@@ -54,12 +54,9 @@ the local date of its daily allocation.
 ### D1 — Remote optimistic concurrency
 
 Every remote update or deletion checks the provider reference observed in the
-snapshot. Google Sheets uses a complete serialized row fingerprint, batch-reads
-only the affected rows, and checks Drive's modification time immediately before mutation;
-MySQL uses an API remote version. Google Sheets is still single-writer storage:
-it has no conditional row-update API, and an edit can land between the final
-Drive check and the write. The postflight check can report that race after data
-was changed, but cannot provide database-style atomic compare-and-swap.
+snapshot. MySQL and Cloudflare D1 use an API remote version and verify the
+affected records after mutation. Append ambiguity is confirmed by a fresh
+versioned snapshot before local acknowledgement.
 
 ### D2 — Cross-device conflict ordering
 
@@ -86,12 +83,3 @@ selector, so that local wall time cannot be saved directly.
 Stored multipliers are decimal values from **1.000** through **5.001**,
 inclusive, with at most three decimal places. Values outside that domain or
 with greater precision are rejected instead of rounded silently.
-
-### D6 — Spreadsheet schema recovery
-
-Automatic schema repair is limited to a missing or entirely empty tab. A
-populated tab must have the exact current header; any mismatch stops before
-writing and requires guided recovery. Matching column count alone is never
-sufficient. A spreadsheet from before the `config` tab and app marker existed
-is supported only when its populated `time_entries` tab already has the current
-header; the missing tab and marker can then be added safely.

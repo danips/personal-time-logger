@@ -16,7 +16,7 @@ describe("error recovery registry", () => {
     }
   });
   it("maps sync failure modes to stable, actionable guidance", () => {
-    for (const code of ["REMOTE_ROW_STALE", "API_TIMEOUT", "REMOTE_APPEND_CONFLICT", "SYNC_BUSY", "RECONCILIATION_PARTIAL"]) {
+    for (const code of ["REMOTE_VERSION_STALE", "API_TIMEOUT", "REMOTE_APPEND_CONFLICT", "SYNC_BUSY", "RECONCILIATION_PARTIAL"]) {
       const info = errorInfo({ code, message: "private server detail" });
       assert.equal(info.diagnosticsCode, code);
       assert.ok(info.recovery.length > 10);
@@ -24,11 +24,11 @@ describe("error recovery registry", () => {
     }
   });
 
-  it("keeps authentication and retry states useful to every page", () => {
-    assert.equal(statusFromError({ code: "AUTH_EXPIRED" }), "not signed in");
+  it("keeps remote authorization and retry states useful to every page", () => {
+    assert.equal(statusFromError({ code: "REMOTE_AUTH_REQUIRED" }), "not authorized");
     assert.equal(statusFromError({ code: "BACKOFF" }), "pending");
     assert.equal(statusFromError({ code: "OFFLINE" }), "offline");
-    assert.match(formatError({ code: "REMOTE_ROW_STALE" }), /Refresh Reconcile/);
+    assert.match(formatError({ code: "REMOTE_VERSION_STALE" }), /refresh Reconcile/);
     assert.match(formatError({ code: "TEMPO_PERMISSION_MISSING" }), /approve the permission request/);
     assert.match(formatError({ code: "TEMPO_PARTIAL" }), /Do not resend the whole week/);
   });

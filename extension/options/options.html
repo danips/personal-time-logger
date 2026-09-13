@@ -28,10 +28,6 @@
           <p id="setupBackupStatus" class="status" role="status" aria-live="polite"></p>
         </section>
         <div id="setupProviderChoices" class="setup-choice-grid">
-          <button id="chooseGoogleSetup" class="setup-choice" type="button">
-            <strong>Start with Google Sheets</strong>
-            <span>Sign in and use a Google spreadsheet as the remote backend.</span>
-          </button>
           <button id="chooseMysqlSetup" class="setup-choice" type="button">
             <strong>Start with MySQL</strong>
             <span>Connect to an existing MySQL dataset or start from local data.</span>
@@ -40,19 +36,6 @@
             <strong>Start with Cloudflare Worker + D1</strong>
             <span>Connect to your own Cloudflare Worker and D1 database.</span>
           </button>
-        </div>
-        <div id="setupGoogle" class="setup-provider" hidden>
-          <h3>Set up Google Sheets</h3>
-          <label for="setupGoogleClientId">OAuth client ID<input id="setupGoogleClientId" type="text" autocomplete="off" spellcheck="false"></label>
-          <label for="setupGoogleClientSecret">OAuth client secret<input id="setupGoogleClientSecret" type="password" autocomplete="off" spellcheck="false"></label>
-          <p class="note">After sign-in, the extension will find or create the compatible spreadsheet.</p>
-          <div id="setupDeviceAuthPanel" class="device-auth" hidden>
-            <p>Google device sign-in code</p>
-            <strong id="setupDeviceUserCode"></strong>
-            <p>Open <a id="setupDeviceVerificationUrl" href="#" target="_blank" rel="noreferrer"></a> and enter the code above.</p>
-            <p id="setupDeviceAuthExpires" class="note"></p>
-          </div>
-          <div class="actions"><button id="setupGoogleBack" type="button">Back</button><button id="setupGoogleButton" type="button">Save and sign in</button></div>
         </div>
         <div id="setupMysql" class="setup-provider" hidden>
           <h3>Set up MySQL</h3>
@@ -125,8 +108,6 @@
           <a href="#appearance">Appearance</a>
           <a href="#general">General</a>
           <a href="#storage">Storage</a>
-          <a id="googleAccountNav" href="#google-account">Google Account</a>
-          <a id="spreadsheetNav" href="#spreadsheet">Spreadsheet</a>
           <a href="#chatgpt-usage">ChatGPT Usage</a>
           <a href="#reconciliation">Reconciliation</a>
           <a href="#tempo">Tempo</a>
@@ -189,16 +170,15 @@
             </div>
             <p id="storageDraftIndicator" class="draft-indicator" hidden><span id="storageDraftMessage"></span><button id="storageDiscardDraft" type="button">Discard</button></p>
             <dl>
-              <div><dt>Active remote backend</dt><dd id="activeRemoteBackend">Google Sheets</dd></div>
+              <div><dt>Active remote backend</dt><dd id="activeRemoteBackend">Not configured</dd></div>
             </dl>
             <label for="remoteBackendTarget">Backend to prepare and test
               <select id="remoteBackendTarget">
-                <option value="google-sheets">Google Sheets</option>
                 <option value="mysql">MySQL 8.4</option>
                 <option value="cloudflare-d1">Cloudflare Worker + D1</option>
               </select>
             </label>
-            <p id="preparedRemoteBackend" class="note">Prepared backend: Google Sheets</p>
+            <p id="preparedRemoteBackend" class="note">Prepared backend: MySQL 8.4</p>
             <p class="note">Choosing a backend here only prepares and tests it. Existing data is not switched until verified migration succeeds; the active backend remains unchanged.</p>
             <p class="note">Migration pauses synchronization, verifies every canonical entry and shared setting, and switches only after the target digest matches. Close other devices and do not edit timers until it finishes.</p>
             <div class="actions"><button id="migrateStorage" type="button">Migrate verified data and switch backend</button></div>
@@ -209,8 +189,8 @@
               <label for="mysqlApiToken">API token<input id="mysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
               <p class="note">The token stays in this Firefox profile and is sent only as a bearer token to the configured API origin. It is not put in Firefox Sync. Replacing this token changes credentials only; it does not select, migrate, or replace the dataset.</p>
               <div class="actions"><button id="testMysqlConnection" type="button">Test MySQL connection</button><button id="saveMysqlSettings" type="button">Save MySQL settings</button><button id="clearMysqlToken" type="button">Clear MySQL token</button><button id="activateMysqlFromLocal" type="button">Initialize from this device</button><button id="activateMysqlFromRemote" type="button">Adopt existing MySQL data</button></div>
-              <p class="note">Initialize from this device when you do not want a Google account. This uses only this profile's local data; Google Sheets is not read.</p>
-              <p class="note">Adopt existing MySQL data when the database already contains your time entries. It imports those records into this profile and does not read Google Sheets.</p>
+              <p class="note">Initialize from this device when you want to use this profile's local data. Existing MySQL records that do not match local data block the switch.</p>
+              <p class="note">Adopt existing MySQL data when the database already contains your time entries. It imports those records into this profile.</p>
               <p id="mysqlConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
             <div id="cloudflareD1StorageFields" hidden>
@@ -220,47 +200,6 @@
               <div class="actions"><button id="testCloudflareD1Connection" type="button">Test Worker connection</button><button id="saveCloudflareD1Settings" type="button">Save D1 settings</button><button id="clearCloudflareD1Token" type="button">Clear D1 token</button><button id="activateCloudflareD1FromLocal" type="button">Initialize from this device</button><button id="activateCloudflareD1FromRemote" type="button">Adopt existing D1 data</button></div>
               <p id="cloudflareD1ConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
-          </section>
-
-          <section id="google-account" class="panel options-section">
-            <h2>Google Account</h2>
-            <p id="google-accountDraftIndicator" class="draft-indicator" hidden><span id="google-accountDraftMessage"></span><button id="google-accountDiscardDraft" type="button">Discard</button></p>
-            <label>
-              OAuth client ID
-              <input id="googleClientId" type="text" autocomplete="off" spellcheck="false">
-            </label>
-            <label>
-              OAuth client secret
-              <input id="googleClientSecret" type="password" autocomplete="off" spellcheck="false">
-            </label>
-            <p class="note">The client ID and client secret are saved with Firefox Sync and can be restored on desktop devices signed into the same Mozilla account with Add-ons sync enabled. Each device still needs its own Google sign-in.</p>
-            <p class="note">Credentials and tokens are unencrypted in each Firefox profile. OAuth access and refresh tokens stay on this device and are never put in Firefox Sync. Use Sign Out to remove tokens, and revoke access in your Google Account to invalidate them. See PRIVACY.md for details.</p>
-            <dl>
-              <div><dt>OAuth status</dt><dd id="authStatus">Loading...</dd></div>
-              <div><dt>Device ID</dt><dd><code id="deviceId"></code></dd></div>
-            </dl>
-            <div id="deviceAuthPanel" class="device-auth" hidden>
-              <p>Google device sign-in code</p>
-              <strong id="deviceUserCode"></strong>
-              <p>Open <a id="deviceVerificationUrl" href="#" target="_blank" rel="noreferrer"></a> and enter the code above.</p>
-              <p id="deviceAuthExpires" class="note"></p>
-            </div>
-            <div class="actions"><button id="saveGoogleCredentials" type="button">Save Credentials</button><button id="signInButton" type="button">Sign In</button><button id="signOutButton" type="button">Sign Out</button></div>
-          </section>
-
-          <section id="spreadsheet" class="panel options-section">
-            <h2>Spreadsheet</h2>
-            <dl>
-              <div><dt>Spreadsheet</dt><dd><a id="spreadsheetLink" href="#" target="_blank" rel="noreferrer">Not set up yet</a></dd></div>
-              <div><dt>Spreadsheet ID</dt><dd><code id="spreadsheetId">not set</code></dd></div>
-            </dl>
-            <p class="note">The spreadsheet is found or created automatically after you sign in. If it is permanently deleted or you lose access, use the recovery controls below; the extension will never replace an inaccessible spreadsheet automatically.</p>
-            <p id="spreadsheetBackupInfo" class="note">Checking local backup...</p>
-            <div class="actions"><button id="copySpreadsheetId" type="button">Copy ID</button><button id="reconnectSpreadsheet" type="button">Reconnect</button><button id="createReplacementSpreadsheet" type="button">Create replacement</button></div>
-            <label>Connect an existing compatible spreadsheet ID<input id="replacementSpreadsheetId" type="text" autocomplete="off" spellcheck="false"></label>
-            <div class="actions"><button id="connectSpreadsheet" type="button">Connect spreadsheet</button></div>
-            <p class="note">Reconnect keeps the current ID. Connecting or creating a replacement preserves every local entry and syncs that backup to the selected destination.</p>
-            <p class="note">The sheet tab named <code>time_entries</code> is the canonical remote storage.</p>
           </section>
 
           <section id="chatgpt-usage" class="panel options-section" aria-labelledby="usageHeading">
@@ -287,10 +226,9 @@
             <p id="reconcileFilterSummary" class="note">Showing all report items</p>
             <div class="options-subsection" aria-labelledby="summaryHeading">
               <h2 id="summaryHeading">Summary</h2>
-              <dl id="summary"><div><dt>Entries on this device</dt><dd id="localCount">-</dd></div><div><dt>Remote records</dt><dd id="remoteRowCount">-</dd></div><div><dt>Remote entries</dt><dd id="remoteCount">-</dd></div><div id="duplicateSummaryMetric"><dt>Duplicate remote records</dt><dd id="duplicateRowCount">-</dd></div><div><dt>Identical on both sides</dt><dd id="inSyncCount">-</dd></div><div><dt>Divergences</dt><dd id="divergenceCount">-</dd></div></dl>
+              <dl id="summary"><div><dt>Entries on this device</dt><dd id="localCount">-</dd></div><div><dt>Remote entries</dt><dd id="remoteCount">-</dd></div><div><dt>Identical on both sides</dt><dd id="inSyncCount">-</dd></div><div><dt>Divergences</dt><dd id="divergenceCount">-</dd></div></dl>
             </div>
             <div id="differentSection" class="options-subsection" aria-labelledby="differentHeading"><div class="panel-heading"><h2 id="differentHeading">Different on each side</h2><div class="actions"><button id="keepAllLocal" type="button">Keep all local</button><button id="keepAllRemote" type="button">Keep all remote</button><button id="keepAllNewest" type="button">Keep newest of each</button></div></div><div id="differentList" class="group-list"></div></div>
-            <div id="duplicateSection" class="options-subsection" aria-labelledby="duplicateHeading"><div class="panel-heading"><h2 id="duplicateHeading">Duplicate remote records</h2><div class="actions"><button id="deleteAllDuplicates" type="button">Delete all extra rows</button></div></div><p class="note">The same entry appears in more than one remote record. Sync uses the most recently updated of them; the others are stale copies that only take up space.</p><div id="duplicateList" class="group-list"></div></div>
             <div id="quarantinedSection" class="options-subsection" aria-labelledby="quarantinedHeading"><div class="panel-heading"><h2 id="quarantinedHeading">Invalid remote records</h2><button id="exportQuarantined" type="button">Export locations</button></div><p class="note">These records are excluded from sync until corrected at the remote backend.</p><div id="quarantinedList" class="group-list"></div></div>
             <div id="localOnlySection" class="options-subsection" aria-labelledby="localOnlyHeading"><div class="panel-heading"><h2 id="localOnlyHeading">Only on this device</h2><div class="actions"><button id="pushAllLocal" type="button">Push all to remote</button></div></div><div id="localOnlyList" class="group-list"></div></div>
             <div id="remoteOnlySection" class="options-subsection" aria-labelledby="remoteOnlyHeading"><div class="panel-heading"><h2 id="remoteOnlyHeading">Only in remote storage</h2><div class="actions"><button id="importAllRemote" type="button">Import all from remote</button></div></div><div id="remoteOnlyList" class="group-list"></div></div>
@@ -324,7 +262,7 @@
             <h2>Diagnostics</h2>
             <p id="diagnosticsSummary" class="note">Loading diagnostics...</p>
             <div id="diagnosticsList" class="diagnostics-list"></div>
-            <p class="note">Recovery records contain time, component, stable error code, bounded occurrence count, safe provider/version/freshness context, entry count, and suggested action. They do not contain time-entry content, OAuth tokens, spreadsheet IDs, URLs, or raw API responses.</p>
+            <p class="note">Recovery records contain time, component, stable error code, bounded occurrence count, safe provider/version/freshness context, entry count, and suggested action. They do not contain time-entry content, credentials, remote identifiers, URLs, or raw API responses.</p>
             <div class="actions"><button id="copyDiagnostics" type="button">Copy diagnostics</button><button id="exportDiagnostics" type="button">Download diagnostics</button><button id="clearDiagnostics" type="button">Clear diagnostics</button></div>
           </section>
         </div>

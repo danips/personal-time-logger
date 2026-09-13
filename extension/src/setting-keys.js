@@ -5,7 +5,6 @@
  */
 export const SETTING_KEY = Object.freeze({
   ACTIVE_TIMER_OPERATION: "active_timer_operation",
-  AUTH_GENERATION: "auth_generation",
   BACKGROUND_SYNC_DUE_AT: "background_sync_due_at",
   CHATGPT_USAGE_SESSION_TOKEN_CONSENT: "chatgpt_usage_session_token_consent",
   CHATGPT_USAGE_STATE: "chatgpt_usage_state",
@@ -15,9 +14,6 @@ export const SETTING_KEY = Object.freeze({
   DURATION_MULTIPLIER: "duration_multiplier",
   DURATION_MULTIPLIER_SYNCED_AT: "duration_multiplier_synced_at",
   DURATION_MULTIPLIER_UPDATED_AT: "duration_multiplier_updated_at",
-  GOOGLE_OAUTH_CLIENT_ID: "google_oauth_client_id",
-  GOOGLE_OAUTH_CLIENT_SECRET: "google_oauth_client_secret",
-  GOOGLE_TOKEN_DATA: "token_data",
   MYSQL_API_BASE_URL: "mysql_api_base_url",
   MYSQL_API_TOKEN: "mysql_api_token",
   MYSQL_REMOTE_CHANGE_TOKEN: "mysql_remote_change_token",
@@ -28,10 +24,6 @@ export const SETTING_KEY = Object.freeze({
   STORAGE_MIGRATION_STATE: "storage_migration_state",
   RECONCILIATION_INTENTS: "reconciliation_intents",
   REMOTE_BACKEND: "remote_backend",
-  REMOTE_CHANGE_TOKEN: "remote_change_token",
-  REMOTE_MODIFIED_TIME: "remote_modified_time",
-  SPREADSHEET_ID: "spreadsheet_id",
-  SPREADSHEET_PROVISION_PENDING: "spreadsheet_provision_pending",
   STALE_RECONCILIATION_INTENTS: "stale_reconciliation_intents",
   STALE_TIMER_REMINDER_ENABLED: "stale_timer_reminder_enabled",
   STALE_TIMER_REMINDER_STATE: "stale_timer_reminder_state",
@@ -48,7 +40,6 @@ export const SETTING_KEY = Object.freeze({
   TEMPO_SUBMISSION_TRACKING_STARTED_AT: "tempo_submission_tracking_started_at",
   TEMPO_PROJECT_TASK_ISSUE_IDS: "tempo_project_task_issue_ids",
   TEMPO_TASK_ISSUE_IDS: "tempo_task_issue_ids",
-  TIME_ENTRIES_SHEET_ID: "time_entries_sheet_id",
   UPDATE_AVAILABLE_VERSION: "update_available_version",
   WINDOW_RESIZE_PRESETS: "window_resize_presets",
   WORKDAY_START_HOUR: "workday_start_hour"

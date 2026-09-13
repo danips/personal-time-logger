@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { before, describe, it } from "node:test";
 
-import { SHEET_HEADERS } from "../extension/src/entries.js";
 import { seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 
@@ -14,11 +13,9 @@ const readFixture = async (name) => JSON.parse(await readFile(join(fixturesDirec
 installFakeIndexedDB();
 
 let db;
-let rowsToEntries;
 
 before(async () => {
   db = await import("../extension/src/db.js");
-  ({ rowsToEntries } = await import("../extension/src/sheets.js"));
 });
 
 describe("migration fixtures", () => {
@@ -35,24 +32,6 @@ describe("migration fixtures", () => {
     assert.deepEqual(await db.getDirtyEntries().then((entries) => entries.map((entry) => entry.id).sort()), [
       "v2-active-entry",
       "v2-tombstone-entry"
-    ]);
-    assert.equal(await db.getSetting("spreadsheet_id"), "legacy-sheet-id");
-  });
-
-  it("decodes a legacy single-tab spreadsheet and preserves its entries", async () => {
-    const spreadsheet = await readFixture("legacy-spreadsheet.json");
-    assert.equal("config" in spreadsheet.tabs, false);
-
-    const rows = spreadsheet.tabs.time_entries.rows;
-    assert.deepEqual(rows[0], SHEET_HEADERS);
-    const { entries, rowMap } = rowsToEntries(rows);
-
-    assert.deepEqual(entries.map((entry) => entry.id), ["legacy-complete-entry", "legacy-deleted-entry"]);
-    assert.equal(entries[1].deleted_at, "2026-07-03T09:00:00.000Z");
-    assert.equal(entries[1].multiply, "2.000");
-    assert.deepEqual([...rowMap], [
-      ["legacy-complete-entry", 2],
-      ["legacy-deleted-entry", 3]
     ]);
   });
 });

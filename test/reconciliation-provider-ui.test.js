@@ -17,9 +17,8 @@ describe("provider-aware reconciliation UI", () => {
       provider: {
         id: "future-provider",
         label: "Future Remote",
-        capabilities: { duplicateRemoteRecords: false },
         async readSnapshot() {
-          return { entries: [], duplicates: [], quarantined: [{ id: "bad", ref: { version: 3 }, reason: "invalid_entry" }] };
+          return { entries: [], quarantined: [{ id: "bad", ref: { version: 3 }, reason: "invalid_entry" }] };
         },
         secretMethod() {}
       }
@@ -28,14 +27,13 @@ describe("provider-aware reconciliation UI", () => {
     assert.deepEqual(report.provider, {
       id: "future-provider",
       label: "Future Remote",
-      capabilities: { duplicateRemoteRecords: false }
     });
     assert.equal(Object.hasOwn(report.provider, "secretMethod"), false);
     assert.equal(report.quarantined[0].ref.version, 3);
   });
 
   it("declares rendered controls for filtering, outcomes, and safe quarantine export", () => {
-    assert.match(reconcileHtml, /id="duplicateSummaryMetric"/);
+    assert.doesNotMatch(reconcileHtml, /duplicate|rowIndex/i);
     assert.match(reconcileHtml, /id="quarantinedSection"/);
     assert.match(reconcileHtml, /id="reconcileSearch"/);
     assert.match(reconcileHtml, /id="operationOutcome"/);
@@ -47,15 +45,13 @@ describe("provider-aware reconciliation UI", () => {
       provider: {
         id: "mysql",
         label: "MySQL 8.4",
-        capabilities: { duplicateRemoteRecords: false },
         async readSnapshot() {
-          return { entries: [], duplicates: [] };
+          return { entries: [] };
         }
       }
     });
 
     assert.equal(report.provider.label, "MySQL 8.4");
-    assert.deepEqual(report.duplicates, []);
     assert.doesNotMatch(reconcileHtml, /spreadsheet/i);
   });
 
@@ -64,7 +60,6 @@ describe("provider-aware reconciliation UI", () => {
       provider: {
         id: "mysql",
         label: "MySQL 8.4",
-        capabilities: { duplicateRemoteRecords: false },
         async readSnapshot() { return null; }
       }
     }), { code: "REMOTE_API_INCOMPATIBLE" });

@@ -21,15 +21,14 @@ async function releaseSyncDrain() {
 function createProvider() {
   const calls = [];
   const provider = {
-    id: "injected-provider",
+    id: "mysql",
     label: "Injected provider",
-    capabilities: { duplicateRemoteRecords: false },
     calls,
     async ensureReady() { calls.push("health"); },
     async getChangeToken() { calls.push("change-token"); return "v1"; },
     async readSnapshot() {
       calls.push("read-snapshot");
-      return { entries: [], entryRefs: new Map(), duplicates: [], quarantined: [], config: {}, configRefs: new Map(), changeToken: "v1" };
+      return { entries: [], entryRefs: new Map(), quarantined: [], config: {}, configRefs: new Map(), changeToken: "v1" };
     },
     async updateEntries(entries) {
       if (entries.length) calls.push("write-entry");
@@ -38,7 +37,6 @@ function createProvider() {
       if (entries.length) calls.push("write-entry");
       return entries.map((entry) => ({ id: entry.id, ref: { kind: "injected", version: 1 } }));
     },
-    async ensureAppMarker() { return false; }
   };
   return provider;
 }

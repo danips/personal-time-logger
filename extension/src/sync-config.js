@@ -13,7 +13,7 @@ export async function hasPendingConfig() {
 }
 
 /** Reconciles the duration multiplier in an already-read remote snapshot. */
-export async function syncConfig(remoteConfig, configRefs, { interactiveAuth, lease, provider } = {}) {
+export async function syncConfig(remoteConfig, configRefs, { lease, provider } = {}) {
   const remote = remoteConfig[MULTIPLIER_KEY];
   const remoteUpdatedAt = remote ? String(remote.updated_at || "") : "";
   const remoteValue = remote ? String(remote.value || "") : "";
@@ -52,7 +52,6 @@ export async function syncConfig(remoteConfig, configRefs, { interactiveAuth, le
   await lease?.assert();
   await provider.updateConfig(MULTIPLIER_KEY, localValue, localUpdatedAt, {
     expectedRef: configRefs.get(MULTIPLIER_KEY),
-    interactiveAuth
   });
   await lease?.assert();
   await setSetting(MULTIPLIER_SYNCED_KEY, localUpdatedAt);

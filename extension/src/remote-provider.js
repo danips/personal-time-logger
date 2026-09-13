@@ -1,29 +1,25 @@
 import { getSetting } from "./db.js";
 import { ERROR_CODE } from "./error-codes.js";
 import { codedError } from "./coded-error.js";
-import { googleSheetsProvider } from "./remote-google-sheets.js";
 import { mysqlProvider } from "./remote-mysql.js";
 import { cloudflareD1Provider } from "./remote-cloudflare-d1.js";
 import { SETTING_KEY } from "./setting-keys.js";
 
 export const REMOTE_PROVIDER_ID = Object.freeze({
-  GOOGLE_SHEETS: "google-sheets",
   MYSQL: "mysql",
   CLOUDFLARE_D1: "cloudflare-d1"
 });
 
 const PROVIDERS = new Map([
-  [REMOTE_PROVIDER_ID.GOOGLE_SHEETS, googleSheetsProvider],
   [REMOTE_PROVIDER_ID.MYSQL, mysqlProvider],
   [REMOTE_PROVIDER_ID.CLOUDFLARE_D1, cloudflareD1Provider]
 ]);
-/** Missing and legacy installations continue to use Google Sheets. */
+
 export function decodeRemoteProviderId(value) {
-  const id = String(value || "").trim();
-  return id || REMOTE_PROVIDER_ID.GOOGLE_SHEETS;
+  return String(value || "").trim();
 }
 
-export function getRemoteProvider(id = REMOTE_PROVIDER_ID.GOOGLE_SHEETS) {
+export function getRemoteProvider(id = "") {
   const providerId = decodeRemoteProviderId(id);
   const provider = PROVIDERS.get(providerId);
   if (!provider) {
@@ -37,12 +33,6 @@ export function getRemoteProvider(id = REMOTE_PROVIDER_ID.GOOGLE_SHEETS) {
 
 export async function getActiveRemoteProvider() {
   return getRemoteProvider(await getSetting(SETTING_KEY.REMOTE_BACKEND, ""));
-}
-
-export function getRemoteProviderCapabilities(provider) {
-  return Object.freeze({
-    duplicateRemoteRecords: provider?.capabilities?.duplicateRemoteRecords === true
-  });
 }
 
 export function registeredRemoteProviderIds() {

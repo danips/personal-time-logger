@@ -11,7 +11,6 @@ function row(values) {
 }
 
 function location(item) {
-  if (item?.rowIndex) return `row ${item.rowIndex}`;
   if (item?.ref?.version !== undefined) return `record version ${item.ref.version}`;
   return "unknown record";
 }

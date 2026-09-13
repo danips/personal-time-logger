@@ -3,21 +3,19 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
-  SHEET_HEADERS,
   canMergeEntries,
   createCompletedEntry,
   decodeEntryEdit,
   decodePersistedEntry,
   duplicateEntryPreview,
-  entryToRow,
   hasEqualTimestampConflict,
   hasMultiplier,
   isRemoteNewer,
   mergeEntryPreview,
   normalizeEntry,
   normalizeMultiplierText,
-  rowToEntry
 } from "../extension/src/entries.js";
+import { ENTRY_FIELDS } from "../extension/src/entry-contract.js";
 import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { seedEntry } from "./support/db-fixtures.js";
@@ -39,7 +37,7 @@ function contractEntry(testCase) {
 
 const fixture = (over = {}) => persistedEntryFixture({ description: "Notes", ...over });
 
-describe("sheet schema", () => {
+describe("entry schema", () => {
   it("identifies different records with an equal timestamp as a conflict", () => {
     const first = fixture();
     assert.equal(hasEqualTimestampConflict(first, { ...first, task: "Other task" }), true);
@@ -48,13 +46,9 @@ describe("sheet schema", () => {
 
   it("no longer carries the unused client, billable and tags columns", () => {
     for (const dropped of ["client", "billable", "tags"]) {
-      assert.equal(SHEET_HEADERS.includes(dropped), false, `${dropped} is gone`);
+      assert.equal(ENTRY_FIELDS.includes(dropped), false, `${dropped} is gone`);
     }
-    assert.equal(SHEET_HEADERS.length, 14);
-  });
-
-  it("starts with the id, which joins local entries to sheet rows", () => {
-    assert.equal(SHEET_HEADERS[0], "id");
+    assert.equal(ENTRY_FIELDS.length, 14);
   });
 });
 
@@ -128,29 +122,9 @@ describe("hasMultiplier", () => {
   });
 });
 
-describe("row serialization", () => {
-  it("round-trips an entry through the sheet row", () => {
-    const entry = fixture({ multiply: "1.500", device_id: "device-a", status: "needs_review" });
-    const restored = rowToEntry(entryToRow(entry));
-
-    for (const field of SHEET_HEADERS) {
-      assert.deepEqual(restored[field], entry[field], `field ${field} survived`);
-    }
-  });
-
-  it("produces one cell per header", () => {
-    assert.equal(entryToRow(fixture()).length, SHEET_HEADERS.length);
-  });
-
-  it("marks a row read from the sheet as clean", () => {
-    const restored = rowToEntry(entryToRow(fixture({ dirty: true })));
-    assert.equal(restored.dirty, false);
-    assert.equal(restored.sync_error, "");
-  });
-
+describe("persistence boundary", () => {
   it("rejects incomplete or invalid records at the persistence boundary", () => {
     assert.throws(() => decodePersistedEntry({ id: "incomplete" }), { code: "ENTRY_INVALID" });
-    assert.throws(() => rowToEntry(["entry-only"]), { code: "ENTRY_INVALID" });
     assert.throws(() => decodePersistedEntry({ ...fixture(), revision: 0 }), { code: "ENTRY_INVALID" });
   });
 

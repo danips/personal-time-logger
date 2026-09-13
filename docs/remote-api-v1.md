@@ -14,7 +14,8 @@ token in URLs, request bodies, backups, diagnostics, or logs.
 | POST | `/v1/entries/delete` | `{ deleted: [string] }` |
 | POST | `/v1/config/update` | `{ key, version }` |
 
-An entry is the canonical fourteen-field model defined by `SHEET_HEADERS`:
+An entry is the canonical fourteen-field model defined by
+`extension/src/entry-contract.js`:
 `id`, `project`, `task`, `description`, `start_at`, `end_at`,
 `duration_seconds`, `status`, `created_at`, `updated_at`, `deleted_at`,
 `device_id`, `revision`, and `multiply`. SQL-backed providers may return
@@ -38,6 +39,6 @@ that record's version. A mutation request is atomic, and its change token is
 advanced at most once. An ordinary idempotent or no-op request does not advance
 the token.
 
-Google Sheets uses row/fingerprint references, while MySQL and Cloudflare D1
-use opaque version references. Provider-specific transport details remain
-behind the provider interface in `extension/src/remote-provider.js`.
+MySQL and Cloudflare D1 use opaque version references. Provider-specific
+transport details remain behind the provider interface in
+`extension/src/remote-provider.js`.

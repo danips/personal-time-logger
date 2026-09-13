@@ -1,33 +1,17 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 
-import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
+import { normalizeEntry } from "../extension/src/entries.js";
 import { SETTING_KEY } from "../extension/src/setting-keys.js";
 import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
-import { createGoogleApiMock } from "./support/mock-google-api.js";
 
 installFakeIndexedDB();
 globalThis.BroadcastChannel = undefined;
-globalThis.browser = {
-  runtime: { getURL: (path) => path },
-  storage: {
-    sync: {
-      async get() {
-        return {
-          google_oauth_client_id: "test-client",
-          google_oauth_client_secret: "test-secret"
-        };
-      },
-      async set() {}
-    }
-  }
-};
 
 let db;
-let google;
 let reconcile;
-let sheets;
+let provider;
 
 const fixture = (over = {}) => normalizeEntry({
   id: "reconciliation-entry",
@@ -43,52 +27,55 @@ const fixture = (over = {}) => normalizeEntry({
   ...over
 });
 
-const snapshotPath = { method: "GET", pathname: "/v4/spreadsheets/sheet-1/values:batchGet" };
-
-function enqueueSnapshot(entries) {
-  google.enqueue(snapshotPath, google.json({
-    valueRanges: [
-      { range: "time_entries!A:N", values: [SHEET_HEADERS, ...entries.map(entryToRow)] },
-      { range: "config!A:C", values: [["key", "value", "updated_at"]] }
-    ]
-  }));
-}
-
-before(async () => {
-  db = await import("../extension/src/db.js");
-  reconcile = await import("../extension/src/reconcile.js");
-  sheets = await import("../extension/src/sheets.js");
-  google = createGoogleApiMock().install();
-  await db.setSetting("token_data", { access_token: "test-access-token", expires_at: Date.now() + 60_000 });
-  await sheets.setSpreadsheetId("sheet-1");
+const remoteSnapshot = (entries) => ({
+  entries,
+  entryRefs: new Map(entries.map((entry) => [entry.id, { kind: "mysql-entry", version: 1 }])),
+  quarantined: [],
+  config: {},
+  configRefs: new Map(),
+  changeToken: "v1"
 });
 
-after(() => google.restore());
+const setSnapshot = (entries) => { provider.snapshot = remoteSnapshot(entries); };
+
+const setup = async () => {
+  db = await import("../extension/src/db.js");
+  reconcile = await import("../extension/src/reconcile.js");
+  provider = {
+    id: "mysql",
+    label: "MySQL 8.4",
+    snapshot: remoteSnapshot([]),
+    async readSnapshot() { return this.snapshot; },
+    async deleteEntries() {}
+  };
+};
+
+await setup();
 
 describe("reconciliation actions", () => {
   it("does not overwrite a local edit made after the reconciliation scan", async () => {
-    const remote = fixture({ id: "stale-local", task: "Spreadsheet task" });
+    const remote = fixture({ id: "stale-local", task: "Remote task" });
     const editedLocal = fixture({ id: remote.id, task: "New local task", revision: 2 });
     await seedEntry(db, editedLocal);
-    enqueueSnapshot([remote]);
+    setSnapshot([remote]);
 
     await assert.rejects(
-      () => reconcile.keepRemote(remote, { expectedLocalRevision: 1 }),
+      () => reconcile.keepRemote(remote, { expectedLocalRevision: 1, provider }),
       (error) => error.code === "STORAGE_CONFLICT" && error.reason === "revision_mismatch"
     );
 
     assert.deepEqual(await db.getEntry(remote.id), editedLocal);
   });
 
-  it("does not overwrite local data after the spreadsheet row was edited", async () => {
-    const remote = fixture({ id: "stale-remote", task: "Scanned spreadsheet task" });
+  it("does not overwrite local data after the remote record was edited", async () => {
+    const remote = fixture({ id: "stale-remote", task: "Scanned remote task" });
     const local = fixture({ id: remote.id, task: "Local task" });
-    const changedRemote = fixture({ id: remote.id, task: "Edited spreadsheet task", updated_at: "2026-08-08T11:00:00.000Z" });
+    const changedRemote = fixture({ id: remote.id, task: "Edited remote task", updated_at: "2026-08-08T11:00:00.000Z" });
     await seedEntry(db, local);
-    enqueueSnapshot([changedRemote]);
+    setSnapshot([changedRemote]);
 
     await assert.rejects(
-      () => reconcile.keepRemote(remote, { expectedLocalRevision: local.revision }),
+      () => reconcile.keepRemote(remote, { expectedLocalRevision: local.revision, provider }),
       (error) => error.code === "STORAGE_CONFLICT" && error.reason === "remote_fingerprint_mismatch"
     );
 
@@ -99,10 +86,10 @@ describe("reconciliation actions", () => {
     const remote = fixture({ id: "new-local-after-scan" });
     const local = fixture({ id: remote.id, task: "New local record", revision: 3 });
     await seedEntry(db, local);
-    enqueueSnapshot([remote]);
+    setSnapshot([remote]);
 
     await assert.rejects(
-      () => reconcile.deleteEverywhere(remote.id, remote),
+      () => reconcile.deleteEverywhere(remote.id, remote, { provider }),
       (error) => error.code === "STORAGE_CONFLICT" && error.reason === "revision_mismatch"
     );
 
@@ -112,21 +99,21 @@ describe("reconciliation actions", () => {
   it("prevalidates every remote row before changing any selected local entry", async () => {
     const firstLocal = fixture({ id: "batch-first", task: "First local", dirty: false });
     const secondLocal = fixture({ id: "batch-second", task: "Second local", dirty: false });
-    const firstRemote = fixture({ id: firstLocal.id, task: "First spreadsheet" });
-    const scannedSecondRemote = fixture({ id: secondLocal.id, task: "Second spreadsheet" });
+    const firstRemote = fixture({ id: firstLocal.id, task: "First remote" });
+    const scannedSecondRemote = fixture({ id: secondLocal.id, task: "Second remote" });
     const changedSecondRemote = fixture({
       id: secondLocal.id,
-      task: "Second spreadsheet changed",
+      task: "Second remote changed",
       updated_at: "2026-08-08T11:00:00.000Z"
     });
     await seedEntries(db, [firstLocal, secondLocal]);
-    enqueueSnapshot([firstRemote, changedSecondRemote]);
+    setSnapshot([firstRemote, changedSecondRemote]);
 
     await assert.rejects(
       () => reconcile.resolveReconciliationBatch([
         { action: "keepLocal", id: firstLocal.id, remoteEntry: firstRemote, expectedRevision: firstLocal.revision },
         { action: "keepLocal", id: secondLocal.id, remoteEntry: scannedSecondRemote, expectedRevision: secondLocal.revision }
-      ]),
+      ], { provider }),
       (error) => error.code === "STORAGE_CONFLICT" && error.reason === "remote_fingerprint_mismatch"
     );
     assert.equal((await db.getEntry(firstLocal.id)).dirty, false);
@@ -136,16 +123,15 @@ describe("reconciliation actions", () => {
   it("applies compatible bulk choices in one snapshot and returns each result", async () => {
     const firstLocal = fixture({ id: "batch-apply-first", task: "First local", dirty: false });
     const secondLocal = fixture({ id: "batch-apply-second", task: "Second local", dirty: false });
-    const firstRemote = fixture({ id: firstLocal.id, task: "First spreadsheet" });
-    const secondRemote = fixture({ id: secondLocal.id, task: "Second spreadsheet" });
+    const firstRemote = fixture({ id: firstLocal.id, task: "First remote" });
+    const secondRemote = fixture({ id: secondLocal.id, task: "Second remote" });
     await seedEntries(db, [firstLocal, secondLocal]);
-    google.calls.length = 0;
-    enqueueSnapshot([firstRemote, secondRemote]);
+    setSnapshot([firstRemote, secondRemote]);
 
     const outcome = await reconcile.resolveReconciliationBatch([
       { action: "keepLocal", id: firstLocal.id, remoteEntry: firstRemote, expectedRevision: firstLocal.revision },
       { action: "keepLocal", id: secondLocal.id, remoteEntry: secondRemote, expectedRevision: secondLocal.revision }
-    ]);
+    ], { provider });
 
     assert.deepEqual(outcome.results.map(({ id, action, status }) => ({ id, action, status })), [
       { id: firstLocal.id, action: "keepLocal", status: "applied" },
@@ -153,7 +139,6 @@ describe("reconciliation actions", () => {
     ]);
     assert.equal((await db.getEntry(firstLocal.id)).dirty, true);
     assert.equal((await db.getEntry(secondLocal.id)).dirty, true);
-    assert.equal(google.calls.filter((call) => call.pathname === snapshotPath.pathname).length, 1);
   });
 
   it("updates only the selected local entry", async () => {
