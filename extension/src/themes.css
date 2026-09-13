@@ -180,34 +180,6 @@ html :is(button, input, select, textarea, a, [role="button"]):focus-visible {
   outline-offset: 2px;
 }
 
-:root[data-contrast="high"] {
-  --text: #ffffff;
-  --muted: #dedede;
-  --border: color-mix(in srgb, var(--accent) 34%, #8c8c8c);
-  --border-strong: color-mix(in srgb, var(--accent) 48%, #d0d0d0);
-  --surface-hover: color-mix(in srgb, var(--surface-raised) 76%, var(--accent));
-  --shadow-sm: 0 0 0 1px var(--border), 0 5px 16px rgba(0, 0, 0, 0.36);
-  --shadow-md: 0 0 0 1px var(--border-strong), 0 18px 44px rgba(0, 0, 0, 0.5);
-}
-
-html[data-contrast="high"] .panel,
-html[data-contrast="high"] .entry-row,
-html[data-contrast="high"] .active-panel,
-html[data-contrast="high"] .calendar-shell,
-html[data-contrast="high"] .section-nav {
-  border-width: 2px;
-}
-
-html[data-contrast="high"] :is(button, input, select, textarea, a, [role="button"]):focus-visible {
-  outline: 3px solid var(--accent-strong);
-  outline-offset: 3px;
-}
-
-html[data-contrast="high"] .section-divider {
-  height: 2px;
-  background: var(--border-strong);
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

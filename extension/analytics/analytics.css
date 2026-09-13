@@ -42,7 +42,6 @@ h2 { font-size: 19px; }
 .period-controls { align-items: end; gap: 10px; }
 .period-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .period-controls input, .period-controls select { padding: 0 9px; }
-.report-actions { display: flex; gap: 8px; }
 .custom-period { align-items: end; gap: 8px; }
 .custom-period[hidden] { display: none; }
 .range-strip { display: flex; gap: 24px; padding: 12px 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
@@ -70,7 +69,6 @@ th:first-child, td:first-child { width: 45%; text-align: left; }
 tbody tr:last-child td { border-bottom: 0; }
 .project-row td { padding-top: 14px; font-weight: 750; }
 .project-toggle { min-height: 28px; padding: 0 6px; border: 0; background: transparent; font-weight: inherit; text-align: left; }
-.print-project-label { display: none; }
 .task-label { padding-left: 27px; color: var(--muted); }
 .share-cell { min-width: 110px; }
 .share-bar { display: inline-block; width: 52px; height: 5px; margin-right: 7px; overflow: hidden; border-radius: 9px; vertical-align: middle; background: var(--surface-subtle); }
@@ -104,16 +102,4 @@ tbody tr:last-child td { border-bottom: 0; }
   .analytics-filters select { width: 100%; }
   .anomaly-row { grid-template-columns: 1fr; }
   .anomaly-destination { text-align: left; }
-}
-
-@media print {
-  :root { color-scheme: light; }
-  body { background: #fff; }
-  .page { width: 100%; padding: 0; }
-  .topbar { display: block; }
-  .period-controls, .report-actions, .analytics-filters, .anomaly-destination, .subtle-button { display: none !important; }
-  .summary-card, .panel { box-shadow: none; break-inside: avoid; }
-  .project-toggle { display: none; }
-  .print-project-label { display: inline; }
-  .range-strip { margin-top: 12px; }
 }

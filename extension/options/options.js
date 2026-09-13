@@ -15,7 +15,6 @@ import { retireGoogleState } from "../src/provider-retirement.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
-import { bindAppearanceControls, readAppearancePreferences, saveAppearancePreferences } from "../src/themes.js";
 import { initReconcilePage } from "../reconcile/reconcile.js";
 import { initUsagePage } from "../usage/usage.js";
 import {
@@ -26,7 +25,7 @@ import {
 } from "../src/options-settings.js";
 import { parseBackup, previewBackup, readPortableBackupSnapshot, restoreBackup, serializeBackup, MAX_BACKUP_BYTES } from "../src/backup.js";
 import { createProviderSetupController } from "./provider-setup-controller.js";
-import { formatSyncCadence, formatSyncContext, readSyncStatus } from "../src/sync-status.js";
+import { readSyncStatus } from "../src/sync-status.js";
 
 let diagnostics = [];
 let syncStatusSnapshot = null;
@@ -159,9 +158,6 @@ function renderBackupPreview(backup, preview) {
   const settingsChoice = document.getElementById("restoreBackupSettings");
   settingsChoice.checked = preview.settingsChanges.length > 0;
   settingsChoice.disabled = preview.settingsChanges.length === 0;
-  const appearanceChoice = document.getElementById("restoreBackupAppearance");
-  appearanceChoice.checked = Boolean(backup.appearance);
-  appearanceChoice.disabled = !backup.appearance;
   const settingsList = document.getElementById("backupPreviewSettings");
   settingsList.replaceChildren();
   for (const change of preview.settingsChanges) {
@@ -188,8 +184,7 @@ function showBackupPreview(backup, preview) {
       resolve(choice);
     };
     confirm.onclick = () => finish({
-      restoreSettings: document.getElementById("restoreBackupSettings").checked,
-      restoreAppearance: document.getElementById("restoreBackupAppearance").checked
+      restoreSettings: document.getElementById("restoreBackupSettings").checked
     });
     cancel.onclick = () => finish(null);
   });
@@ -203,10 +198,10 @@ function restoreReportText(summary, { syncPending = false } = {}) {
   return `Backup restored locally: ${summary.added} added, ${summary.identical} identical, ${summary.settingsChanged} setting${summary.settingsChanged === 1 ? "" : "s"} changed.${conflictText}${pendingText}`;
 }
 
-function renderBackupReport(summary, { syncPending = false, restoreSettings = true, restoreAppearance = true } = {}) {
+function renderBackupReport(summary, { syncPending = false, restoreSettings = true } = {}) {
   const report = document.getElementById("backupReport");
   if (!report) return;
-  document.getElementById("backupReportSummary").textContent = `${restoreReportText(summary, { syncPending })} ${restoreSettings ? "Selected settings were applied." : "Settings were not selected."}${restoreAppearance ? " High-contrast preference was applied when present." : " High-contrast preference was not selected."}`;
+  document.getElementById("backupReportSummary").textContent = `${restoreReportText(summary, { syncPending })} ${restoreSettings ? "Selected settings were applied." : "Settings were not selected."}`;
   renderBackupEntryList(document.getElementById("backupReportAdditions"), summary.addedEntries);
   renderBackupEntryList(document.getElementById("backupReportIdentical"), summary.identicalEntries);
   const settings = document.getElementById("backupReportSettings");
@@ -357,7 +352,7 @@ async function syncRestoredBackup() {
 async function exportBackupClicked() {
   setStatus("Capturing local backup...");
   const snapshot = await withLocalBackupLock(() => readPortableBackupSnapshot());
-  const text = serializeBackup({ ...snapshot, appearance: readAppearancePreferences() });
+  const text = serializeBackup(snapshot);
   const blob = new Blob([text], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -378,8 +373,6 @@ async function importBackupClicked(file) {
 
   setStatus("Restoring local backup...");
   const summary = await withLocalBackupLock(() => restoreBackup(backup, { restoreSettings: choice.restoreSettings }));
-  if (choice.restoreAppearance && backup.appearance) saveAppearancePreferences(backup.appearance);
-
   let syncPending = false;
   if (summary.added || summary.settingsChanged) {
     setStatus("Backup restored locally; synchronizing...");
@@ -391,8 +384,7 @@ async function importBackupClicked(file) {
   }
   renderBackupReport(summary, {
     syncPending,
-    restoreSettings: choice.restoreSettings,
-    restoreAppearance: choice.restoreAppearance
+    restoreSettings: choice.restoreSettings
   });
   setStatus(restoreReportText(summary, { syncPending }));
   return true;
@@ -408,7 +400,7 @@ function bindSectionNavigation() {
     const requestedSection = requestedId && document.getElementById(requestedId);
     const requestedLink = links.find((link) => link.hash === `#${requestedId}`);
     const visible = requestedSection && !requestedSection.hidden && requestedLink && !requestedLink.hidden;
-    const nextId = visible ? requestedId : "appearance";
+    const nextId = visible ? requestedId : "general";
     if (nextId !== requestedId) history.replaceState(null, "", `#${nextId}`);
     setActive(nextId);
     if (scroll) document.getElementById(nextId)?.scrollIntoView({ block: "start" });
@@ -1010,16 +1002,11 @@ function renderDiagnostics() {
   $("#clearDiagnostics").disabled = diagnostics.length === 0;
 }
 
-async function renderSyncFreshness() {
+async function refreshSyncStatusSnapshot() {
   try {
-    const snapshot = await readSyncStatus();
-    syncStatusSnapshot = snapshot;
-    $("#syncFreshnessDetails").textContent = formatSyncContext(snapshot);
-    $("#syncCadenceDetails").textContent = formatSyncCadence(snapshot);
+    syncStatusSnapshot = await readSyncStatus();
   } catch {
     syncStatusSnapshot = null;
-    $("#syncFreshnessDetails").textContent = "Sync freshness is unavailable; local entries remain the source of truth.";
-    $("#syncCadenceDetails").textContent = "Background cadence is unavailable.";
   }
 }
 
@@ -1040,7 +1027,7 @@ async function refresh() {
   setRefreshedValue($("#setupCloudflareD1ApiBaseUrl"), cloudflareBaseUrl);
   setRefreshedValue($("#setupCloudflareD1ApiToken"), cloudflareToken);
   diagnostics = await getDiagnostics();
-  await renderSyncFreshness();
+  await refreshSyncStatusSnapshot();
   renderDiagnostics();
   setRefreshedValue($("#syncInterval"), await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
   setRefreshedValue($("#durationMultiplier"), await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
@@ -1089,12 +1076,6 @@ async function clearDiagnosticsClicked() {
 function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
-  bindAppearanceControls({
-    contrastToggle: $("#highContrast"),
-    onChange(preferences) {
-      setStatus(`Blue Archive${preferences.highContrast ? " · High contrast" : ""} applied`);
-    }
-  });
   for (const field of document.querySelectorAll("input, select, textarea")) {
     field.addEventListener("input", () => markOptionEdited(optionDraftKey(field)));
     field.addEventListener("change", () => markOptionEdited(optionDraftKey(field)));

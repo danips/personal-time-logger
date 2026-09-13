@@ -40,9 +40,7 @@ export function parseBackup(text) {
   });
   let settings;
   try { settings = normalizeBackupSettings(value.settings); } catch { throw backupError(); }
-  const appearance = value.appearance && typeof value.appearance === "object" && !Array.isArray(value.appearance)
-    ? value.appearance : null;
-  return { entries, settings, appearance };
+  return { entries, settings };
 }
 
 function portableEntry(entry) {
@@ -50,13 +48,12 @@ function portableEntry(entry) {
   return { ...canonical, dirty: false, last_sync_at: "", sync_error: "" };
 }
 
-export function serializeBackup({ entries, settings, appearance, exportedAt = nowIso() }) {
+export function serializeBackup({ entries, settings, exportedAt = nowIso() }) {
   const backup = {
     format: BACKUP_FORMAT,
     schema_version: BACKUP_SCHEMA_VERSION,
     exported_at: exportedAt,
     settings,
-    appearance,
     entries: entries.map(portableEntry)
   };
   const text = `${JSON.stringify(backup, null, 2)}\n`;

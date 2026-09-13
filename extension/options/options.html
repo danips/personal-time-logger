@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-contrast="standard">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="../reconcile/reconcile.css">
     <link rel="stylesheet" href="options.css">
     <link rel="stylesheet" href="../src/themes.css">
-    <script type="module" src="../src/themes.js"></script>
   </head>
   <body data-page="options">
     <main class="page">
@@ -68,7 +67,6 @@
         <h3>Settings</h3>
         <ul id="backupPreviewSettings" class="backup-list"></ul>
         <label class="backup-choice"><input id="restoreBackupSettings" type="checkbox"> Restore selected non-secret settings</label>
-        <label class="backup-choice"><input id="restoreBackupAppearance" type="checkbox"> Restore high-contrast preference when present</label>
         <h3>Conflicts</h3>
         <ul id="backupPreviewConflicts" class="backup-list"></ul>
         <div class="actions">
@@ -105,7 +103,6 @@
             <p id="statusLine" class="status" role="status" aria-live="polite">Loading...</p>
           </div>
           <p class="section-nav-label">Sections</p>
-          <a href="#appearance">Appearance</a>
           <a href="#general">General</a>
           <a href="#storage">Storage</a>
           <a href="#chatgpt-usage">ChatGPT Usage</a>
@@ -116,27 +113,10 @@
         </nav>
 
         <div class="options-content">
-          <section id="appearance" class="panel options-section appearance-panel">
-            <div class="section-heading">
-              <div>
-                <h2>Appearance</h2>
-                <p class="note">Blue Archive is the fixed palette. High contrast applies immediately across Time Logger.</p>
-              </div>
-            </div>
-            <div class="appearance-controls">
-              <label class="contrast-switch"><input id="highContrast" type="checkbox"><span class="switch-track" aria-hidden="true"><span></span></span><span><strong>High contrast</strong><small>Stronger panel edges, text, and focus indicators</small></span></label>
-            </div>
-          </section>
-
           <section id="general" class="panel options-section">
             <h2>General</h2>
             <p id="generalDraftIndicator" class="draft-indicator" hidden><span id="generalDraftMessage"></span><button id="generalDiscardDraft" type="button">Discard</button></p>
             <p class="note">Settings that apply to Time Logger regardless of the selected remote storage backend.</p>
-            <div class="sync-freshness" aria-labelledby="syncFreshnessHeading">
-              <h3 id="syncFreshnessHeading">Sync freshness</h3>
-              <p id="syncFreshnessDetails" class="note">Loading sync freshness...</p>
-              <p id="syncCadenceDetails" class="note">Loading background cadence...</p>
-            </div>
             <label>Sync interval seconds<input id="syncInterval" type="number" min="30" step="1"></label>
             <label>Duration multiplier<input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001"></label>
             <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>

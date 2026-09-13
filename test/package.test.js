@@ -35,7 +35,6 @@ const expectedFiles = [
   "reconcile/reconcile.html",
   "reconcile/reconcile.js",
   "src/action-runner.js",
-  "src/analytics-export.js",
   "src/analytics-period.js",
   "src/analytics.js",
   "src/background-schedule.js",
@@ -84,7 +83,6 @@ const expectedFiles = [
   "src/tempo-upload-handler.js",
   "src/tempo.js",
   "src/themes.css",
-  "src/themes.js",
   "src/time-allocation.js",
   "src/time.js",
   "src/timer-reminders.js",
@@ -222,10 +220,10 @@ describe("Firefox release package", () => {
         "--expected-version", manifest.version,
         "--output", relative(root, outputDirectory)
       ], { cwd: root });
-      await rm(join(outputDirectory, "src", "themes.js"));
+      await rm(join(outputDirectory, "src", "themes.css"));
       await assert.rejects(
         () => assertPackagedReferencesResolve(outputDirectory),
-        /manifest\.json|\.html.*themes\.js|does not resolve/
+        /manifest\.json|\.html.*themes\.css|does not resolve/
       );
     } finally {
       await rm(outputDirectory, { recursive: true, force: true });

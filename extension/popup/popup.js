@@ -70,6 +70,8 @@ const $updateNotice = $("#updateNotice");
 const $installUpdate = $("#installUpdate");
 const $recentEntries = $("#recentEntries");
 const $loadMoreRecent = $("#loadMoreRecent");
+const $recentControls = $("#recentControls");
+const $toggleRecentControls = $("#toggleRecentControls");
 const $recentDate = $("#recentDate");
 const $jumpRecentDate = $("#jumpRecentDate");
 const $currentRecentWeek = $("#currentRecentWeek");
@@ -84,7 +86,6 @@ const $recentTotals = $("#recentTotals");
 const $dirtyBadge = $("#dirtyBadge");
 const $undoDeleteButton = $("#undoDeleteButton");
 const $syncStatus = $("#syncStatus");
-const $syncContext = $("#syncContext");
 const $brandRow = $(".brand-row");
 const $statusRow = $(".status-row");
 const $editPanel = $("#editPanel");
@@ -119,6 +120,7 @@ const windowSizeController = createWindowSizeController({
 
 function setSyncStatus(status, detail = "") {
   setStatus($syncStatus, status, detail);
+  if (detail) $syncStatus.title = detail;
   if (status === "synced" || status === "pending") {
     $brandRow.append($syncStatus);
     return;
@@ -592,12 +594,10 @@ async function renderSyncContext(isCurrent) {
   try {
     const snapshot = await readSyncStatus();
     if (!isCurrent()) return false;
-    $syncContext.textContent = formatSyncContext(snapshot);
-    $syncContext.dataset.state = snapshot.state;
+    $syncStatus.title = formatSyncContext(snapshot);
   } catch {
     if (!isCurrent()) return false;
-    $syncContext.textContent = "Sync freshness is unavailable; local entries remain the source of truth.";
-    delete $syncContext.dataset.state;
+    $syncStatus.title = "Sync freshness is unavailable; local entries remain the source of truth.";
   }
   return true;
 }
@@ -619,21 +619,23 @@ async function renderChatGptUsageSummary(isCurrent) {
   const windows = [
     { label: "5h", window: snapshot?.primary_window },
     { label: "Week", window: snapshot?.secondary_window }
-  ].filter(({ window }) => compactPercent(window?.remaining_percent));
+  ].filter(({ window }) => compactPercent(window?.used_percent));
   $chatGptUsageSummary.classList.toggle("hidden", windows.length === 0);
   if (!windows.length) return true;
 
   const values = windows.map(({ label, window }) => {
-    const remaining = compactPercent(window.remaining_percent);
-    const used = compactPercent(window.used_percent) || "not provided";
-    const nextRefresh = window.reset_at ? formatUsageCountdown(window.reset_at) : "reset unavailable";
+    const used = compactPercent(window.used_percent);
+    const remaining = compactPercent(window.remaining_percent) || "not provided";
+    const nextRefresh = window.reset_at
+      ? formatUsageCountdown(window.reset_at).replace(/^in\s+/, "")
+      : "reset unavailable";
     const lastUpdate = shortDateTime(snapshot.collected_at) || "not available";
     const stale = usageSnapshotIsStale(snapshot);
     const detail = `${label} limit: ${used} used, ${remaining} remaining\nResets: ${nextRefresh}\nLast update: ${lastUpdate}${stale ? "\nStatus: stale" : ""}`;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chatgpt-usage-value";
-    button.textContent = `${label} ${remaining} remaining · ${nextRefresh}`;
+    button.textContent = `${label} ${used} · ${nextRefresh}`;
     button.title = detail;
     button.setAttribute("aria-label", `Open ChatGPT usage limits. ${detail.replaceAll("\n", ". ")}`);
     return button;
@@ -1021,6 +1023,14 @@ function bindEvents() {
     $recentDate.value = "";
     expandedRecentGroups.clear();
     rerenderRecent();
+  });
+  $toggleRecentControls.addEventListener("click", () => {
+    const expanded = $recentControls.hidden;
+    $recentControls.hidden = !expanded;
+    $toggleRecentControls.setAttribute("aria-expanded", String(expanded));
+    $toggleRecentControls.setAttribute("aria-label", `${expanded ? "Hide" : "Show"} history filters`);
+    $toggleRecentControls.title = `${expanded ? "Hide" : "Show"} history filters`;
+    if (expanded) $recentTextFilter.focus();
   });
   $("#openAnalytics").addEventListener("click", () => platform.openExtensionPage("analytics/analytics.html").catch((error) => setSyncStatus("error", formatError(error))));
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setSyncStatus("error", formatError(error))));

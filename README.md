@@ -167,12 +167,11 @@ discarding reloads the saved values. General settings show validation beside
 the affected field, including sync interval, multiplier, and calendar start
 hour errors.
 
-Use **Appearance** in Options to enable **High contrast**. Time Logger uses the
-fixed **Blue Archive** palette across all pages, and the shared semantic palette
-has page-level fallbacks if saved preferences cannot be read. Keyboard focus
-remains visible on controls; compact Popup and resized Calendar layouts keep
-actions reachable, and transitions honor the browser's reduced-motion
-preference.
+Time Logger uses the fixed **Blue Archive** palette across all pages, and the
+shared semantic palette has page-level fallbacks if it cannot load. Keyboard
+focus remains visible on controls; compact Popup and resized Calendar layouts
+keep actions reachable, and transitions honor the browser's reduced-motion
+preference. Hover the sync status indicator to see detailed sync freshness.
 
 ## Remote Storage and Migration
 

@@ -186,58 +186,7 @@ async function waitForCondition(baseUrl, sessionId, label, script, diagnosticScr
   throw new Error(`${label} did not complete.${diagnostic ? ` Last state: ${diagnostic}` : ""}`);
 }
 
-async function exerciseAppearance(baseUrl, sessionId, origin) {
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
-  await waitForPage(baseUrl, sessionId, ["#highContrast"]);
-  const settingsAppearance = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: `
-      const contrast = document.querySelector("#highContrast");
-      contrast.checked = true;
-      contrast.dispatchEvent(new Event("change", { bubbles: true }));
-      return { contrast: document.documentElement.dataset.contrast };
-    `,
-    args: []
-  });
-  if (settingsAppearance.contrast !== "high") {
-    throw new Error(`High contrast control did not apply: ${JSON.stringify(settingsAppearance)}`);
-  }
-
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
-  await waitForPage(baseUrl, sessionId, ["#calendarGrid"]);
-  const calendarAppearance = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: "return { contrast: document.documentElement.dataset.contrast };",
-    args: []
-  });
-  if (calendarAppearance.contrast !== "high") {
-    throw new Error(`High contrast did not persist across extension pages: ${JSON.stringify(calendarAppearance)}`);
-  }
-
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
-  await waitForPage(baseUrl, sessionId, ["#highContrast", ".section-nav"]);
-  const renderedAppearanceState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: `
-      const control = document.querySelector("#highContrast");
-      control.focus();
-      const style = getComputedStyle(control);
-      return {
-        themeText: getComputedStyle(document.body).color,
-        highContrastBorder: getComputedStyle(document.querySelector(".section-nav")).borderTopWidth,
-        focusStyle: { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth },
-        reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
-        transitionDuration: getComputedStyle(document.querySelector("button")).transitionDuration
-      };
-    `,
-    args: []
-  });
-  if (!renderedAppearanceState.themeText
-    || renderedAppearanceState.highContrastBorder !== "2px"
-    || renderedAppearanceState.focusStyle.outlineStyle !== "solid"
-    || Number.parseFloat(renderedAppearanceState.focusStyle.outlineWidth) < 3
-    || !renderedAppearanceState.reducedMotion
-    || Number.parseFloat(renderedAppearanceState.transitionDuration) > 0.01) {
-    throw new Error(`Rendered appearance accessibility sample was incomplete: ${JSON.stringify(renderedAppearanceState)}`);
-  }
-
+async function exerciseResponsiveLayouts(baseUrl, sessionId, origin) {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#recentEntries", ".icon-button"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/window/rect`, { width: 360, height: 800 });
@@ -263,8 +212,8 @@ async function exerciseAppearance(baseUrl, sessionId, origin) {
     throw new Error(`Narrow popup access check failed: ${JSON.stringify(narrowPopup)}`);
   }
 
-  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
-  await waitForPage(baseUrl, sessionId, ["#highContrast", ".section-nav"]);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#general` });
+  await waitForPage(baseUrl, sessionId, ["#general", ".section-nav"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/window/rect`, { width: 480, height: 900 });
   const longLabelLayout = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
@@ -853,8 +802,6 @@ async function exerciseSyncFreshness(baseUrl, sessionId, origin) {
         await db.setSetting(settings.SETTING_KEY.SYNC_LAST_STATUS, "synced");
         await db.setSetting(settings.SETTING_KEY.SYNC_BACKOFF_UNTIL, now + 60000);
         await db.setSetting(settings.SETTING_KEY.BACKGROUND_SYNC_DUE_AT, now + 120000);
-        await db.setSetting(settings.SETTING_KEY.SYNC_INTERVAL_SECONDS, 30);
-        await db.setSetting(settings.SETTING_KEY.SYNC_IDLE_STREAK, 2);
         await db.mutateEntries(["r23-freshness-review"], (stored) => stored.set("r23-freshness-review", entries.normalizeEntry({
           id: "r23-freshness-review",
           project: "R23 browser smoke",
@@ -877,9 +824,9 @@ async function exerciseSyncFreshness(baseUrl, sessionId, origin) {
   if (seeded?.error || seeded !== true) throw new Error(`Could not seed R23 freshness state: ${JSON.stringify(seeded)}`);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
-  await waitForPage(baseUrl, sessionId, ["#syncContext", "#recentEntries"]);
-  await waitForCondition(baseUrl, sessionId, "Popup sync freshness context", `
-    const text = document.querySelector("#syncContext")?.textContent || "";
+  await waitForPage(baseUrl, sessionId, ["#syncStatus", "#recentEntries"]);
+  await waitForCondition(baseUrl, sessionId, "Popup sync freshness tooltip", `
+    const text = document.querySelector("#syncStatus")?.title || "";
     return text.includes("Provider: MySQL 8.4")
       && text.includes("Local pending: 1")
       && text.includes("Review: 1")
@@ -902,11 +849,7 @@ async function exerciseSyncFreshness(baseUrl, sessionId, origin) {
   if (diagnosticsSeeded?.error || diagnosticsSeeded !== true) throw new Error(`Could not seed R29 diagnostics state: ${JSON.stringify(diagnosticsSeeded)}`);
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#general` });
-  await waitForPage(baseUrl, sessionId, ["#syncFreshnessDetails", "#syncCadenceDetails"]);
-  await waitForCondition(baseUrl, sessionId, "Options sync cadence context", `
-    const text = document.querySelector("#syncCadenceDetails")?.textContent || "";
-    return text.includes("every 1 minute") && text.includes("30 seconds") && text.includes("idle streak 2");
-  `);
+  await waitForPage(baseUrl, sessionId, ["#diagnosticsList"]);
   await waitForCondition(baseUrl, sessionId, "Options bounded diagnostics navigation", `
     const text = document.querySelector("#diagnosticsList")?.textContent || "";
     const item = [...document.querySelectorAll("#diagnosticsList .diagnostic-record")]
@@ -969,13 +912,10 @@ async function exerciseAnalytics(baseUrl, sessionId, origin) {
       const preset = document.querySelector("#periodPreset");
       preset.value = "last_30_days";
       preset.dispatchEvent(new Event("change", { bubbles: true }));
-      return { before, contrast: document.documentElement.dataset.contrast };
+      return { before };
     `,
     args: []
   });
-  if (analyticsRerender.contrast !== "high") {
-    throw new Error(`Analytics did not retain high contrast: ${JSON.stringify(analyticsRerender)}`);
-  }
   await waitForCondition(baseUrl, sessionId, "Analytics period rerender", `
     return document.documentElement.dataset.pageRuntime === "ready"
       && document.querySelector("#statusLine")?.dataset.status === "ready"
@@ -985,21 +925,15 @@ async function exerciseAnalytics(baseUrl, sessionId, origin) {
 
   const reportActions = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
-      let csvCreated = false;
-      let printCalled = false;
-      URL.createObjectURL = () => { csvCreated = true; return "blob:analytics-smoke"; };
-      URL.revokeObjectURL = () => {};
-      HTMLAnchorElement.prototype.click = function () { this.dataset.smokeClicked = "true"; };
-      window.print = () => { printCalled = true; };
-      document.querySelector("#exportAnalytics")?.click();
-      const exportButton = document.querySelector("#exportAnalytics");
-      document.querySelector("#printAnalytics")?.click();
-      return { csvCreated, printCalled, status: document.querySelector("#statusLine")?.textContent, exportPresent: Boolean(exportButton) };
+      return {
+        exportPresent: Boolean(document.querySelector("#exportAnalytics")),
+        printPresent: Boolean(document.querySelector("#printAnalytics"))
+      };
     `,
     args: []
   });
-  if (!reportActions.csvCreated || !reportActions.printCalled || !reportActions.exportPresent) {
-    throw new Error(`Analytics export/print actions were unavailable: ${JSON.stringify(reportActions)}`);
+  if (reportActions.exportPresent || reportActions.printPresent) {
+    throw new Error(`Analytics export/print actions were not removed: ${JSON.stringify(reportActions)}`);
   }
 
   const filtered = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
@@ -1699,7 +1633,6 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
 
   await setBackend("mysql");
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
-  await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#storage` });
   await waitForPage(baseUrl, sessionId, ["#remoteBackendTarget", "#preparedRemoteBackend", "#migrationPreview"]);
   await waitForCondition(baseUrl, sessionId, "MySQL active settings reload", `
@@ -1711,6 +1644,7 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
       hash: window.location.hash,
       mysqlFieldsHidden: document.querySelector("#mysqlStorageFields")?.hidden,
       testMysqlHidden: document.querySelector("#testMysqlConnection")?.hidden,
+      draftIndicatorsHidden: ["general", "storage", "tempo"].every((section) => document.querySelector("#" + section + "DraftIndicator")?.hidden),
       prepared: document.querySelector("#preparedRemoteBackend")?.textContent,
       migrationPreviewHidden: document.querySelector("#migrationPreview")?.hidden,
       migrateLabel: document.querySelector("#migrateStorage")?.textContent,
@@ -1724,6 +1658,7 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
     || hiddenMysqlState.hash !== "#storage"
     || hiddenMysqlState.mysqlFieldsHidden
     || !hiddenMysqlState.testMysqlHidden
+    || !hiddenMysqlState.draftIndicatorsHidden
     || hiddenMysqlState.prepared !== "Prepared backend: MySQL 8.4"
     || !hiddenMysqlState.migrationPreviewHidden
     || hiddenMysqlState.migrateLabel !== "Migrate verified data and switch to MySQL 8.4"
@@ -1796,8 +1731,11 @@ async function exerciseProviderAwareSettings(baseUrl, sessionId, origin) {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
   await waitForPage(baseUrl, sessionId, ["#chatGptUsageValues"]);
   await waitForCondition(baseUrl, sessionId, "Popup usage presentation", `
-    return document.querySelector("#chatGptUsageValues")?.textContent.includes("remaining")
-      && document.querySelector("#chatGptUsageValues")?.textContent.includes("in ");
+    const text = document.querySelector("#chatGptUsageValues")?.textContent || "";
+    return text.includes("5h 12% · 1h")
+      && text.includes("Week 34% ·")
+      && !text.includes("remaining")
+      && !text.includes("in ");
   `);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/async`, {
     script: `
@@ -1962,7 +1900,19 @@ async function exercisePopupHistoryPagination(baseUrl, sessionId, origin) {
   if (!seeded) throw new Error("Could not seed popup history pagination data.");
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
-  await waitForPage(baseUrl, sessionId, ["#recentEntries"]);
+  await waitForPage(baseUrl, sessionId, ["#recentEntries", "#toggleRecentControls"]);
+  await waitForCondition(baseUrl, sessionId, "Popup history filters collapsed", `
+    return document.querySelector("#recentControls")?.hidden
+      && document.querySelector("#toggleRecentControls")?.getAttribute("aria-expanded") === "false";
+  `);
+  await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "document.querySelector('#toggleRecentControls')?.click(); return true;",
+    args: []
+  });
+  await waitForCondition(baseUrl, sessionId, "Popup history filters expanded", `
+    return !document.querySelector("#recentControls")?.hidden
+      && document.querySelector("#toggleRecentControls")?.getAttribute("aria-expanded") === "true";
+  `);
   await waitForCondition(baseUrl, sessionId, "Popup previous-week fallback", `
     return document.querySelector("#loadMoreRecent")?.textContent === "Load previous week"
       && document.querySelector("#recentEntries")?.textContent.includes("Previous-week browser smoke")
@@ -2284,7 +2234,7 @@ try {
     await waitForPage(baseUrl, sessionId, selectors);
   }
 
-  await exerciseAppearance(baseUrl, sessionId, origin);
+  await exerciseResponsiveLayouts(baseUrl, sessionId, origin);
   await exerciseSyncFreshness(baseUrl, sessionId, origin);
   await exerciseOfflineBackup(baseUrl, sessionId, origin);
 

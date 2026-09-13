@@ -1,6 +1,5 @@
 import { ANALYTICS_MISSING_FILTER, buildAnalyticsReport, filterAnalyticsEntries, resolveAnalyticsEntryTarget } from "../src/analytics.js";
 import { ANALYTICS_PERIOD_PRESET, analyticsDateInputValue, resolveAnalyticsPeriod } from "../src/analytics-period.js";
-import { serializeAnalyticsReport } from "../src/analytics-export.js";
 import { getEntriesIntersecting } from "../src/db.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { onEntriesChanged } from "../src/events.js";
@@ -123,8 +122,7 @@ function renderProjects(report) {
     const expanded = expandedProjects ? expandedProjects.has(project.label) : true;
     toggle.setAttribute("aria-expanded", String(expanded));
     toggle.textContent = `${expanded ? "▾" : "▸"} ${project.label}`;
-    const printLabel = element("span", "print-project-label", project.label);
-    labelCell.replaceChildren(toggle, printLabel);
+    labelCell.replaceChildren(toggle);
     rows.push(projectRow);
     for (const task of project.tasks) {
       const taskRow = reportRow(task.label, task, "task-row");
@@ -270,34 +268,6 @@ function renderFilterOptions(entries) {
   $("#analyticsFilterSummary").textContent = `${filterLabel(analyticsFilters.project, "All projects")} · ${filterLabel(analyticsFilters.task, "All tasks")}`;
 }
 
-function browserTimezone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "Browser local time";
-}
-
-function reportExportOptions() {
-  return {
-    primaryRange: $("#primaryRange").textContent,
-    comparisonRange: $("#comparisonRange").textContent,
-    timezone: browserTimezone(),
-    filters: {
-      project: filterLabel(analyticsFilters.project, "All projects"),
-      task: filterLabel(analyticsFilters.task, "All tasks")
-    }
-  };
-}
-
-function exportReport() {
-  if (!latestReport) return;
-  const csv = serializeAnalyticsReport(latestReport, reportExportOptions());
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `time-logger-analytics-${analyticsDateInputValue()}.csv`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-  setStatus("CSV exported", "ready");
-}
-
 function captureViewState() {
   const active = document.activeElement;
   return {
@@ -399,8 +369,6 @@ function bindEvents() {
     if (!custom) applyPeriod();
   });
   $("#applyCustom").addEventListener("click", applyPeriod);
-  $("#exportAnalytics").addEventListener("click", exportReport);
-  $("#printAnalytics").addEventListener("click", () => window.print());
   $("#analyticsProjectFilter").addEventListener("change", applyAnalyticsFilters);
   $("#analyticsTaskFilter").addEventListener("change", applyAnalyticsFilters);
   $("#toggleDescriptions").addEventListener("click", () => {

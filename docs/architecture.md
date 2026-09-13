@@ -41,9 +41,9 @@ use the existing settings normalizers and native validity state, so validation
 stays close to the input without adding a second state framework.
 
 The fixed Blue Archive theme is shared across pages through
-`extension/src/themes.js` and `extension/src/themes.css`. Page styles retain
-only the fallback and geometry tokens they need; the shared stylesheet owns
-the palette, high-contrast edges, focus outlines, and reduced-motion overrides.
+`extension/src/themes.css`. Page styles retain only the fallback and geometry
+tokens they need; the shared stylesheet owns the palette, focus outlines, and
+reduced-motion overrides.
 Theme and responsive checks use rendered computed styles and visible control
 geometry rather than CSS spelling assertions.
 

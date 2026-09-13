@@ -52,14 +52,6 @@ h3 {
   font-size: 16px;
 }
 
-.sync-freshness {
-  margin: 16px 0;
-  padding: 12px;
-  border: 1px solid #dadce0;
-  border-radius: 8px;
-  background: #fafbff;
-}
-
 .diagnostics-list {
   display: grid;
   gap: 8px;
@@ -85,10 +77,6 @@ h3 {
   font-weight: 650;
 }
 
-.sync-freshness h3 {
-  margin-top: 0;
-}
-
 .status {
   margin-top: 6px;
   color: #5f6368;
@@ -104,6 +92,10 @@ h3 {
   border-left: 3px solid #a86608;
   background: #fff6df;
   color: #704900;
+}
+
+.draft-indicator[hidden] {
+  display: none;
 }
 
 .draft-indicator button {
@@ -476,86 +468,6 @@ code {
     background: #1f3b63;
     color: #8ab4f8;
   }
-}
-
-.appearance-controls {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr);
-  gap: 16px;
-  align-items: end;
-}
-
-.contrast-switch {
-  display: flex;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 11px;
-  min-height: 42px;
-  margin: 0 0 12px;
-  cursor: pointer;
-}
-
-.contrast-switch > input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.switch-track {
-  display: flex;
-  width: 43px;
-  height: 24px;
-  flex: 0 0 auto;
-  align-items: center;
-  padding: 3px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface-subtle);
-  transition: background-color 140ms ease, border-color 140ms ease;
-}
-
-.switch-track > span {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--muted);
-  transition: transform 140ms ease, background-color 140ms ease;
-}
-
-.contrast-switch input:checked + .switch-track {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.contrast-switch input:checked + .switch-track > span {
-  transform: translateX(18px);
-  background: var(--accent-strong);
-}
-
-.contrast-switch input:focus-visible + .switch-track {
-  outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  outline-offset: 2px;
-}
-
-.contrast-switch strong,
-.contrast-switch small {
-  display: block;
-}
-
-.contrast-switch strong {
-  color: var(--text);
-  font-size: 14px;
-}
-
-.contrast-switch small {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-@media (max-width: 760px) {
-  .appearance-controls { gap: 4px; }
 }
 
 /* Settings visual system. This file loads last on the options page, so these

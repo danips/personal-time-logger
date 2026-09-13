@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-contrast="standard">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="../src/entry-editor.css">
     <link rel="stylesheet" href="popup.css">
     <link rel="stylesheet" href="../src/themes.css">
-    <script type="module" src="../src/themes.js"></script>
   </head>
   <body>
     <main class="popup">
@@ -24,7 +23,6 @@
             <span id="dirtyBadge" class="dirty-badge hidden" title="Unsynced local changes">0 pending</span>
             <button id="undoDeleteButton" class="undo-delete-button" type="button" hidden>Undo deletion</button>
           </div>
-          <p id="syncContext" class="sync-context" aria-live="polite">Loading sync freshness...</p>
         </div>
         <div class="header-actions">
           <button id="openAnalytics" class="icon-button" title="Analytics" aria-label="Analytics" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg></button>
@@ -124,8 +122,9 @@
       <section class="recent">
         <div class="recent-heading">
           <h2>Recent Entries</h2>
+          <button id="toggleRecentControls" class="recent-search-toggle" type="button" aria-label="Show history filters" aria-controls="recentControls" aria-expanded="false" title="Show history filters">🔍</button>
         </div>
-        <div class="recent-controls" aria-label="History navigation and filters">
+        <div id="recentControls" class="recent-controls" aria-label="History navigation and filters" hidden>
           <div class="recent-date-controls">
             <label>Jump to date <input id="recentDate" type="date"></label>
             <button id="jumpRecentDate" type="button">Show week</button>
