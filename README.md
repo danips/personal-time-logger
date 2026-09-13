@@ -1,6 +1,6 @@
 # Personal Time Logger Extension
 
-Current release: `0.1.75` (`v0.1.75`).
+Current release: `0.1.76` (`v0.1.76`).
 
 A Firefox extension for local-first time tracking with Google Sheets, MySQL, or a user-owned Cloudflare Worker + D1 backend. It is intentionally plain: vanilla JavaScript modules, no bundler, no React, no TypeScript, no external runtime libraries. Node is used only to run the tests and the release packaging scripts.
 
@@ -26,9 +26,9 @@ A Firefox extension for local-first time tracking with Google Sheets, MySQL, or 
 
 ## Manual backups
 
-Options provides manual JSON backup and restore. Export first completes a successful sync and captures one coherent local snapshot; unsynchronized edits block the export. The backup includes entries and selected non-secret settings (duration multiplier, sync interval, Tempo mapping/account, window presets, and calendar start hour). OAuth credentials, API tokens, ChatGPT consent, diagnostics, locks, and backend bindings are never included.
+Options provides manual JSON backup and restore. Export and local restore capture one coherent local snapshot without contacting a remote backend, so unsynchronized edits can be preserved before setup or during an outage. A follow-up sync is attempted after restore; the local restore remains committed if synchronization is unavailable. The backup includes entries and selected non-secret settings (duration multiplier, sync interval, Tempo mapping/account, window presets, and calendar start hour). OAuth credentials, API tokens, ChatGPT consent, diagnostics, locks, backend bindings, and local recovery markers are never included.
 
-Restore merges entries by ID: existing differing entries are preserved and reported as conflicts, while new entries and selected settings are restored locally. A follow-up sync is attempted; if the network is unavailable, the local restore remains committed and Options reports that synchronization is pending. JSON backups are limited to 128 MiB of UTF-8 text; oversized files require an alternate recovery path.
+Restore previews additions, identical entries, conflicts, and selected non-secret settings before committing. Existing differing entries are preserved and reported with field differences, while new entries and selected settings are restored locally. A follow-up sync is attempted; if the network is unavailable, the local restore remains committed and Options reports that synchronization is pending. JSON backups are limited to 128 MiB of UTF-8 text; chunked import and alternate recovery for larger files are not supported.
 
 ## ChatGPT Usage Limits (Experimental)
 
@@ -36,7 +36,12 @@ The **ChatGPT usage limits** section in Options reads the account signed in to t
 
 The feature reads the current session from ChatGPT's fixed `/api/auth/session` endpoint, keeps its access token in memory, and uses it only for the private, undocumented `backend-api/wham/usage` request. It is experimental and may stop working after a ChatGPT update. The token never reaches extension storage, logs, URLs, exports, or Firefox Sync. Permission, sign-in, network, endpoint, and schema failures are reported explicitly.
 
-The usage card displays both the 5-hour and weekly percentages, reset times, and countdowns returned by ChatGPT.
+The usage card displays used and remaining percentages for both the 5-hour and
+weekly windows, reset times and local countdowns, collection age, and stale or
+error state. Options' **Clear ChatGPT usage data** removes the local snapshot
+and consent; revoking the separate host permission is reported independently,
+and unchecking consent is the disable path. The integration remains optional
+and does not collect additional account data.
 
 ### ChatGPT setup
 
@@ -109,7 +114,7 @@ git push origin v0.1.2
 
 Firefox periodically checks the deployed `updates.json` and installs a higher signed version. In `about:addons`, **Check for Updates** can trigger an immediate check.
 
-The release package is generated from an explicit allow-list. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. Normal Firefox installations require the Mozilla-signed XPI.
+The release package is generated from an explicit allow-list of Git-tracked files under the permitted extension directories. The packaging boundary does not independently approve every runtime file for safety, so new modules still require import and asset inspection. The local `config.js`, old XPI files, temporary downloads, Git metadata, and development-agent files cannot enter the release. Normal Firefox installations require the Mozilla-signed XPI.
 
 ## Google Cloud OAuth Setup
 
@@ -179,18 +184,36 @@ Sync reads first and only inspects the layout when a read fails. A missing tab, 
 4. Click **Stop** when finished.
    Click the active timer card to open it in the edit panel when you need to change its details or start time.
 5. Use the header sync button to push/pull immediately.
-6. Click a recent entry row to edit it. Deleting asks for confirmation.
+6. Click a recent entry row to edit it. After saving, the one-page-session **Undo change** action restores that exact prior revision while it remains unchanged; deleting asks for confirmation and exposes **Undo deletion** for the same guarded tombstone recovery.
 7. Use the play button on a recent entry to start a new timer with the same details.
-8. Use **Load more** to reach earlier weeks in the recent list.
+8. Use **Load more** to reach earlier weeks in the recent list. Use **Jump to date** to show a selected week, then filter the loaded range by text, project, task, or review status. The history panel labels its loaded range and separates period totals from filtered totals.
 9. Use the Analytics button to open reports, the calendar button to open the weekly calendar view, and the ⇄ button to open Reconcile.
-10. Use **Send week to Tempo** in the calendar to create the displayed week's completed worklogs directly in Tempo. Open the adjacent menu and choose **Choose individual days** when you only want to send part of the week.
-11. Use the merge controls in a recent entry edit panel or selected calendar entry to append another matching completed log's elapsed time to the selected entry.
+   Reconcile presents large groups in bounded pages with search over the loaded report. Bulk actions preview affected and unresolved counts, preserve stale-reference checks, and report completed, pending, and failed outcomes after refreshing the comparison. Quarantined records can be exported as a local, escaped metadata report containing their provider location and reason.
+10. Use **Add completed entry** in the calendar to backfill a finished log with explicit start and end times. It saves locally as a completed dirty entry and does not stop or alter an active timer.
+11. Use **Send week to Tempo** in the calendar to create the displayed week's completed worklogs directly in Tempo. Open the adjacent menu and choose **Choose individual days** when you only want to send part of the week.
+12. Use the merge controls in a recent entry edit panel or selected calendar entry to review and then append another matching completed log's elapsed time to the selected entry. The preview shows actual and effective duration, the compacted gap, and the retained target multiplier/status before confirmation.
 
 Starting, stopping, editing, and deleting always write to IndexedDB first. The UI remains usable when offline or when the active provider is not ready.
+
+If an active timer has been running for at least eight hours, the popup shows an inline review warning with **Edit** and **Stop** actions. If multiple active timers exist, the warning lists each timer with its local start time and device so each one can be resolved independently. These warnings never stop or alter a timer automatically. Options also offers an off-by-default **Remind me about long-running timers** setting; when enabled, Firefox may show one notification per unchanged stale-timer revision, and selecting it opens the popup. Notifications never stop or edit timers automatically.
 
 If the popup and calendar are open at the same time, local changes broadcast between them and both views refresh automatically.
 
 Set **Duration multiplier** in Options. Entries with **Multiply** checked store `duration_seconds` as actual elapsed seconds times that multiplier, and store the multiplier value itself in the active provider's shared `multiply` field. Entries without **Multiply** keep their actual duration and leave `multiply` empty.
+
+Options marks unsaved sections and provides a local **Discard** action. If a
+saved value changes in another context while a section is being edited, the
+typed draft stays visible and the section says that the saved value changed;
+discarding reloads the saved values. General settings show validation beside
+the affected field, including sync interval, multiplier, and calendar start
+hour errors.
+
+Use **Appearance** in Options to choose a named theme or enable **High
+contrast**. Theme preferences retain legacy names when profiles are upgraded,
+and the shared semantic palette has page-level fallbacks if saved preferences
+cannot be read. Keyboard focus remains visible on controls; compact Popup and
+resized Calendar layouts keep actions reachable, and transitions honor the
+browser's reduced-motion preference.
 
 ## Remote Storage and Migration
 
@@ -208,24 +231,29 @@ Spreadsheet settings are shown when Google is active or selected as the
 preparation target, and are hidden during ordinary MySQL use without deleting
 Google credentials, tokens, or spreadsheet state.
 
-On a new installation, Options first asks whether to start with Google Sheets
-or MySQL. The remaining settings stay hidden until the selected backend has
-been established. MySQL setup can either adopt an existing remote dataset or
-initialize it from this profile's local data.
+On a new installation, Options first asks whether to start with Google Sheets,
+MySQL, or Cloudflare Worker + D1. The remaining settings stay hidden until the
+selected backend has been established. MySQL and Cloudflare D1 setup can either
+adopt an existing remote dataset or initialize it from this profile's local
+data.
 
 Storage migration pauses ordinary synchronization, verifies the canonical
 entries and shared configuration, and switches the active backend only after
-verification succeeds. The source provider and its data remain available for
-reverse migration.
+verification succeeds. Options keeps the active backend and the backend being
+prepared visible separately. Before the switch, it shows verified source and
+target entry/config counts plus disagreements; that preview is persisted with
+the migration state so reopening Options can resume instead of repeating
+completed writes. The source provider and its data remain available for reverse
+migration.
 
-For a new profile that does not use Google, choose the direct setup action for
-MySQL or Cloudflare D1 in Storage. This initializes the selected backend from
+For a new profile that does not use Google, choose **Initialize from this
+device** for MySQL or Cloudflare D1 in Storage. This initializes the selected backend from
 that Firefox profile's local data without reading Google Sheets. Existing
 remote records that do not match the local data are rejected rather than
 overwritten.
 
 If MySQL or Cloudflare D1 already contains the authoritative data, choose the
-corresponding **Use existing ... data** action instead. This verifies any local
+corresponding **Adopt existing ... data** action instead. This verifies any local
 records that are already present, switches the backend, and imports remote-only
 records into the local database; it does not require Google sign-in.
 
@@ -240,29 +268,35 @@ check Cloudflare's current documentation before relying on them.
 
 ## Calendar View
 
-The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Ordinary time logs are drawn from their actual start to end. A multiplied completed entry also has a visually distinct tail extending to its effective duration; that tail can overlap other blocks, but it does not move report, daily-total, sync, or Tempo time into a later period. Effective time is allocated proportionally across the actual interval. Entries whose displayed blocks overlap are shown side by side. Set the calendar start hour in Options; the initial calendar view starts displaying at that hour. The default is 07:00.
+The calendar page shows the current week by default and lets you move to previous, next, or selected weeks. Use **Add completed entry** to open the shared editor for a finished log with explicit start and end times; the local write is offline-first and leaves any active timer unchanged. Ordinary time logs are drawn from their actual start to end. A multiplied completed entry also has a visually distinct tail extending to its effective duration; that tail can overlap other blocks, but it does not move report, daily-total, sync, or Tempo time into a later period. Effective time is allocated proportionally across the actual interval. Entries whose displayed blocks overlap are shown side by side. Set the calendar start hour in Options; the initial calendar view starts displaying at that hour. The default is 07:00.
 
-Click **Send week to Tempo** to send the displayed week's completed entries to Tempo. The first use asks Firefox for access to `api.tempo.io`; Tempo requests then run in the extension background context so they are not subject to page CORS checks. Configure the Tempo API token and author account ID in Options first. Each Task maps to a numeric Jira issue ID; the calendar asks when it encounters an unknown Task and stores the answer in the editable cache in Options. The entry description becomes the Tempo worklog comment, and multiplied time is apportioned proportionally when an entry crosses the week boundary. Running timers are skipped because Tempo requires a fixed duration. Review the confirmation carefully: sending the same week again creates duplicate Tempo worklogs.
+Click **Send week to Tempo** to send the displayed week's completed entries to Tempo. The first use asks Firefox for access to `api.tempo.io`; Tempo requests then run in the extension background context so they are not subject to page CORS checks. Configure the Tempo API token and author account ID in Options first. A task-only mapping remains compatible for tasks used by one project; when the same task label occurs in multiple projects, the preview requires a separate project+task mapping so one issue cannot be silently applied to both. The editable preview keeps mappings and shows task/project context when an issue is missing. The entry description becomes the Tempo worklog comment. Entries crossing local midnight become one daily worklog allocation per intersecting civil day; effective seconds are rounded once per entry across the displayed week, including proportional multiplied time and DST-length days. Running timers are skipped because Tempo requires a fixed duration. The preview records local acknowledged, rejected, and unknown outcomes: acknowledged and unknown allocations require explicit resend selection, while a cancelled upload keeps acknowledged work and stops only future chunks.
 
-The normal **Send week to Tempo** action sends the whole displayed week without showing extra controls. Its adjacent menu offers **Choose individual days**, which reveals an unchecked box in each day header and enables the send action after at least one day is selected. The checkboxes disappear after a successful send or when you change weeks. The selection is not stored, which keeps a resend after a partial send an explicit choice. Sending a day that was already sent still creates duplicates, so use this to send the remaining days rather than to correct an earlier send.
+The normal **Send week to Tempo** action sends the whole displayed week after the preview is reviewed. Its adjacent menu offers **Choose individual days**, which reveals an unchecked box in each day header and enables the send action after at least one day is selected. The preview reports daily worklog allocations and explains that entries crossing local midnight are split and rounded per entry before day filtering. The checkboxes disappear after a successful send or when you change weeks. If a partial upload is cancelled, the background completes the current request, reports its outcome, and the preview can be reopened to review the remaining allocations. Unknown outcomes are never retried automatically; reopening the same profile retains the local ledger, while pre-ledger history still requires explicit review. The selection is not stored, so a resend remains an explicit choice.
 
-Drag a time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`. Completed entries keep their original duration when moved. Active timers keep running and only their `start_at` value changes.
+The first Tempo send establishes a local tracking epoch. Allocations created after that epoch with no ledger outcome are selected by default as **Unsent · send**; allocations from before it remain **Untracked history · review**. Acknowledged, unknown, and changed allocations are never selected as automatic resends. This is same-profile protection only: the [current Tempo API documentation](https://tempo.apidocumentation.com/) exposes bulk/read worklogs and worklog-ID-based update/delete operations, but the create contract does not accept this extension's local entry fingerprint as an idempotency key. The extension therefore does not attempt remote matching or update/delete, and a different device or cleared profile still requires manual review.
+
+Drag a completed time log to move it to another day or start time. Dragging snaps the start time to 15-minute intervals such as `09:00`, `09:15`, `09:30`, and `09:45`, and keeps the original duration. Running timers cannot be moved while active; stop or edit one after it has a settled end time.
 
 Select a completed time log, then drag its top or bottom edge to change its start or end time. Resize handles are only available on the selected log. Resizing snaps to one-minute intervals and keeps a minimum duration of one minute. Use **Undo resize** in the calendar toolbar immediately afterward to restore the previous times.
 
-Click a time log in the calendar to select it and open its edit panel. Click the selected time log again to clear the selection. If another completed log in the week has the exact same project, task, and description, the merge panel lets you combine them into one entry with the total duration of both logs. The same merge action is available from the popup edit panel for recent entries.
+Click a time log in the calendar to select it and open its edit panel; focus a log and press Enter or Space for the keyboard equivalent. Press Escape to cancel editing and return focus to the selected log. The editor explains the browser's displayed timezone, actual duration, effective duration, multiplier, and visual multiplier tail. Saving exposes one **Undo edit** action in the calendar toolbar; it restores the captured fields only while the same revision/fingerprint is still current. Deleting exposes **Undo deletion** for the same page-session guard. If another completed log in the week has the exact same project, task, and description, the merge panel first previews the actual/effective result, compacted interval gap, and retained target multiplier/status. Confirming then combines the logs into one contiguous target interval and tombstones the source. The same guarded preview and merge action is available from the popup edit panel for recent entries. Split-at-time remains intentionally deferred: direct completed entry, merge preview, and bounded undo cover the demonstrated correction workflow without introducing automatic interval surgery.
 
-Use the edit panel that opens with a selected time log to change its project, task, description, multiply flag, start and end times, or review status. Saving recalculates the duration and syncs the updated entry. Entries are also reachable from the keyboard: focus a time log and press Enter or Space to open it.
+Use the edit panel that opens with a selected time log to change its project, task, description, multiply flag, start and end times, or review status. Saving recalculates the duration and syncs the updated entry. Nonexistent spring-forward times and ambiguous repeated-hour times are rejected with correction guidance; the editor does not silently choose an occurrence. Entries are also reachable from the keyboard: focus a time log and press Enter or Space to open it.
 
 ## Analytics Dashboard
 
 The Analytics button in the popup opens a local report for **This week**, **Last week**, **This month**, **Last month**, **Last 30 days**, **This year**, or an inclusive custom date range. Every selection is automatically compared with the matching previous period; in-progress calendar periods compare only the same elapsed portion so the result stays fair.
 
-The dashboard shows effective-time totals and project/task and description breakdowns. It separately uses actual elapsed time for session lengths, short-session buckets, project/task switches, overlaps, long sessions, and stale active timers, so a duration multiplier never makes a physical session look longer or more fragmented. Anomalies are deterministic and informational; Analytics does not change entries. Reports read only the local IndexedDB interval covering the selected and comparison periods and do not contact a remote provider.
+The dashboard shows effective-time totals and project/task and description breakdowns. Use the project and task filters to scope both the current and comparison datasets; the page also displays total actual elapsed time separately from multiplier-adjusted effective time. It separately uses actual elapsed time for session lengths, short-session buckets, project/task switches, overlaps, long sessions, and stale active timers, so a duration multiplier never makes a physical session look longer or more fragmented. Anomalies are deterministic and informational; **Open entry** takes you to the matching calendar week/editor when the entry is still available. Reports read only the local IndexedDB interval covering the selected and comparison periods and do not contact a remote provider.
+
+Analytics preserves the selected period, project/task filters, expanded project rows, scroll position, and focused control while its minute refresh or an entry-change refresh rerenders the report. “This week,” “This month,” and “This year” compare the same elapsed portion of the preceding period; complete prior periods compare adjacent calendar periods, with shorter months and leap days clamped to valid civil dates.
+
+Use **Export CSV** to download the same filtered report snapshot shown on screen, including its ranges, browser timezone, actual/effective labels, project/task rows, descriptions, and anomalies. Text fields are quoted and formula-leading text is neutralized without changing numeric columns. **Print** opens the browser print flow; the print view keeps report totals and labels while removing interactive controls.
 
 Dates and times follow your browser's locale throughout.
 
-Select a completed time log and click **Duplicate** to create a new entry with the same details, start time, end time, and duration. The copy is saved as a separate entry and synced normally.
+Select a completed time log and click **Duplicate** to preview the copied actual/effective duration and its intentional overlap with the original. Confirm to create a separate entry with the same details, interval, multiplier, and status; it is saved and synced normally.
 
 ## Sync Behavior
 
@@ -273,7 +307,9 @@ Sync happens when:
 - the header sync button is clicked;
 - a background alarm fires while the browser is open, with or without any page open.
 
-The sync interval defaults to 60 seconds and is clamped to a minimum of 30 seconds. When nothing is changing, the background poller stretches its interval out to 2x, 5x, then 10x that value, capped at 15 minutes, and snaps back to the configured interval as soon as a cycle moves data or you act in the interface. A second device's edits can therefore take up to 15 minutes to appear on an idle machine; opening the popup or calendar syncs immediately.
+The sync interval defaults to 60 seconds and accepts values down to 30 seconds, but Firefox alarms and the idle poller schedule whole minutes, so the shortest effective interval is one minute. When nothing is changing, the background poller stretches its interval out to 2x, 5x, then 10x the rounded base interval, capped at 15 minutes, and snaps back to the configured interval as soon as a cycle moves data or you act in the interface. A second device's edits can therefore take up to 15 minutes to appear on an idle machine; opening the popup or calendar syncs immediately.
+
+The Popup and Options page show one freshness summary with the active provider, locally pending count, last successful remote exchange, review count, and the next retry/check. “Locally saved” means the edit is safe in IndexedDB but not yet confirmed remotely; “remotely synchronized” means the last exchange succeeded with no pending/review work; “needs review” means a conflict or quarantined record still needs an explicit decision. Options also shows the rounded background cadence and the current idle delay.
 
 The popup, calendar, and background each attempt sync independently. A renewable IndexedDB lease admits one current holder, and the holder checks its generation before each mutating phase. A context that cannot acquire or renew the lease stops and retries from a fresh snapshot; this prevents normal same-profile cycles from both appending an entry, but it is not a distributed database lock across devices.
 
@@ -284,15 +320,15 @@ On sync, the extension:
 3. Reads the active provider's canonical entries and shared configuration.
 4. Pushes local changes through the provider adapter with provider-specific concurrency references.
 5. Pulls remote entries into IndexedDB, using last `updated_at` wins for normal edits.
-6. Removes entries deleted more than 14 days ago through the active provider's cleanup semantics.
+6. Retains deletion tombstones so a profile returning after a long outage can still observe the deletion.
 
-An idle cycle costs a single request. A timer left running overnight keeps running; it is never closed automatically.
+For a ready Google Sheets backend, an idle cycle normally uses one Drive change-token request before it can skip the snapshot. MySQL and Cloudflare Worker + D1 first validate backend health and then request a change token, so an idle cycle normally uses two API requests. The provider-injection regression in `test/sync-request-counts.test.js` measures the API-shaped path as two requests for idle (health plus change token), four for a dirty cycle (health, snapshot, one write, and the post-write marker), and two for a forced cycle (health plus snapshot). These are boundary counts, not latency guarantees for a live service. A timer left running overnight keeps running; it is never closed automatically.
 
 Where a valid entry ID appears in several rows, the valid row with the newest `updated_at` is selected regardless of its position, so a stale duplicate cannot overwrite a newer one. Equal timestamps do not provide a reliable ordering and duplicate rows remain visible for review. Malformed rows are quarantined instead of participating in the choice. Surplus rows are deleted only after their full row fingerprints are rechecked.
 
 Google Sheets must be treated as single-writer storage. Immediately before an existing row is rewritten or deleted, the extension asks Drive whether the file changed during preflight and stops if it did. This narrows the race window but cannot make Sheets mutations atomic, so do not edit the sheet or sync another device while a sync is running.
 
-Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the active provider receives the same tombstone instead of an immediate physical removal. This lets other devices learn about the deletion and prevents old local copies from being re-created as new remote entries. Tombstones older than 14 days are removed from remote storage and local storage.
+Deleted entries are marked locally with `deleted_at` first so deletion is local-first and can sync later. During sync, the active provider receives the same tombstone instead of an immediate physical removal. Tombstones are retained locally and remotely as the deletion evidence used by long-offline profiles; they are not automatically purged after 14 days. A previously synchronized local entry that is absent from a remote snapshot, or an entry restored from an old backup, is held for explicit review in Reconcile rather than silently appended as a new remote entry. Only a genuinely new unsent entry with no prior synchronization evidence can take the automatic append path. A dirty edit against a retained remote tombstone is also held for an explicit choice. Clients that already purged this evidence cannot be repaired by inference from remote absence; they require user-directed reconciliation or rebootstrap.
 
 ## Reconcile Screen
 
@@ -306,13 +342,14 @@ Resolutions validate the local revision and the remote fingerprint shown in the 
 
 - Google Sheets is not a real database; MySQL uses the HTTPS API's relational uniqueness and version fencing.
 - Sync is polling-based, not real-time.
+- Popup history navigation and filters are bounded to the explicitly loaded date range; they do not search entries outside that range. Project and task suggestions come from values loaded into the current history view.
 - Conflict handling is intentionally simple.
 - Calendar moving snaps to 15-minute intervals and preserves completed-entry duration; resizing a selected entry snaps to one-minute intervals.
 - Merging keeps the selected entry's start, multiplier, and status; it appends the other matching entry's actual elapsed time as one contiguous interval, then marks the other entry deleted locally.
-- Deleted entries remain in remote storage as tombstones for 14 days so multiple devices can converge during sync.
+- Deleted entries remain in remote storage as tombstones indefinitely so multiple devices can converge during sync. Profiles with previously purged evidence, including those using older clients, require explicit reconciliation or rebootstrap; remote absence alone is not interpreted as permission to recreate a synchronized ID.
 - When it does read, each provider currently returns its complete canonical snapshot; the provider change token avoids that read when possible.
 - Google-specific read gating only works for a spreadsheet this extension created, because `drive.file` covers nothing else. A spreadsheet configured by hand in an older version reads on every cycle.
-- A forgotten timer runs indefinitely. Nothing prompts about it.
+- A forgotten timer runs indefinitely until you explicitly edit or stop it; the popup warns after eight hours and provides both actions. Multiple active timers are listed there with start/device context.
 - OAuth uses Google device flow and stores personal OAuth credentials in the local Firefox extension profile, unencrypted. See `PRIVACY.md`.
 - No team or multi-user support.
 - Browser runtime smoke tests run pages against Firefox's extension APIs without contacting live Sheets or Drive.
@@ -358,6 +395,8 @@ npm test
 
 Runs the Node test runner over `test/`. It includes fake-IndexedDB transaction/concurrency checks and deterministic Google API barriers before response, response body, and commit acknowledgement. Run `npm ci` first so the pinned static-analysis and packaging tools are available; the extension itself has no runtime npm dependencies.
 
+The fake IndexedDB implementation is a focused test double for the transaction, cursor, FIFO, and rollback behavior covered by these tests; it is not a complete browser database implementation. Use the Firefox smoke test for browser-only IndexedDB semantics and page lifecycle behavior that the test double does not model.
+
 For a Firefox WebDriver behavior smoke test, install Firefox, `geckodriver`, and `zip`, then run:
 
 ```bash
@@ -402,5 +441,4 @@ OAuth client credentials are stored in Firefox synchronized extension storage th
 - Add project/task autocomplete from recent entries.
 - Add a keyboard shortcut to start and stop the timer.
 - Show elapsed time as badge text on the toolbar icon.
-- Let an Analytics anomaly open its entry directly in an editor.
 - Add entry search across all history.

@@ -26,9 +26,9 @@ export function readEntryForm(fields, { multiplyValue = "" } = {}) {
   const start = fromLocalInputValue(fields.start.value);
   const end = fromLocalInputValue(fields.end.value);
   if (start.kind !== "instant") {
-    throw formError(start.kind === "empty" ? "A valid start time is required." : `Start time is invalid (${start.reason}).`);
+    throw formError(start.kind === "empty" ? "A valid start time is required." : invalidTimeMessage("Start", start.reason));
   }
-  if (end.kind === "invalid") throw formError(`End time is invalid (${end.reason}).`);
+  if (end.kind === "invalid") throw formError(invalidTimeMessage("End", end.reason));
   if (end.kind === "instant" && new Date(end.iso) < new Date(start.iso)) {
     throw formError("End time cannot be before the start time.");
   }
@@ -43,6 +43,12 @@ export function readEntryForm(fields, { multiplyValue = "" } = {}) {
   };
   if (fields.status) payload.status = fields.status.value;
   return payload;
+}
+
+function invalidTimeMessage(label, reason) {
+  if (reason === "nonexistent") return `${label} time does not exist in this timezone; choose another local time.`;
+  if (reason === "ambiguous") return `${label} time occurs twice in this timezone; choose a different time because an occurrence selector is not available.`;
+  return `${label} time is invalid (${reason}).`;
 }
 
 function formError(message) {

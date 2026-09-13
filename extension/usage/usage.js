@@ -10,6 +10,12 @@ import {
 import { UsageError } from "../src/codex-usage.js";
 import { platform } from "../src/platform.js";
 import { startPage } from "../src/page-runtime.js";
+import {
+  formatUsageCountdown,
+  usageSnapshotAgeMs,
+  usageSnapshotIsStale,
+  usageWindowLabel
+} from "../src/usage-presentation.js";
 
 const AUTO_REFRESH_AFTER_MS = 5 * 60 * 1000;
 const STALE_AFTER_MS = 15 * 60 * 1000;
@@ -24,6 +30,7 @@ const $snapshot = $("#usageSnapshot");
 let sessionTokenConsent = false;
 let renderGeneration = 0;
 let eventsBound = false;
+let countdownTimer = null;
 
 function messageFor(error) {
   if (error?.code === "schema_changed") {
@@ -48,30 +55,10 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
-function formatCountdown(resetAt, now = Date.now()) {
-  const remaining = new Date(resetAt).getTime() - now;
-  if (!Number.isFinite(remaining)) return "reset time unavailable";
-  if (remaining <= 0) return "reset time has passed; refresh to confirm the new allowance";
-  const totalMinutes = Math.ceil(remaining / 60_000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-  const parts = [];
-  if (days) parts.push(`${days}d`);
-  if (hours) parts.push(`${hours}h`);
-  if (minutes || !parts.length) parts.push(`${minutes}m`);
-  return `in ${parts.join(" ")}`;
-}
-
-export function usageWindowLabel(window, fallback) {
-  const seconds = Number(window?.window_seconds);
-  if (seconds === 5 * 60 * 60) return "5-hour limit";
-  if (seconds === 7 * 24 * 60 * 60) return "Weekly limit";
-  return fallback;
-}
+export { usageWindowLabel };
 
 function snapshotAge(snapshot) {
-  return Date.now() - new Date(snapshot?.collected_at || 0).getTime();
+  return usageSnapshotAgeMs(snapshot);
 }
 
 function usageWindow(window, fallbackLabel) {
@@ -103,7 +90,7 @@ function usageWindow(window, fallbackLabel) {
   const reset = document.createElement("p");
   reset.className = "usage-reset";
   reset.textContent = window.reset_at
-    ? `Resets ${formatDate(window.reset_at)} (${formatCountdown(window.reset_at)})`
+    ? `Resets ${formatDate(window.reset_at)} (${formatUsageCountdown(window.reset_at)})`
     : "Reset time unavailable";
   section.append(reset);
   return section;
@@ -126,7 +113,7 @@ function renderSnapshot(state) {
     return;
   }
 
-  const stale = snapshotAge(snapshot) > STALE_AFTER_MS;
+  const stale = usageSnapshotIsStale(snapshot, Date.now(), STALE_AFTER_MS);
   const card = document.createElement("article");
   card.className = "usage-card";
   card.dataset.stale = String(stale);
@@ -258,7 +245,15 @@ function bindEvents() {
 export async function initUsagePage() {
   bindEvents();
   await render();
+  countdownTimer = setInterval(() => {
+    void render({ autoRefresh: false });
+  }, 30_000);
 }
+
+window.addEventListener("pagehide", () => {
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = null;
+});
 
 if (document.body?.dataset.page === "usage") {
   startPage({ page: "usage", title: "ChatGPT usage limits", init: initUsagePage });

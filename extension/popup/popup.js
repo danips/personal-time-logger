@@ -6,17 +6,17 @@ import {
   getChatGptUsageState,
   refreshChatGptUsage
 } from "../src/chatgpt-usage-service.js";
-import { canMergeEntries, hasMultiplier, mergeEntries, replaceActiveTimer, softDeleteEntry, stopEntry, updateEntry } from "../src/entries.js";
+import { canMergeEntries, deletionUndoToken, entryUpdateUndoToken, hasMultiplier, mergeEntries, mergeEntryPreview, replaceActiveTimer, softDeleteEntry, stopEntry, undoDeletedEntry, undoEntryUpdate, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
-import { activeTimerState, elapsedTimerState } from "../src/popup-active-state.js";
+import { activeTimerState, activeTimerWarningState } from "../src/popup-active-state.js";
 import { onEntriesChanged } from "../src/events.js";
 import {
   requestBackgroundSync,
   UPDATE_CHECK_MESSAGE,
   UPDATE_INSTALL_MESSAGE
 } from "../src/sync-request.js";
-import { groupRecentEntries } from "../src/popup-recent-groups.js";
+import { filterRecentEntries, groupRecentEntries, recentFieldValues, recentTotalSeconds } from "../src/popup-recent-groups.js";
 import { createWindowSizeController } from "./window-size-controller.js";
 import {
   addDays,
@@ -38,6 +38,8 @@ import {
 import { platform } from "../src/platform.js";
 import { runPageTask, startPage } from "../src/page-runtime.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
+import { formatUsageCountdown, usageSnapshotIsStale } from "../src/usage-presentation.js";
+import { formatSyncContext, readSyncStatus } from "../src/sync-status.js";
 
 const entryEditor = mountEntryEditor(document.getElementById("popupEntryEditor"), {
   variant: "popup"
@@ -51,8 +53,12 @@ let unsubscribeEntryEvents = null;
 let eventsBound = false;
 const expandedRecentGroups = new Set();
 let recentWeekCount = 1;
+let recentAnchorWeek = null;
 let recentEntries = [];
 let renderGeneration = 0;
+let usageCountdownTimer = null;
+let lastEntryUndo = null;
+let pendingEditorPreview = null;
 
 const $activePanel = $(".active-panel");
 const $activeTitle = $("#activeTitle");
@@ -64,8 +70,21 @@ const $updateNotice = $("#updateNotice");
 const $installUpdate = $("#installUpdate");
 const $recentEntries = $("#recentEntries");
 const $loadMoreRecent = $("#loadMoreRecent");
+const $recentDate = $("#recentDate");
+const $jumpRecentDate = $("#jumpRecentDate");
+const $currentRecentWeek = $("#currentRecentWeek");
+const $recentTextFilter = $("#recentTextFilter");
+const $recentProjectFilter = $("#recentProjectFilter");
+const $recentTaskFilter = $("#recentTaskFilter");
+const $recentReviewFilter = $("#recentReviewFilter");
+const $recentProjects = $("#recentProjects");
+const $recentTasks = $("#recentTasks");
+const $recentRangeLabel = $("#recentRangeLabel");
+const $recentTotals = $("#recentTotals");
 const $dirtyBadge = $("#dirtyBadge");
+const $undoDeleteButton = $("#undoDeleteButton");
 const $syncStatus = $("#syncStatus");
+const $syncContext = $("#syncContext");
 const $brandRow = $(".brand-row");
 const $statusRow = $(".status-row");
 const $editPanel = $("#editPanel");
@@ -76,6 +95,7 @@ const $editEnd = entryEditor.fields.end;
 const $mergeTarget = entryEditor.merge.target;
 const $mergeEdit = entryEditor.merge.button;
 const $mergeTools = entryEditor.merge.control;
+const $editorPreview = entryEditor.preview;
 const $newTimerToggle = $("#newTimerToggle");
 const $newTimerPanel = $("#newTimerPanel");
 const $newTimerIcon = $(".new-timer-icon");
@@ -285,10 +305,7 @@ function renderRecentTimerGroup(group) {
 }
 
 function tickElapsed(latest) {
-  $elapsed.textContent = elapsedTimerState(
-    latest,
-    latest ? formatElapsed(durationSeconds(latest.start_at)) : "00:00:00"
-  ).elapsed;
+  $elapsed.textContent = formatElapsed(durationSeconds(latest.start_at));
 }
 
 function renderActiveState(latest) {
@@ -307,6 +324,61 @@ function renderActiveState(latest) {
   $activePanel.setAttribute("role", "button");
   $activePanel.setAttribute("aria-label", state.ariaLabel);
   if (state.running) setNewTimerOpen(false);
+}
+
+function renderActiveWarning() {
+  const warnings = activeTimerWarningState(activeEntries);
+  const stale = warnings.filter(({ stale: isStale }) => isStale);
+  if (activeEntries.length < 2 && !stale.length) {
+    $activeWarning.classList.add("hidden");
+    $activeWarning.replaceChildren();
+    return;
+  }
+
+  $activeWarning.replaceChildren();
+  const heading = document.createElement("strong");
+  heading.textContent = stale.length
+    ? "Review an old active timer"
+    : "Multiple active timers need review";
+  $activeWarning.append(heading);
+  const intro = document.createElement("p");
+  intro.textContent = stale.length
+    ? "This timer has been running unusually long. Edit its recorded times or stop it when you are ready."
+    : "Each timer remains active until you explicitly edit or stop it.";
+  $activeWarning.append(intro);
+
+  const list = document.createElement("div");
+  list.className = "active-warning-list";
+  for (const { entry, elapsedSeconds, stale: isStale } of warnings) {
+    const item = document.createElement("div");
+    item.className = "active-warning-item";
+    const details = document.createElement("div");
+    details.className = "active-warning-details";
+    const title = document.createElement("strong");
+    title.textContent = entryTitle(entry);
+    const metadata = document.createElement("span");
+    metadata.textContent = `${shortDateTime(entry.start_at) || "Unknown start"} · ${entry.device_id || "Unknown device"}${isStale ? ` · ${formatElapsed(elapsedSeconds)} active` : ""}`;
+    details.append(title, metadata);
+    const actions = document.createElement("div");
+    actions.className = "active-warning-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.dataset.warningEditId = entry.id;
+    edit.textContent = "Edit";
+    edit.setAttribute("aria-label", `Edit active timer ${entryTitle(entry)}`);
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.className = "danger";
+    stop.dataset.warningStopId = entry.id;
+    stop.dataset.expectedRevision = String(entry.revision || 0);
+    stop.textContent = "Stop";
+    stop.setAttribute("aria-label", `Stop active timer ${entryTitle(entry)}`);
+    actions.append(edit, stop);
+    item.append(details, actions);
+    list.append(item);
+  }
+  $activeWarning.append(list);
+  $activeWarning.classList.remove("hidden");
 }
 
 function updateElapsed() {
@@ -352,27 +424,73 @@ async function renderActive(isCurrent) {
   if (!isCurrent()) return false;
   activeEntries = entries;
   renderActiveState(activeEntries[0]);
+  renderActiveWarning();
   if (activeEntries[0]) {
     startElapsedTicker();
   } else {
     stopElapsedTicker();
   }
 
-  if (activeEntries.length > 1) {
-    $activeWarning.textContent = `Warning: ${activeEntries.length} active timers exist. Older active entries are marked needs_review on sync.`;
-    $activeWarning.classList.remove("hidden");
-  } else {
-    $activeWarning.classList.add("hidden");
-  }
   return true;
 }
 
 function recentWeekRange(weekCount) {
-  const currentWeek = startOfLocalWeek(new Date());
+  const currentWeek = recentAnchorWeek || startOfLocalWeek(new Date());
   return {
     start: addDays(currentWeek, -7 * (weekCount - 1)),
     end: addDays(currentWeek, 7)
   };
+}
+
+function recentDateLabel(date) {
+  return date.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+}
+
+function recentFilters() {
+  return {
+    text: $recentTextFilter.value,
+    project: $recentProjectFilter.value,
+    task: $recentTaskFilter.value,
+    status: $recentReviewFilter.value
+  };
+}
+
+function renderRecentControls(entries, filteredEntries, range) {
+  $recentProjects.replaceChildren(...recentFieldValues(entries, "project").map((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    return option;
+  }));
+  $recentTasks.replaceChildren(...recentFieldValues(entries, "task").map((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    return option;
+  }));
+  const end = addDays(range.end, -1);
+  $recentRangeLabel.textContent = `Loaded range: ${recentDateLabel(range.start)} – ${recentDateLabel(end)}. Filters apply only to this range.`;
+  $recentTotals.textContent = `Period total: ${formatElapsed(recentTotalSeconds(entries, range))} · Filtered total: ${formatElapsed(recentTotalSeconds(filteredEntries, range))} · ${filteredEntries.length} of ${entries.length} entries`;
+}
+
+function recentFocusTarget() {
+  const active = document.activeElement;
+  if (!active || active === document.body) return null;
+  return {
+    id: active.id || "",
+    editId: active.dataset.editId || "",
+    toggleGroup: active.dataset.toggleGroup || ""
+  };
+}
+
+function restoreRecentFocus(target) {
+  if (!target) return;
+  const element = target.id
+    ? document.getElementById(target.id)
+    : target.editId
+      ? document.querySelector(`[data-edit-id="${CSS.escape(target.editId)}"]`)
+      : target.toggleGroup
+        ? document.querySelector(`[data-toggle-group="${CSS.escape(target.toggleGroup)}"]`)
+        : null;
+  if (element && typeof element.focus === "function") element.focus();
 }
 
 function weeksBeforeCurrentWeek(iso) {
@@ -383,6 +501,7 @@ function weeksBeforeCurrentWeek(iso) {
 }
 
 async function renderRecent(isCurrent) {
+  const focusTarget = recentFocusTarget();
   let range = recentWeekRange(recentWeekCount);
   let entries = await getEntriesIntersecting(range.start, range.end);
   if (!isCurrent()) return false;
@@ -403,18 +522,21 @@ async function renderRecent(isCurrent) {
   if (!isCurrent()) return false;
   const hasMore = Boolean(older);
   recentEntries = entries;
+  const filteredEntries = filterRecentEntries(entries, recentFilters());
+  renderRecentControls(entries, filteredEntries, range);
 
-  if (!entries.length) {
+  if (!filteredEntries.length) {
     const empty = document.createElement("p");
     empty.className = "entry-meta";
-    empty.textContent = "No entries yet.";
+    empty.textContent = entries.length ? "No entries match the current filters in the loaded range." : "No entries in the loaded range.";
     $recentEntries.replaceChildren(empty);
     $loadMoreRecent.classList.toggle("hidden", !hasMore);
     $loadMoreRecent.textContent = hasMore ? "Load previous week" : "";
+    restoreRecentFocus(focusTarget);
     return true;
   }
 
-  const weekElements = groupRecentEntries(entries, range).map((week) => {
+  const weekElements = groupRecentEntries(filteredEntries, range).map((week) => {
     const section = document.createElement("section");
     section.className = "week-group";
     const header = document.createElement("header");
@@ -448,6 +570,7 @@ async function renderRecent(isCurrent) {
     return section;
   });
   $recentEntries.replaceChildren(...weekElements);
+  restoreRecentFocus(focusTarget);
 
   $loadMoreRecent.classList.toggle("hidden", !hasMore);
   $loadMoreRecent.textContent = hasMore ? "Load previous week" : "";
@@ -462,6 +585,20 @@ async function renderDirtyBadge(isCurrent) {
   $dirtyBadge.textContent = label;
   $dirtyBadge.title = `${count} unsynced local ${count === 1 ? "change" : "changes"}`;
   $dirtyBadge.classList.toggle("hidden", count === 0);
+  return true;
+}
+
+async function renderSyncContext(isCurrent) {
+  try {
+    const snapshot = await readSyncStatus();
+    if (!isCurrent()) return false;
+    $syncContext.textContent = formatSyncContext(snapshot);
+    $syncContext.dataset.state = snapshot.state;
+  } catch {
+    if (!isCurrent()) return false;
+    $syncContext.textContent = "Sync freshness is unavailable; local entries remain the source of truth.";
+    delete $syncContext.dataset.state;
+  }
   return true;
 }
 
@@ -488,13 +625,15 @@ async function renderChatGptUsageSummary(isCurrent) {
 
   const values = windows.map(({ label, window }) => {
     const remaining = compactPercent(window.remaining_percent);
-    const nextRefresh = shortDateTime(window.reset_at) || "not provided";
+    const used = compactPercent(window.used_percent) || "not provided";
+    const nextRefresh = window.reset_at ? formatUsageCountdown(window.reset_at) : "reset unavailable";
     const lastUpdate = shortDateTime(snapshot.collected_at) || "not available";
-    const detail = `${label} limit: ${remaining} remaining\nResets: ${nextRefresh}\nLast update: ${lastUpdate}`;
+    const stale = usageSnapshotIsStale(snapshot);
+    const detail = `${label} limit: ${used} used, ${remaining} remaining\nResets: ${nextRefresh}\nLast update: ${lastUpdate}${stale ? "\nStatus: stale" : ""}`;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chatgpt-usage-value";
-    button.textContent = `${label} ${remaining}`;
+    button.textContent = `${label} ${remaining} remaining · ${nextRefresh}`;
     button.title = detail;
     button.setAttribute("aria-label", `Open ChatGPT usage limits. ${detail.replaceAll("\n", ". ")}`);
     return button;
@@ -527,6 +666,7 @@ async function render() {
   if (updateVersion) $installUpdate.textContent = `Update ${updateVersion} available — click to install`;
   if (!(await renderChatGptUsageSummary(isCurrent))) return;
   if (!(await renderDirtyBadge(isCurrent))) return;
+  if (!(await renderSyncContext(isCurrent))) return;
   await renderRecent(isCurrent);
 }
 
@@ -623,6 +763,7 @@ async function showEdit(id) {
     multiplyValue: entry.multiply || "",
     mergeTargetRevisions: new Map()
   };
+  clearEditorPreview();
   editorSession = session;
   $editProjectDot.classList.toggle("hidden", !entry.project);
   $editProjectDot.style.setProperty("--project-color", projectColor(entry));
@@ -656,12 +797,45 @@ function hideEdit(session = editorSession) {
   if (session && editorSession !== session) return false;
   editorToken += 1;
   editorSession = null;
+  clearEditorPreview();
   $mergeTarget.replaceChildren();
   $mergeEdit.disabled = true;
   setEntryEditorMergeAvailability($mergeTools, false);
   $editProjectDot.classList.add("hidden");
   $editPanel.classList.add("hidden");
   return true;
+}
+
+function clearEditorPreview() {
+  pendingEditorPreview = null;
+  $editorPreview.panel.hidden = true;
+  $editorPreview.text.textContent = "";
+  $mergeTarget.disabled = false;
+}
+
+function showEditorPreview(text, action) {
+  pendingEditorPreview = action;
+  $editorPreview.text.textContent = text;
+  $editorPreview.panel.hidden = false;
+  $mergeTarget.disabled = true;
+  $editorPreview.confirm.focus();
+}
+
+function editorConflictError() {
+  const error = new Error("Entry changed in another window");
+  error.code = "STORAGE_CONFLICT";
+  return error;
+}
+
+function previewDuration(seconds) {
+  return formatElapsed(Math.max(0, Number(seconds) || 0));
+}
+
+function mergePreviewText(target, source, preview) {
+  const gap = preview.compactedGapSeconds
+    ? ` The ${previewDuration(preview.compactedGapSeconds)} gap is compacted.`
+    : " Any gap is compacted.";
+  return `Merge ${entryTitle(target)} with ${entryTitle(source)}. Actual duration ${previewDuration(preview.actualSeconds)} (${previewDuration(preview.targetActualSeconds)} + ${previewDuration(preview.sourceActualSeconds)}); effective duration ${previewDuration(preview.effectiveSeconds)}. Result: ${preview.startAt} to ${preview.endAt}.${gap} Target multiplier ${preview.targetMultiply || "none"} and status ${preview.targetStatus} are retained; the source becomes a tombstone.`;
 }
 
 function renderMergeTargets(entry, entries, session) {
@@ -682,11 +856,16 @@ async function saveEdit() {
   const session = editorSession;
   if (!session) return;
   try {
-    await updateEntry(
+    const before = await getEntry(session.id);
+    if (!before || Number(before.revision || 0) !== session.revision) throw editorConflictError();
+    const updated = await updateEntry(
       session.id,
       readEntryForm(editFields(), { multiplyValue: session.multiplyValue }),
       { expectedRevision: session.revision }
     );
+    lastEntryUndo = { kind: "update", ...entryUpdateUndoToken(before, updated) };
+    $undoDeleteButton.textContent = "Undo change";
+    $undoDeleteButton.hidden = false;
     if (editorSession === session) hideEdit(session);
     queueSync();
   } catch (error) {
@@ -707,7 +886,10 @@ async function deleteEdit() {
   if (!session) return;
   if (!confirm("Delete this time log entry?")) return;
   try {
-    await softDeleteEntry(session.id, { expectedRevision: session.revision });
+    const deleted = await softDeleteEntry(session.id, { expectedRevision: session.revision });
+    lastEntryUndo = { kind: "deletion", ...deletionUndoToken(deleted) };
+    $undoDeleteButton.textContent = "Undo deletion";
+    $undoDeleteButton.hidden = false;
     if (editorSession === session) hideEdit(session);
     queueSync();
   } catch (error) {
@@ -716,23 +898,58 @@ async function deleteEdit() {
   }
 }
 
+async function undoDeletion() {
+  const undo = lastEntryUndo;
+  if (!undo) return;
+  lastEntryUndo = null;
+  $undoDeleteButton.hidden = true;
+  if (undo.kind === "deletion") {
+    await undoDeletedEntry(undo.id, undo);
+    setSyncStatus("synced", "Deletion undone");
+  } else {
+    await undoEntryUpdate(undo);
+    setSyncStatus("synced", "Change undone");
+  }
+  queueSync();
+}
+
 async function mergeEdit() {
   const session = editorSession;
   if (!session) return;
   const sourceId = $mergeTarget.value;
   if (!sourceId) return;
-  try {
-    await mergeEntries(session.id, sourceId, {
+  const target = await getEntry(session.id);
+  const source = await getEntry(sourceId);
+  if (!target || !source || target.revision !== session.revision
+    || source.revision !== session.mergeTargetRevisions.get(sourceId)) throw editorConflictError();
+  const preview = mergeEntryPreview(target, source);
+  showEditorPreview(mergePreviewText(target, source, preview), {
+    kind: "merge",
+    sessionToken: session.token,
+    targetId: session.id,
+    sourceId,
+    expectedTargetRevision: session.revision,
+    expectedSourceRevision: source.revision
+  });
+}
+
+async function confirmEditorPreview() {
+  const pending = pendingEditorPreview;
+  const session = editorSession;
+  if (!pending || !session || pending.sessionToken !== session.token) {
+    clearEditorPreview();
+    throw editorConflictError();
+  }
+  if (pending.kind === "merge") {
+    await mergeEntries(pending.targetId, pending.sourceId, {
       expectedRevisions: {
-        [session.id]: session.revision,
-        [sourceId]: session.mergeTargetRevisions.get(sourceId)
+        [pending.targetId]: pending.expectedTargetRevision,
+        [pending.sourceId]: pending.expectedSourceRevision
       }
     });
-    if (editorSession === session) hideEdit(session);
+    hideEdit(session);
+    setSyncStatus("synced", "Entries merged");
     queueSync();
-  } catch (error) {
-    if (error.code === "STORAGE_CONFLICT" && editorSession === session) hideEdit(session);
-    throw error;
   }
 }
 
@@ -755,15 +972,55 @@ function bindEvents() {
       expectedRevision: target?.expectedRevision
     });
   });
+  $activeWarning.addEventListener("click", (event) => {
+    const edit = event.target.closest("[data-warning-edit-id]");
+    if (edit) {
+      showEdit(edit.dataset.warningEditId).catch((error) => setSyncStatus("error", formatError(error)));
+      return;
+    }
+    const stop = event.target.closest("[data-warning-stop-id]");
+    if (!stop) return;
+    const target = activeEntries.find((entry) => entry.id === stop.dataset.warningStopId);
+    if (!target) return;
+    runPopupAction(`stop-timer:${target.id}`, () => stopTimer({ id: target.id, expectedRevision: target.revision }), {
+      button: stop,
+      expectedRevision: target.revision
+    });
+  });
   $activePanel.addEventListener("click", editActiveTimer);
   $activePanel.addEventListener("keydown", editActiveTimerFromKeyboard);
   $("#headerSyncButton").addEventListener("click", (event) => runPopupAction("sync", syncAndCheckForUpdate, { button: event.currentTarget }));
+  $undoDeleteButton.addEventListener("click", (event) => runPopupAction(`undo-entry:${lastEntryUndo?.id || "none"}`, undoDeletion, { button: event.currentTarget }));
   $installUpdate.addEventListener("click", () => void installUpdate());
   $loadMoreRecent.addEventListener("click", () => {
     recentWeekCount += 1;
     render().catch((error) => {
       setSyncStatus("error", formatError(error));
     });
+  });
+  const rerenderRecent = () => {
+    render().catch((error) => setSyncStatus("error", formatError(error)));
+  };
+  [$recentTextFilter, $recentProjectFilter, $recentTaskFilter, $recentReviewFilter].forEach((control) => {
+    control.addEventListener(control === $recentReviewFilter ? "change" : "input", rerenderRecent);
+  });
+  $jumpRecentDate.addEventListener("click", () => {
+    const date = new Date(`${$recentDate.value}T12:00:00`);
+    if (!$recentDate.value || Number.isNaN(date.getTime())) {
+      setSyncStatus("error", "Choose a valid date to show its week.");
+      return;
+    }
+    recentAnchorWeek = startOfLocalWeek(date);
+    recentWeekCount = 1;
+    expandedRecentGroups.clear();
+    rerenderRecent();
+  });
+  $currentRecentWeek.addEventListener("click", () => {
+    recentAnchorWeek = null;
+    recentWeekCount = 1;
+    $recentDate.value = "";
+    expandedRecentGroups.clear();
+    rerenderRecent();
   });
   $("#openAnalytics").addEventListener("click", () => platform.openExtensionPage("analytics/analytics.html").catch((error) => setSyncStatus("error", formatError(error))));
   $("#openCalendar").addEventListener("click", () => platform.openExtensionPage("calendar/calendar.html").catch((error) => setSyncStatus("error", formatError(error))));
@@ -803,6 +1060,11 @@ function bindEvents() {
     button: event.currentTarget,
     expectedRevision: editorSession?.revision
   }));
+  entryEditor.preview.confirm.addEventListener("click", (event) => runPopupAction(`confirm-entry-preview:${editorSession?.id || "none"}:${editorSession?.token || 0}`, confirmEditorPreview, {
+    button: event.currentTarget,
+    expectedRevision: editorSession?.revision
+  }));
+  entryEditor.preview.cancel.addEventListener("click", clearEditorPreview);
   entryEditor.actions.cancel.addEventListener("click", () => hideEdit());
   entryEditor.actions.delete.addEventListener("click", (event) => runPopupAction(`delete-entry:${editorSession?.id || "none"}:${editorSession?.token || 0}`, deleteEdit, {
     button: event.currentTarget,
@@ -865,6 +1127,9 @@ async function init() {
     });
   }
   await render();
+  usageCountdownTimer = setInterval(() => {
+    void renderChatGptUsageSummary(() => true);
+  }, 30_000);
   void runPageTask({
     page: "popup",
     phase: "chatgpt-usage-refresh",
@@ -881,6 +1146,8 @@ async function init() {
 
 window.addEventListener("pagehide", () => {
   stopElapsedTicker();
+  if (usageCountdownTimer) clearInterval(usageCountdownTimer);
+  usageCountdownTimer = null;
   if (unsubscribeEntryEvents) unsubscribeEntryEvents();
 });
 

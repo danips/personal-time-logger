@@ -42,6 +42,15 @@ function run(command, args, options = {}) {
   });
 }
 
+async function executeLocalSql(instance, command) {
+  const result = await run(wrangler, [
+    "d1", "execute", "DB", "--local", "--config", instance.configPath,
+    "--persist-to", instance.statePath, "--command", command, "--json"
+  ]);
+  assert.equal(result.code, 0, result.output);
+  return JSON.parse(result.output);
+}
+
 async function startWorker() {
   const directory = await mkdtemp(join(tmpdir(), "ptl-d1-integration-"));
   const configPath = join(directory, "wrangler.test.jsonc");
@@ -75,7 +84,7 @@ async function startWorker() {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`${baseUrl}/v1/health`, { headers: { Authorization: `Bearer ${token}` } });
-      if (response.status === 200) return { child, baseUrl, directory };
+      if (response.status === 200) return { child, baseUrl, directory, configPath, statePath };
     } catch {
       // Wrangler is still starting; the bounded readiness probe retries.
     }
@@ -87,14 +96,18 @@ async function startWorker() {
   throw new Error(`Local Worker did not become ready: ${output}`);
 }
 
-async function stopWorker() {
-  if (!worker) return;
-  if (worker.child.exitCode === null) {
-    const closed = new Promise((resolveStop) => worker.child.once("close", resolveStop));
-    worker.child.kill("SIGTERM");
+async function stopWorkerInstance(instance) {
+  if (!instance) return;
+  if (instance.child.exitCode === null) {
+    const closed = new Promise((resolveStop) => instance.child.once("close", resolveStop));
+    instance.child.kill("SIGTERM");
     await closed;
   }
-  await rm(worker.directory, { recursive: true, force: true });
+  await rm(instance.directory, { recursive: true, force: true });
+}
+
+async function stopWorker() {
+  await stopWorkerInstance(worker);
   worker = null;
 }
 
@@ -121,7 +134,60 @@ describe("local Cloudflare Worker + D1 API", { skip: !supported }, () => {
   after(stopWorker);
 
   it("matches the shared HTTP contract", async () => {
-    await assertHttpContract(worker.baseUrl, token);
+    const isolated = await startWorker();
+    try {
+      await assertHttpContract(isolated.baseUrl, token);
+    } finally {
+      await stopWorkerInstance(isolated);
+    }
+  });
+
+  it("enforces migrated metadata, version, and mutation-guard constraints", async () => {
+    const isolated = await startWorker();
+    try {
+      const metadata = await executeLocalSql(isolated, "SELECT id, schema_version, change_seq FROM app_meta");
+      assert.deepEqual(metadata[0].results, [{ id: 1, schema_version: 1, change_seq: 1 }]);
+
+      const entryId = `schema-check-${process.pid}`;
+      const insert = await executeLocalSql(isolated, `INSERT INTO time_entries
+        (id, project, task, description, start_at, end_at, duration_seconds, status,
+         created_at, updated_at, deleted_at, device_id, revision, multiply)
+        VALUES ('${entryId}', 'Project', 'Task', 'Description', '2026-08-30T09:00:00.000Z',
+          '2026-08-30T10:00:00.000Z', 3600, 'ok', '2026-08-30T09:00:00.000Z',
+          '2026-08-30T10:00:00.000Z', NULL, 'schema-check', 1, NULL)`);
+      assert.deepEqual(insert[0].results, []);
+      const defaultVersion = await executeLocalSql(isolated, `SELECT remote_version FROM time_entries WHERE id = '${entryId}'`);
+      assert.deepEqual(defaultVersion[0].results, [{ remote_version: 1 }]);
+      await executeLocalSql(isolated, "INSERT INTO config (key, value, updated_at) VALUES ('schema-check', 'value', '2026-08-30T09:00:00.000Z')");
+      const configVersion = await executeLocalSql(isolated, "SELECT remote_version FROM config WHERE key = 'schema-check'");
+      assert.deepEqual(configVersion[0].results, [{ remote_version: 1 }]);
+
+      const invalidVersion = await run(wrangler, [
+        "d1", "execute", "DB", "--local", "--config", isolated.configPath,
+        "--persist-to", isolated.statePath, "--command",
+        `UPDATE time_entries SET remote_version = 0 WHERE id = '${entryId}'`
+      ]);
+      assert.notEqual(invalidVersion.code, 0, invalidVersion.output);
+      assert.match(invalidVersion.output, /CHECK constraint failed|constraint/i);
+
+      const invalidMetadata = await run(wrangler, [
+        "d1", "execute", "DB", "--local", "--config", isolated.configPath,
+        "--persist-to", isolated.statePath, "--command",
+        "UPDATE app_meta SET schema_version = 2 WHERE id = 1"
+      ]);
+      assert.notEqual(invalidMetadata.code, 0, invalidMetadata.output);
+      assert.match(invalidMetadata.output, /CHECK constraint failed|constraint/i);
+
+      const invalidGuard = await run(wrangler, [
+        "d1", "execute", "DB", "--local", "--config", isolated.configPath,
+        "--persist-to", isolated.statePath, "--command",
+        "INSERT INTO mutation_guard (id, value) VALUES (1, NULL)"
+      ]);
+      assert.notEqual(invalidGuard.code, 0, invalidGuard.output);
+      assert.match(invalidGuard.output, /NOT NULL|constraint/i);
+    } finally {
+      await stopWorkerInstance(isolated);
+    }
   });
 
   it("supports authenticated health, atomic append/update/config, and snapshot reads", async () => {

@@ -45,6 +45,22 @@ describe("runAction", () => {
     assert.equal(isActionRunning("delete-entry"), false);
   });
 
+  it("runs error reporting and refresh before releasing the initiating control", async () => {
+    const button = { disabled: false };
+    const events = [];
+    const result = await runAction("save-error-behavior", async () => {
+      throw Object.assign(new Error("conflict"), { code: "STORAGE_CONFLICT" });
+    }, {
+      setBusy: (busy) => { button.disabled = busy; events.push(`busy:${busy}`); },
+      onError: (error) => events.push(`error:${error.code}`),
+      onFinally: () => events.push("refresh")
+    });
+
+    assert.equal(result, undefined);
+    assert.equal(button.disabled, false);
+    assert.deepEqual(events, ["busy:true", "error:STORAGE_CONFLICT", "refresh", "busy:false"]);
+  });
+
   it("passes the displayed revision through to a guarded action", async () => {
     let received;
     await runAction("stop-entry", ({ expectedRevision }) => {

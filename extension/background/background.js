@@ -9,10 +9,11 @@ import {
   UPDATE_CHECK_ALARM
 } from "../src/background-schedule.js";
 import { platform } from "../src/platform.js";
+import { ERROR_CODE } from "../src/error-codes.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { SETTING_KEY } from "../src/setting-keys.js";
-import { ERROR_CODE } from "../src/error-codes.js";
-import { updateActiveIcon } from "../src/icon.js";
+import { createToolbarIndicatorRefresher, updateActiveIcon } from "../src/icon.js";
+import { runStaleTimerReminders } from "../src/timer-reminders.js";
 import { onEntriesChanged } from "../src/events.js";
 import {
   SYNC_REQUEST_MESSAGE,
@@ -20,18 +21,51 @@ import {
   UPDATE_INSTALL_MESSAGE
 } from "../src/sync-request.js";
 import {
-  sendTempoWorklogs,
+  TEMPO_CANCEL_MESSAGE,
   TEMPO_UPLOAD_MESSAGE,
-  tempoXhrRequest
-} from "../src/tempo.js";
+  createTempoUploadHandler
+} from "../src/tempo-upload-handler.js";
 const UPDATE_CHECK_MINUTES = 24 * 60;
 
-async function refreshToolbarIndicator() {
-  const active = await getActiveEntries();
-  await updateActiveIcon(active.length > 0);
+// The browser smoke package uses this non-routable update URL. Keep the alarm
+// probe behind that marker so ordinary installations have no test control
+// surface or altered toolbar bookkeeping.
+const BROWSER_SMOKE_UPDATE_URL = "https://example.invalid/personal-time-logger/updates.json";
+const BROWSER_SMOKE_ARM_ALARM_MESSAGE = "browser_smoke_arm_alarm";
+const BROWSER_SMOKE_STATE_MESSAGE = "browser_smoke_alarm_state";
+let browserSmokeAlarmRuns = 0;
+let browserSmokeToolbarActive = null;
+let browserSmokeLastAlarmError = null;
+
+function browserSmokeEnabled() {
+  const api = globalThis.browser || globalThis.chrome;
+  return api?.runtime?.getManifest?.()?.browser_specific_settings?.gecko?.update_url
+    === BROWSER_SMOKE_UPDATE_URL;
 }
 
-onEntriesChanged(() => { void refreshToolbarIndicator(); });
+const refreshToolbarIndicator = createToolbarIndicatorRefresher({
+  readActiveEntries: getActiveEntries,
+  async updateIcon(active) {
+    const applied = await updateActiveIcon(active);
+    if (applied && browserSmokeEnabled()) browserSmokeToolbarActive = active;
+    return applied;
+  }
+});
+
+async function refreshToolbarIndicatorSafely() {
+  try {
+    await refreshToolbarIndicator();
+  } catch (error) {
+    await recordDiagnostic({
+      subsystem: "background",
+      phase: "toolbar-refresh",
+      error,
+      recovery: "The toolbar icon may be stale. Reopen the popup, then check Options diagnostics."
+    }).catch(() => {});
+  }
+}
+
+onEntriesChanged(() => { void refreshToolbarIndicatorSafely(); });
 
 /**
  * The alarm is a fixed heartbeat and the actual sync interval is a due time in
@@ -55,11 +89,30 @@ async function runBackgroundSync() {
       error,
       recovery: "Open Options, review diagnostics, then retry sync."
     }).catch(() => {});
+    if (browserSmokeEnabled()) browserSmokeLastAlarmError = {
+      code: error?.code || "",
+      message: error?.message || String(error)
+    };
   }
 
   // Set from the idle streak, so a quiet profile stretches its polling out and
   // snaps back to the configured interval as soon as anything changes.
   await setSetting(NEXT_DUE_KEY, Date.now() + await nextSyncDelayMinutes() * 60000);
+}
+
+async function runStaleTimerReminderCycle() {
+  const enabled = Boolean(await getSetting(SETTING_KEY.STALE_TIMER_REMINDER_ENABLED, false));
+  const notified = await getSetting(SETTING_KEY.STALE_TIMER_REMINDER_STATE, {});
+  const notifications = globalThis.browser?.notifications || globalThis.chrome?.notifications;
+  if (enabled && !notifications?.create) throw new Error("Browser notifications are unavailable");
+  const result = await runStaleTimerReminders({
+    enabled,
+    entries: await getActiveEntries(),
+    notified,
+    notify: (id, details) => notifications.create(id, details)
+  });
+  await setSetting(SETTING_KEY.STALE_TIMER_REMINDER_STATE, result.notified);
+  return result;
 }
 
 async function runRequestedSync(message) {
@@ -89,7 +142,7 @@ async function runRequestedSync(message) {
       // The existing heartbeat remains armed if its due time cannot be updated.
     }
     await scheduleHeartbeat();
-    await refreshToolbarIndicator().catch(() => {});
+    await refreshToolbarIndicatorSafely();
   }
 }
 
@@ -167,6 +220,18 @@ async function runAlarmLifecycle() {
     // This must be awaited so a failed due-time or sync operation cannot strand
     // future periodic work without attempting a conservative fallback alarm.
     await scheduleHeartbeat();
+    await refreshToolbarIndicatorSafely();
+    try {
+      await runStaleTimerReminderCycle();
+    } catch (error) {
+      await recordDiagnostic({
+        subsystem: "background",
+        phase: "stale_timer_reminder",
+        error,
+        recovery: "Open Options and check whether stale-timer reminders are enabled and supported."
+      }).catch(() => {});
+    }
+    if (browserSmokeEnabled()) browserSmokeAlarmRuns += 1;
   }
 }
 
@@ -203,7 +268,7 @@ async function handleInstalled({ reason }) {
     }).catch(() => {});
   } finally {
     await scheduleHeartbeat();
-    await refreshToolbarIndicator().catch(() => {});
+    await refreshToolbarIndicatorSafely();
   }
 }
 
@@ -211,52 +276,54 @@ platform.onInstalled((details) => {
   void handleInstalled(details);
 });
 
-const TEMPO_ERROR_CODES = new Set([
-  ERROR_CODE.TEMPO_API_ERROR,
-  ERROR_CODE.TEMPO_CONFIG_MISSING,
-  ERROR_CODE.TEMPO_NETWORK,
-  ERROR_CODE.TEMPO_PARTIAL,
-  ERROR_CODE.TEMPO_PERMISSION_MISSING
-]);
+const browserNotifications = globalThis.browser?.notifications || globalThis.chrome?.notifications;
+browserNotifications?.onClicked?.addListener((notificationId) => {
+  if (!String(notificationId).startsWith("personal-time-logger-stale-")) return;
+  void platform.openExtensionPage("popup/popup.html").catch(() => {});
+});
 
-async function uploadTempoWorklogs(message, sender) {
-  const calendarUrl = platform.getURL("calendar/calendar.html");
-  if (sender?.url !== calendarUrl || !Array.isArray(message.groups)) {
-    return { ok: false, error: { code: ERROR_CODE.TEMPO_PERMISSION_MISSING } };
-  }
-  try {
-    const token = await getSetting(SETTING_KEY.TEMPO_API_TOKEN, "");
-    const result = await sendTempoWorklogs(message.groups, {
-      token,
-      fetchImpl: tempoXhrRequest
-    });
-    return { ok: true, result };
-  } catch (error) {
-    const code = TEMPO_ERROR_CODES.has(error?.code)
-      ? error.code
-      : ERROR_CODE.TEMPO_NETWORK;
-    return {
-      ok: false,
-      error: {
-        code,
-        message: error?.message || "Tempo upload failed.",
-        acknowledgedWorklogs: error.acknowledgedWorklogs ?? 0,
-        requestCount: error.requestCount ?? 0,
-        currentRequestOutcome: error.currentRequestOutcome ?? "unknown"
-      }
-    };
-  }
-}
+const cancelledTempoUploads = new Set();
+const uploadTempoWorklogs = createTempoUploadHandler({
+  platform,
+  isCancelled: (operationId) => cancelledTempoUploads.has(operationId)
+});
 
 platform.onRuntimeMessage((message, sender) => {
+  if (browserSmokeEnabled() && message?.type === BROWSER_SMOKE_ARM_ALARM_MESSAGE) {
+    const alarms = globalThis.browser?.alarms || globalThis.chrome?.alarms;
+    if (!alarms?.create) return { ok: false, error: { code: "ALARM_UNAVAILABLE" } };
+    browserSmokeLastAlarmError = null;
+    return Promise.resolve(alarms.clear?.(SYNC_ALARM)).then(() => {
+      alarms.create(SYNC_ALARM, { when: Date.now() + 1000 });
+      return { ok: true };
+    });
+  }
+  if (browserSmokeEnabled() && message?.type === BROWSER_SMOKE_STATE_MESSAGE) {
+    return {
+      ok: true,
+      alarmRuns: browserSmokeAlarmRuns,
+      toolbarActive: browserSmokeToolbarActive,
+      lastAlarmError: browserSmokeLastAlarmError
+    };
+  }
   if (message?.type === SYNC_REQUEST_MESSAGE) return runRequestedSync(message);
   if (message?.type === UPDATE_CHECK_MESSAGE) return runUpdateCheck();
   if (message?.type === UPDATE_INSTALL_MESSAGE) return installAvailableUpdate();
+  if (message?.type === TEMPO_CANCEL_MESSAGE) {
+    if (sender?.url !== platform.getURL("calendar/calendar.html") || !String(message?.operationId ?? "").trim()) {
+      return { ok: false, error: { code: ERROR_CODE.TEMPO_PERMISSION_MISSING } };
+    }
+    cancelledTempoUploads.add(String(message.operationId).trim());
+    return { ok: true };
+  }
   if (message?.type !== TEMPO_UPLOAD_MESSAGE) return undefined;
-  return uploadTempoWorklogs(message, sender);
+  return uploadTempoWorklogs(message, sender).finally(() => {
+    const operationId = String(message?.operationId ?? "").trim();
+    if (operationId) cancelledTempoUploads.delete(operationId);
+  });
 });
 
 void scheduleHeartbeat();
 void scheduleUpdateCheck();
 void runUpdateCheck();
-void refreshToolbarIndicator();
+void refreshToolbarIndicatorSafely();

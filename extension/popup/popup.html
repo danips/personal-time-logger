@@ -18,11 +18,13 @@
               <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="8"></circle></svg>
             </span>
             <h1>Time Logger</h1>
-            <p id="syncStatus" class="status" data-status="pending">pending</p>
+            <p id="syncStatus" class="status" data-status="pending" role="status" aria-live="polite">pending</p>
           </div>
           <div class="status-row">
             <span id="dirtyBadge" class="dirty-badge hidden" title="Unsynced local changes">0 pending</span>
+            <button id="undoDeleteButton" class="undo-delete-button" type="button" hidden>Undo deletion</button>
           </div>
+          <p id="syncContext" class="sync-context" aria-live="polite">Loading sync freshness...</p>
         </div>
         <div class="header-actions">
           <button id="openAnalytics" class="icon-button" title="Analytics" aria-label="Analytics" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg></button>
@@ -122,6 +124,29 @@
       <section class="recent">
         <div class="recent-heading">
           <h2>Recent Entries</h2>
+        </div>
+        <div class="recent-controls" aria-label="History navigation and filters">
+          <div class="recent-date-controls">
+            <label>Jump to date <input id="recentDate" type="date"></label>
+            <button id="jumpRecentDate" type="button">Show week</button>
+            <button id="currentRecentWeek" type="button">This week</button>
+          </div>
+          <div class="recent-filter-grid">
+            <label>Text <input id="recentTextFilter" type="search" autocomplete="off" placeholder="Project, task, or description"></label>
+            <label>Project <input id="recentProjectFilter" list="recentProjects" autocomplete="off"></label>
+            <label>Task <input id="recentTaskFilter" list="recentTasks" autocomplete="off"></label>
+            <label>Review
+              <select id="recentReviewFilter">
+                <option value="all">All statuses</option>
+                <option value="ok">OK</option>
+                <option value="needs_review">Needs review</option>
+              </select>
+            </label>
+          </div>
+          <datalist id="recentProjects"></datalist>
+          <datalist id="recentTasks"></datalist>
+          <p id="recentRangeLabel" class="entry-meta"></p>
+          <p id="recentTotals" class="entry-meta"></p>
         </div>
         <div id="recentEntries" class="recent-list"></div>
         <button id="loadMoreRecent" class="load-more-button hidden" type="button">Load more</button>

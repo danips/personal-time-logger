@@ -5,17 +5,26 @@ import { describe, it } from "node:test";
 import {
   SHEET_HEADERS,
   canMergeEntries,
+  createCompletedEntry,
   decodeEntryEdit,
   decodePersistedEntry,
+  duplicateEntryPreview,
   entryToRow,
   hasEqualTimestampConflict,
   hasMultiplier,
   isRemoteNewer,
+  mergeEntryPreview,
   normalizeEntry,
   normalizeMultiplierText,
   rowToEntry
 } from "../extension/src/entries.js";
 import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
+import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
+import { seedEntry } from "./support/db-fixtures.js";
+
+installFakeIndexedDB();
+globalThis.BroadcastChannel = undefined;
+const db = await import("../extension/src/db.js");
 
 const contract = JSON.parse(readFileSync(new URL("./fixtures/entry-contract.json", import.meta.url), "utf8"));
 
@@ -172,6 +181,48 @@ describe("entry edit decoder", () => {
   });
 });
 
+describe("completed entry creation", () => {
+  it("creates a dirty completed entry with a multiplier without touching an active timer", async () => {
+    const active = normalizeEntry({
+      id: "still-active",
+      task: "Keep running",
+      start_at: "2026-07-27T08:00:00.000Z",
+      end_at: "",
+      duration_seconds: 0,
+      device_id: "other-device",
+      revision: 3
+    });
+    await seedEntry(db, active);
+    await db.setSetting("duration_multiplier", "1.5");
+    const created = await createCompletedEntry({
+      project: "Project",
+      task: "Backfill",
+      description: "Offline work",
+      start_at: "2026-07-27T09:00:00.000Z",
+      end_at: "2026-07-27T10:00:00.000Z",
+      multiply: true
+    });
+
+    assert.equal(created.end_at, "2026-07-27T10:00:00.000Z");
+    assert.equal(created.duration_seconds, 5400);
+    assert.equal(created.dirty, true);
+    assert.equal(created.revision, 1);
+    assert.equal(created.device_id, await db.getSetting("device_id"));
+    assert.deepEqual(await db.getEntry(active.id), active);
+    assert.deepEqual((await db.getActiveEntries()).map(({ id }) => id), [active.id]);
+  });
+
+  it("accepts a zero-duration completed entry and rejects missing or reversed times", async () => {
+    const created = await createCompletedEntry({
+      start_at: "2026-07-27T10:00:00.000Z",
+      end_at: "2026-07-27T10:00:00.000Z"
+    });
+    assert.equal(created.duration_seconds, 0);
+    await assert.rejects(() => createCompletedEntry({ start_at: "2026-07-27T10:00:00.000Z", end_at: "" }), { code: "ENTRY_INVALID" });
+    await assert.rejects(() => createCompletedEntry({ start_at: "2026-07-27T11:00:00.000Z", end_at: "2026-07-27T10:00:00.000Z" }), { code: "ENTRY_INVALID" });
+  });
+});
+
 describe("canMergeEntries", () => {
   it("accepts two completed entries with matching project, task and description", () => {
     assert.equal(canMergeEntries(fixture(), fixture({ id: "entry-2" })), true);
@@ -198,6 +249,58 @@ describe("canMergeEntries", () => {
   it("rejects missing operands", () => {
     assert.equal(canMergeEntries(fixture(), null), false);
     assert.equal(canMergeEntries(null, fixture()), false);
+  });
+});
+
+describe("merge and duplicate previews", () => {
+  it("shows merge compaction and retained target policy without mutating entries", () => {
+    const target = fixture({ multiply: "2", status: "needs_review" });
+    const source = fixture({
+      id: "preview-source",
+      start_at: "2026-08-08T12:00:00.000Z",
+      end_at: "2026-08-08T13:00:00.000Z",
+      duration_seconds: 3600,
+      multiply: "3",
+      status: "ok"
+    });
+    const preview = mergeEntryPreview(target, source);
+
+    assert.deepEqual({
+      targetActualSeconds: preview.targetActualSeconds,
+      sourceActualSeconds: preview.sourceActualSeconds,
+      actualSeconds: preview.actualSeconds,
+      effectiveSeconds: preview.effectiveSeconds,
+      compactedGapSeconds: preview.compactedGapSeconds,
+      targetMultiply: preview.targetMultiply,
+      targetStatus: preview.targetStatus
+    }, {
+      targetActualSeconds: 3600,
+      sourceActualSeconds: 3600,
+      actualSeconds: 7200,
+      effectiveSeconds: 14400,
+      compactedGapSeconds: 7200,
+      targetMultiply: "2.000",
+      targetStatus: "needs_review"
+    });
+    assert.equal(target.deleted_at, "");
+    assert.equal(source.deleted_at, "");
+  });
+
+  it("shows duplicate overlap, effective duration, multiplier, and status", () => {
+    const preview = duplicateEntryPreview(fixture({ multiply: "1.5", status: "needs_review", duration_seconds: 5400 }));
+    assert.deepEqual({
+      actualSeconds: preview.actualSeconds,
+      effectiveSeconds: preview.effectiveSeconds,
+      overlapSeconds: preview.overlapSeconds,
+      multiply: preview.multiply,
+      status: preview.status
+    }, {
+      actualSeconds: 3600,
+      effectiveSeconds: 5400,
+      overlapSeconds: 3600,
+      multiply: "1.500",
+      status: "needs_review"
+    });
   });
 });
 

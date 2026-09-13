@@ -40,10 +40,14 @@ of assigning the whole entry to either week. Running entries are excluded becaus
 Tempo requires a fixed positive duration.
 
 Choosing an individual-day send reveals header checkboxes that narrow the send
-to chosen local civil dates. A worklog is included when the local date of its
-clipped allocation start is selected, so an entry is never split by the
-selection: it belongs wholly to the day the week allocation starts on, which is
-the same date Tempo receives.
+to chosen local civil dates. After clipping to the displayed week, each entry is
+split across the local civil days it intersects. Its exact effective seconds are
+rounded once per entry: each day is floored, remaining seconds go to descending
+fractional remainders with local-date order as the tie-breaker, and only then is
+the selected-day filter applied. This keeps a selected day identical whether it
+is sent alone or as part of the full week, including on 23-hour, 24-hour, and
+25-hour civil days. Zero-second allocations are omitted. A worklog's date is
+the local date of its daily allocation.
 
 ## Second-audit decisions
 

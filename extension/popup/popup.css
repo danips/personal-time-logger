@@ -57,6 +57,23 @@
   margin-left: 41px;
 }
 
+.sync-context {
+  max-width: 34rem;
+  margin: 7px 0 0 41px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sync-context[data-state="needs-review"] {
+  color: var(--warning);
+  font-weight: 650;
+}
+
+.sync-context[data-state="locally-saved"] {
+  color: var(--accent-strong);
+}
+
 button:active:not(:disabled) {
   transform: translateY(1px);
 }
@@ -195,6 +212,15 @@ h2 {
   margin-top: 3px;
 }
 
+.undo-delete-button {
+  min-height: 27px;
+  padding: 3px 9px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
 .status {
   color: var(--muted);
   font-size: 12px;
@@ -238,6 +264,54 @@ h2 {
   border-radius: 10px;
   background: var(--warning-soft);
   color: var(--warning);
+}
+
+.warning > p {
+  margin: 4px 0 8px;
+}
+
+.active-warning-list {
+  display: grid;
+  gap: 7px;
+}
+
+.active-warning-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
+}
+
+.active-warning-details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.active-warning-details strong,
+.active-warning-details span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-warning-details span {
+  color: color-mix(in srgb, var(--warning) 76%, var(--text));
+  font-size: 11px;
+}
+
+.active-warning-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.active-warning-actions button {
+  min-height: 27px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .update-notice {
@@ -684,6 +758,60 @@ textarea {
 
 .recent-heading h2 {
   margin-bottom: 0;
+}
+
+.recent-controls {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 10px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+}
+
+.recent-date-controls,
+.recent-filter-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.recent-date-controls {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+}
+
+.recent-filter-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recent-controls label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.recent-controls input,
+.recent-controls select {
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.recent-controls button {
+  min-height: 30px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.recent-controls p {
+  margin: 0;
 }
 
 .recent-list {

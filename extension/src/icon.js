@@ -12,6 +12,36 @@ export async function setActiveIcon(active) {
 }
 
 /**
+ * Coalesces indicator reads while ensuring a result observed before a newer
+ * request cannot be applied after that request has arrived.
+ */
+export function createToolbarIndicatorRefresher({ readActiveEntries, updateIcon = updateActiveIcon }) {
+  if (typeof readActiveEntries !== "function") throw new TypeError("An active-entry reader is required");
+  let refreshPromise = null;
+  let refreshRequested = false;
+
+  async function drain() {
+    do {
+      refreshRequested = false;
+      const activeEntries = await readActiveEntries();
+      if (refreshRequested) continue;
+      await updateIcon(activeEntries.length > 0);
+    } while (refreshRequested);
+  }
+
+  return function refresh() {
+    refreshRequested = true;
+    if (!refreshPromise) {
+      refreshPromise = drain().finally(() => {
+        refreshPromise = null;
+        if (refreshRequested) void refresh();
+      });
+    }
+    return refreshPromise;
+  };
+}
+
+/**
  * Updates the toolbar icon without allowing a resource or browser API failure
  * to escape the popup render path. Repeated failures are recorded at most once
  * per minute until an icon update succeeds.

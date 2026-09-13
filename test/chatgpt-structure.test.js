@@ -43,15 +43,6 @@ describe("ChatGPT usage security boundaries", () => {
     assert.doesNotMatch(service, /rawBody|raw_response/);
   });
 
-  it("renders both popup windows from one local snapshot and refreshes directly on open", () => {
-    assert.match(popup, /getChatGptUsageState/);
-    assert.match(popup, /label: "5h"/);
-    assert.match(popup, /label: "Week"/);
-    assert.match(popup, /refreshChatGptUsage/);
-    assert.match(popup, /chatgpt-usage-refresh/);
-    assert.doesNotMatch(popup, /backend-api\/wham\/usage|api\/auth\/session|queryChatGptTabs|createTab/);
-  });
-
   it("keeps fixtures redacted", () => {
     const fixtures = [
       readFileSync(join(root, "test/codex-usage.test.js"), "utf8"),

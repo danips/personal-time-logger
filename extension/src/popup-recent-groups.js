@@ -25,6 +25,24 @@ export function compareRecentEntries(left, right) {
   return byStart || String(right.id || "").localeCompare(String(left.id || ""));
 }
 
+export function filterRecentEntries(entries, { text = "", project = "", task = "", status = "all" } = {}) {
+  const search = String(text).trim().toLocaleLowerCase();
+  const projectSearch = String(project).trim().toLocaleLowerCase();
+  const taskSearch = String(task).trim().toLocaleLowerCase();
+  return entries.filter((entry) => {
+    const values = [entry.project, entry.task, entry.description].map((value) => String(value || "").toLocaleLowerCase());
+    return (!search || values.some((value) => value.includes(search)))
+      && (!projectSearch || values[0].includes(projectSearch))
+      && (!taskSearch || values[1].includes(taskSearch))
+      && (status === "all" || entry.status === status);
+  });
+}
+
+export function recentFieldValues(entries, field) {
+  return [...new Set(entries.map((entry) => String(entry[field] || "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function weekInfo(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return { key: "unknown", label: "Unknown week", start: null, totalSeconds: 0, days: [], dayMap: new Map() };
@@ -78,4 +96,9 @@ export function groupRecentEntries(entries, { start, end }) {
     }
   }
   return weeks.sort((left, right) => right.start.getTime() - left.start.getTime());
+}
+
+export function recentTotalSeconds(entries, range) {
+  return groupRecentEntries(entries, range)
+    .reduce((total, week) => total + week.totalSeconds, 0);
 }

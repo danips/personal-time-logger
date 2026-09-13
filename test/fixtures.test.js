@@ -22,7 +22,7 @@ before(async () => {
 });
 
 describe("migration fixtures", () => {
-  it("loads a version-2 IndexedDB snapshot without losing active entries or tombstones", async () => {
+  it("imports a version-2 IndexedDB fixture without losing active entries or tombstones", async () => {
     const snapshot = await readFixture("indexeddb-v2.json");
     assert.equal(snapshot.database, "timelogger_db");
     assert.equal(snapshot.version, 2);

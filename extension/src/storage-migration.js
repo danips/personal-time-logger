@@ -110,6 +110,45 @@ function mapConfig(snapshot) {
   return new Map(canonicalConfig(snapshot.config).map(([key, value, updatedAt]) => [key, { value, updated_at: updatedAt }]));
 }
 
+/** Return a non-mutating, provider-neutral dataset preview for Options. */
+export function migrationPreview(source, target) {
+  const sourceEntries = mapEntries(source);
+  const targetEntries = mapEntries(target);
+  const sourceConfig = mapConfig(source);
+  const targetConfig = mapConfig(target);
+  let sourceOnlyEntryCount = 0;
+  let targetOnlyEntryCount = 0;
+  let changedEntryCount = 0;
+  for (const [id, entry] of sourceEntries) {
+    if (!targetEntries.has(id)) sourceOnlyEntryCount += 1;
+    else if (!sameEntry(entry, targetEntries.get(id))) changedEntryCount += 1;
+  }
+  for (const id of targetEntries.keys()) {
+    if (!sourceEntries.has(id)) targetOnlyEntryCount += 1;
+  }
+  let configDisagreementCount = 0;
+  for (const [key, value] of sourceConfig) {
+    const targetValue = targetConfig.get(key);
+    if (!targetValue || targetValue.value !== value.value || targetValue.updated_at !== value.updated_at) {
+      configDisagreementCount += 1;
+    }
+  }
+  for (const key of targetConfig.keys()) {
+    if (!sourceConfig.has(key)) configDisagreementCount += 1;
+  }
+  return {
+    sourceEntryCount: sourceEntries.size,
+    targetEntryCount: targetEntries.size,
+    sourceConfigCount: sourceConfig.size,
+    targetConfigCount: targetConfig.size,
+    sourceOnlyEntryCount,
+    targetOnlyEntryCount,
+    changedEntryCount,
+    configDisagreementCount,
+    disagreementCount: sourceOnlyEntryCount + targetOnlyEntryCount + changedEntryCount + configDisagreementCount
+  };
+}
+
 function compareTarget(source, target, state = {}) {
   const ownedEntries = state.owned_entries || {};
   const sourceEntries = mapEntries(source);
@@ -410,7 +449,8 @@ export async function activateProviderFromLocal(targetProviderId, { onProgress }
         phase: "seeding",
         source_digest: sourceDigest,
         total_entries: sourceSnapshot.entries.length,
-        total_config: canonicalConfig(sourceSnapshot.config).length
+        total_config: canonicalConfig(sourceSnapshot.config).length,
+        preview: migrationPreview(sourceSnapshot, targetSnapshot)
       });
       await saveState(state);
       onProgress?.(state);
@@ -479,7 +519,8 @@ export async function activateProviderFromRemote(targetProviderId, { onProgress 
         source_digest: await migrationDigest(targetSnapshot),
         total_entries: targetSnapshot.entries.length,
         total_config: canonicalConfig(targetSnapshot.config).length,
-        completed_entries: targetSnapshot.entries.length
+        completed_entries: targetSnapshot.entries.length,
+        preview: migrationPreview(localSnapshot, targetSnapshot)
       });
       await saveState(state);
       onProgress?.(state);
@@ -556,6 +597,9 @@ export async function migrateStorage(targetProviderId, { interactiveAuth = true,
         await lease.assert();
         let targetSnapshot = await targetProvider.readSnapshot(options);
         validateSnapshot(targetSnapshot, "target");
+        state = progressState(state, { preview: migrationPreview(sourceSnapshot, targetSnapshot) });
+        await saveState(state);
+        onProgress?.(state);
         await seedTarget(sourceSnapshot, targetProvider, targetSnapshot, state, { lease, options });
         state = progressState(state, { phase: "verifying" });
         await saveState(state);

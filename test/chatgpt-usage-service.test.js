@@ -9,6 +9,7 @@ import {
   refreshChatGptUsage,
   requestCurrentChatGptUsage
 } from "../extension/src/chatgpt-usage-service.js";
+import { SETTING_KEY } from "../extension/src/setting-keys.js";
 
 const NOW = 1_800_000_000_000;
 
@@ -39,6 +40,12 @@ function usageResponse() {
     },
     credits: { has_credits: false, unlimited: false, overage_limit_reached: false, balance: "0" }
   };
+}
+
+function usageResponseWithPrimary(usedPercent) {
+  const response = usageResponse();
+  response.rate_limit.primary_window.used_percent = usedPercent;
+  return response;
 }
 
 function jsonResponse(body, status = 200, headers = {}) {
@@ -109,6 +116,43 @@ describe("single-session ChatGPT usage", () => {
     assert.equal(values.get(CHATGPT_USAGE_STATE_KEY).last_error, null);
   });
 
+  it("keeps a newer refresh response when two contexts finish out of order", async () => {
+    const first = await import(`../extension/src/chatgpt-usage-service.js?context=first-${Date.now()}`);
+    const second = await import(`../extension/src/chatgpt-usage-service.js?context=second-${Date.now()}`);
+    const values = new Map([[CHATGPT_SESSION_TOKEN_CONSENT_KEY, true]]);
+    const calls = [];
+    const persist = async (keys, mutator) => {
+      const settings = new Map(keys.filter((key) => values.has(key)).map((key) => [key, values.get(key)]));
+      const result = mutator(settings);
+      for (const key of keys) {
+        if (settings.has(key)) values.set(key, settings.get(key));
+        else values.delete(key);
+      }
+      return result;
+    };
+    const context = (usedPercent, delay) => ({
+      now: () => NOW,
+      platform: { async hasOptionalHostPermission() { return true; } },
+      async fetch(url) {
+        calls.push(url);
+        if (url.endsWith("/api/auth/session")) return jsonResponse({ accessToken: accessToken() });
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+        return jsonResponse(usageResponseWithPrimary(usedPercent));
+      },
+      getSetting: async (key, fallback) => values.has(key) ? values.get(key) : fallback,
+      mutateSettings: persist
+    });
+
+    const older = first.refreshChatGptUsage({ ...context(10, 30), ignoreCooldown: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const newer = second.refreshChatGptUsage({ ...context(20, 0), ignoreCooldown: true });
+    await Promise.all([older, newer]);
+    const state = values.get(CHATGPT_USAGE_STATE_KEY);
+    assert.equal(state.snapshot.primary_window.used_percent, 20);
+    assert.equal(values.get(SETTING_KEY.CHATGPT_USAGE_GENERATION), 2);
+    assert.equal(calls.length, 4);
+  });
+
   it("requires permission and explicit consent", async () => {
     const denied = harness();
     denied.overrides.platform.hasOptionalHostPermission = async () => false;
@@ -133,6 +177,23 @@ describe("single-session ChatGPT usage", () => {
     assert.equal(state.last_error.code, "workspace_deactivated");
     assert.equal(JSON.stringify(state).includes("private_detail"), false);
     assert.equal(JSON.stringify(state).includes("deactivated_workspace"), false);
+  });
+
+  it("keeps the last successful snapshot when a later request fails", async () => {
+    const { values, overrides } = harness();
+    values.set(CHATGPT_USAGE_STATE_KEY, {
+      snapshot: { account: { plan_type: "plus" }, collected_at: new Date(NOW).toISOString() },
+      last_attempt_at: 0,
+      last_error: null
+    });
+    overrides.fetch = async (url) => url.endsWith("/api/auth/session")
+      ? jsonResponse({ accessToken: accessToken() })
+      : jsonResponse({}, 503);
+
+    await assert.rejects(() => refreshChatGptUsage({ ...overrides, ignoreCooldown: true }), { code: "service_error" });
+    const state = await getChatGptUsageState(overrides);
+    assert.equal(state.snapshot.account.plan_type, "plus");
+    assert.equal(state.last_error.code, "service_error");
   });
 
   it("clears the current snapshot and consent", async () => {

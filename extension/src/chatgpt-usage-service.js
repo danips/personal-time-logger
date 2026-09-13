@@ -199,7 +199,8 @@ export async function refreshChatGptUsage(overrides = {}) {
       const state = normalizeChatGptUsageState(settings.get(CHATGPT_USAGE_STATE_KEY));
       const cooldownMs = Math.max(REFRESH_COOLDOWN_MS, Number(state.last_error?.retry_after_seconds || 0) * 1000);
       if (!overrides.ignoreCooldown && attemptedAt - state.last_attempt_at < cooldownMs) return { skipped: true, state };
-      generation = Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0);
+      generation = Number(settings.get(SETTING_KEY.CHATGPT_USAGE_GENERATION) || 0) + 1;
+      settings.set(SETTING_KEY.CHATGPT_USAGE_GENERATION, generation);
       settings.set(CHATGPT_USAGE_STATE_KEY, { ...state, last_attempt_at: attemptedAt });
       return { skipped: false, state };
     });

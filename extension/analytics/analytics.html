@@ -42,13 +42,28 @@
             <button id="applyCustom" type="button">Apply</button>
           </div>
         </div>
+        <div class="report-actions" aria-label="Report actions">
+          <button id="exportAnalytics" type="button">Export CSV</button>
+          <button id="printAnalytics" type="button">Print</button>
+        </div>
       </header>
 
       <section class="range-strip" aria-label="Report ranges">
         <p><span>Current</span> <strong id="primaryRange"></strong></p>
         <p><span>Compared with</span> <strong id="comparisonRange"></strong></p>
+        <p><span>Filters</span> <strong id="analyticsFilterSummary">All projects · All tasks</strong></p>
       </section>
       <p id="periodError" class="period-error" role="alert" hidden></p>
+
+      <section class="analytics-filters" aria-labelledby="analyticsFiltersHeading">
+        <div><p class="eyebrow">Scope</p><h2 id="analyticsFiltersHeading">Filter report</h2></div>
+        <label>Project
+          <select id="analyticsProjectFilter" aria-label="Filter analytics by project"><option value="">All projects</option></select>
+        </label>
+        <label>Task
+          <select id="analyticsTaskFilter" aria-label="Filter analytics by task"><option value="">All tasks</option></select>
+        </label>
+      </section>
 
       <section aria-labelledby="summaryHeading">
         <div class="section-heading"><div><p class="eyebrow">Overview</p><h2 id="summaryHeading">Summary</h2></div></div>

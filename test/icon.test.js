@@ -17,7 +17,7 @@ globalThis.browser = {
 };
 
 const diagnostics = await import("../extension/src/diagnostics.js");
-const { setActiveIcon, updateActiveIcon } = await import("../extension/src/icon.js");
+const { createToolbarIndicatorRefresher, setActiveIcon, updateActiveIcon } = await import("../extension/src/icon.js");
 
 describe("toolbar icon updates", () => {
   it("keeps the active asset geometry aligned with the packaged base icon", () => {
@@ -74,5 +74,33 @@ describe("toolbar icon updates", () => {
       async reportDiagnostic() { reportsAfterRecovery += 1; }
     }), false);
     assert.equal(reportsAfterRecovery, 1);
+  });
+
+  it("coalesces indicator reads and discards an older result after a newer request", async () => {
+    const resolvers = [];
+    const updates = [];
+    const refresh = createToolbarIndicatorRefresher({
+      readActiveEntries: () => new Promise((resolve) => resolvers.push(resolve)),
+      updateIcon: async (active) => { updates.push(active); }
+    });
+
+    const first = refresh();
+    const second = refresh();
+    assert.strictEqual(first, second);
+    resolvers.shift()([]);
+    await Promise.resolve();
+    assert.deepEqual(updates, []);
+    resolvers.shift()([{ id: "new-active" }]);
+    await first;
+    assert.deepEqual(updates, [true]);
+  });
+
+  it("keeps a read failure observable to the caller without starting an unhandled refresh", async () => {
+    const failure = new Error("active-entry read unavailable");
+    const refresh = createToolbarIndicatorRefresher({
+      readActiveEntries: async () => { throw failure; }
+    });
+
+    await assert.rejects(refresh(), failure);
   });
 });

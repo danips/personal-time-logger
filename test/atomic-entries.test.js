@@ -62,6 +62,82 @@ describe("atomic entry mutations", () => {
     assert.deepEqual(await db.getEntry(original.id), original);
   });
 
+  it("undoes one deletion with its exact tombstone and rejects a second undo", async () => {
+    const original = fixture({ id: "undo-once", dirty: true });
+    await seedEntry(db, original);
+    const deleted = await entries.softDeleteEntry(original.id, { expectedRevision: original.revision });
+    const restored = await entries.undoDeletedEntry(original.id, entries.deletionUndoToken(deleted));
+
+    assert.equal(restored.deleted_at, "");
+    assert.equal(restored.revision, deleted.revision + 1);
+    assert.equal(restored.dirty, true);
+    await assert.rejects(
+      () => entries.undoDeletedEntry(original.id, entries.deletionUndoToken(deleted)),
+      { code: "UNDO_UNAVAILABLE" }
+    );
+  });
+
+  it("does not resurrect a newer tombstone or a purged row", async () => {
+    const newer = fixture({ id: "undo-newer-tombstone" });
+    await seedEntry(db, newer);
+    const deleted = await entries.softDeleteEntry(newer.id, { expectedRevision: newer.revision });
+    const replacement = await entries.updateEntry(newer.id, {
+      deleted_at: "2026-08-08T12:00:00.000Z"
+    }, { expectedRevision: deleted.revision });
+    assert.notEqual(replacement.deleted_at, deleted.deleted_at);
+    await assert.rejects(
+      () => entries.undoDeletedEntry(newer.id, entries.deletionUndoToken(deleted)),
+      { code: "UNDO_UNAVAILABLE" }
+    );
+
+    const purged = fixture({ id: "undo-purged" });
+    await seedEntry(db, purged);
+    const purgedToken = entries.deletionUndoToken(await entries.softDeleteEntry(purged.id));
+    await db.mutateEntries([purged.id], (stored) => stored.delete(purged.id));
+    await assert.rejects(() => entries.undoDeletedEntry(purged.id, purgedToken), { code: "UNDO_UNAVAILABLE" });
+  });
+
+  it("undoes one completed edit and refuses after another change", async () => {
+    const original = fixture({ id: "undo-edit" });
+    await seedEntry(db, original);
+    const edited = await entries.updateEntry(original.id, {
+      task: "Corrected task",
+      description: "Corrected description"
+    }, { expectedRevision: original.revision });
+    const token = entries.entryUpdateUndoToken(original, edited);
+    const restored = await entries.undoEntryUpdate(token);
+
+    assert.equal(restored.task, original.task);
+    assert.equal(restored.description, original.description);
+    assert.equal(restored.revision, edited.revision + 1);
+    assert.equal(restored.dirty, true);
+
+    const nextEdit = await entries.updateEntry(original.id, { task: "Another correction" }, {
+      expectedRevision: restored.revision
+    });
+    assert.equal(nextEdit.task, "Another correction");
+    await assert.rejects(() => entries.undoEntryUpdate(token), { code: "UNDO_UNAVAILABLE" });
+  });
+
+  it("can undo a deletion after its remote acknowledgement", async () => {
+    const original = fixture({ id: "undo-acknowledged" });
+    await seedEntry(db, original);
+    const deleted = await entries.softDeleteEntry(original.id);
+    await db.mutateEntries([original.id], (stored) => {
+      stored.set(original.id, { ...stored.get(original.id), dirty: false, last_sync_at: deleted.updated_at, sync_error: "" });
+    });
+
+    const restored = await entries.undoDeletedEntry(original.id, entries.deletionUndoToken({
+      ...deleted,
+      dirty: false,
+      last_sync_at: deleted.updated_at,
+      sync_error: ""
+    }));
+    assert.equal(restored.deleted_at, "");
+    assert.equal(restored.dirty, true);
+    assert.equal(restored.revision, deleted.revision + 1);
+  });
+
   it("merges the target and source in one committed mutation", async () => {
     await seedEntries(db, [
       fixture({ id: "merge-target", revision: 3 }),
@@ -83,6 +159,27 @@ describe("atomic entry mutations", () => {
     assert.equal(deleted.revision, 8);
     assert.ok(deleted.deleted_at);
     assert.equal((await db.getEntry("merge-source")).deleted_at, deleted.deleted_at);
+  });
+
+  it("rejects a stale merge confirmation without changing either entry", async () => {
+    const target = fixture({ id: "preview-target" });
+    const source = fixture({ id: "preview-source", start_at: "2026-08-08T11:00:00.000Z", end_at: "2026-08-08T12:00:00.000Z" });
+    await seedEntries(db, [target, source]);
+    const preview = entries.mergeEntryPreview(target, source);
+    await entries.updateEntry(target.id, { description: "Changed before confirmation" }, { expectedRevision: target.revision });
+
+    await assert.rejects(
+      () => entries.mergeEntries(target.id, source.id, {
+        expectedRevisions: {
+          [target.id]: target.revision,
+          [source.id]: source.revision
+        }
+      }),
+      (error) => error.code === "STORAGE_CONFLICT" && error.reason === "revision_mismatch"
+    );
+    assert.equal((await db.getEntry(target.id)).description, "Changed before confirmation");
+    assert.equal((await db.getEntry(source.id)).deleted_at, "");
+    assert.equal(preview.sourceId, source.id);
   });
 
   it("appends actual time to the selected target and retains its multiplier", async () => {

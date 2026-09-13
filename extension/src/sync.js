@@ -25,6 +25,7 @@ const LEGACY_REMOTE_MODIFIED_KEY = SETTING_KEY.REMOTE_MODIFIED_TIME;
 const MYSQL_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.MYSQL_REMOTE_CHANGE_TOKEN;
 const CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN_KEY = SETTING_KEY.CLOUDFLARE_D1_REMOTE_CHANGE_TOKEN;
 const IDLE_STREAK_KEY = SETTING_KEY.SYNC_IDLE_STREAK;
+const SYNC_RECOVERY_REQUIRED = "Remote recovery requires review before upload.";
 // Multipliers applied to the configured interval as idle cycles accumulate.
 const IDLE_BACKOFF_STEPS = [1, 2, 5, 10];
 const MAX_IDLE_INTERVAL_MINUTES = 15;
@@ -93,14 +94,17 @@ function syncRecovery(error) {
   return "Retry the sync. Open Options diagnostics if it continues.";
 }
 
-async function recordSyncDiagnostic(phase, error, entryCount = 0, retryAt = 0) {
+async function recordSyncDiagnostic(phase, error, entryCount = 0, retryAt = 0, context = {}) {
   try {
+    const lastSuccessAt = String(await getSetting(SETTING_KEY.SYNC_LAST_SUCCESS_AT, "") || "");
     await recordDiagnostic({
       subsystem: "sync",
       phase,
       error,
       entryCount,
       retryAt,
+      ...context,
+      freshness: context.freshness || (lastSuccessAt ? `last success ${lastSuccessAt}` : "not yet"),
       recovery: syncRecovery(error)
     });
   } catch {
@@ -210,6 +214,50 @@ async function acknowledgePushedEntries(local, entries, pushedIds, { lease } = {
     if (acknowledgement.entry) local.set(acknowledgement.entry.id, acknowledgement.entry);
     if (acknowledgement.applied) pushedIds.add(entry.id);
   }
+}
+
+/**
+ * Prevents a previously synchronized or backup-restored entry from silently
+ * becoming a new remote record when its deletion evidence is absent. A dirty
+ * live edit also cannot overwrite a retained remote tombstone without an
+ * explicit reconciliation choice. Genuinely new local entries have no prior
+ * sync marker and remain eligible for the append path.
+ */
+export async function protectDeletionRecovery(local, remoteEntries, pendingBackupIds, forcedIds, { lease } = {}) {
+  const remoteById = new Map(remoteEntries.map((entry) => [entry.id, entry]));
+  const blockedIds = new Set();
+  const candidates = [];
+  for (const entry of local.values()) {
+    if (forcedIds.has(entry.id)) continue;
+    const remote = remoteById.get(entry.id);
+    const missingPreviouslySynced = !remote && (Boolean(entry.last_sync_at) || pendingBackupIds.has(entry.id));
+    const dirtyAgainstTombstone = remote?.deleted_at && !entry.deleted_at && entry.dirty;
+    if (!missingPreviouslySynced && !dirtyAgainstTombstone) continue;
+    blockedIds.add(entry.id);
+    if (entry.sync_error !== SYNC_RECOVERY_REQUIRED) candidates.push(entry);
+  }
+
+  if (!candidates.length) return blockedIds;
+  await lease?.assert();
+  const changed = await mutateEntries(candidates.map((entry) => entry.id), (entries) => {
+    const applied = [];
+    for (const expected of candidates) {
+      const current = entries.get(expected.id);
+      if (!current || entryFingerprint(current) !== entryFingerprint(expected)) continue;
+      entries.set(expected.id, normalizeEntry({ ...current, sync_error: SYNC_RECOVERY_REQUIRED }));
+      applied.push(expected);
+    }
+    return applied;
+  });
+  applyEntries(local, changed);
+  await recordDiagnostic({
+    subsystem: "sync",
+    phase: "remote_recovery",
+    code: "REMOTE_RECOVERY_REQUIRED",
+    entryCount: changed.length,
+    recovery: "Open Reconcile, review the missing or deleted entry, then choose a side before syncing again."
+  });
+  return blockedIds;
 }
 
 /**
@@ -441,68 +489,19 @@ export async function purgeDeletedEntries(local, remoteEntries, entryRefs, dupli
   provider,
   pushedIds = new Set()
 } = {}) {
-  const remoteProvider = providerOrDefault(provider);
-  const observedIds = new Set(remoteEntries.map((entry) => entry.id));
-  const expiredRows = remoteEntries
-    .filter((entry) => !blockedIds.has(entry.id) && isExpiredDeletion(entry.deleted_at) && entryRefs.has(entry.id))
-    .map((entry) => ({
-      id: entry.id,
-      expectedRef: entryRefs.get(entry.id)
-    }));
-  for (const duplicate of duplicates) {
-    if (!duplicate?.entry || blockedIds.has(duplicate.id) || !isExpiredDeletion(duplicate.entry.deleted_at)) continue;
-    for (const ref of duplicate.extraRefs || []) expiredRows.push({ id: duplicate.id, expectedRef: ref });
-  }
-
-  // The provider owns ordering and optimistic-concurrency details for deletion.
-  let failedIds = new Set();
-  const deletedRemoteIds = new Set();
-  if (expiredRows.length) {
-    try {
-      await lease?.assert();
-      await remoteProvider.deleteEntries(expiredRows, { interactiveAuth });
-      await lease?.assert();
-      for (const { id } of expiredRows) {
-        entryRefs.delete(id);
-        deletedRemoteIds.add(id);
-      }
-    } catch (error) {
-      // Keep the local copies so the rows are retried on the next sync.
-      failedIds = new Set(expiredRows.map((row) => row.id));
-      await recordDiagnostic({
-        subsystem: "sync",
-        phase: "purge",
-        error,
-        entryCount: failedIds.size,
-        recovery: "Expired deletions will retry during the next sync."
-      });
-    }
-  }
-
-  const candidates = [...local.values()].filter((entry) => (
-    isExpiredDeletion(entry.deleted_at) && !blockedIds.has(entry.id) && !failedIds.has(entry.id)
-      && !pushedIds.has(entry.id)
-      && (deletedRemoteIds.has(entry.id) || !observedIds.has(entry.id))
-  ));
-  if (!candidates.length) return 0;
-  const expectedById = new Map(candidates.map((entry) => [entry.id, entryFingerprint(entry)]));
-  await lease?.assert();
-  const deletedIds = await mutateEntries(candidates.map((entry) => entry.id), (entries) => {
-    const applied = [];
-    for (const [id, expectedFingerprint] of expectedById) {
-      const current = entries.get(id);
-      if (!current) {
-        entries.delete(id);
-        continue;
-      }
-      if (entryFingerprint(current) !== expectedFingerprint || !isExpiredDeletion(current.deleted_at)) continue;
-      entries.delete(id);
-      applied.push(id);
-    }
-    return applied;
-  });
-  for (const id of deletedIds) local.delete(id);
-  return deletedIds.length;
+  // Retain the existing tombstone rows. Their canonical shape is already
+  // understood by every provider and is the only deletion evidence available
+  // to devices that reconnect after a long outage. `entryRefs`, `duplicates`,
+  // and `pushedIds` remain parameters for the provider-neutral call boundary.
+  void entryRefs;
+  void duplicates;
+  void interactiveAuth;
+  void lease;
+  void provider;
+  void pushedIds;
+  void blockedIds;
+  void remoteEntries;
+  return 0;
 }
 
 /**
@@ -578,7 +577,7 @@ async function recoverMissingRemote(error, local, provider, { interactiveAuth, l
   }) || null;
 }
 
-async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
+async function runSyncCycle({ interactiveAuth, force, migrationId = "", provider: injectedProvider = null }) {
   let phase = "preflight";
   let entryCount = 0;
   await assertMigrationMaySync(migrationId);
@@ -623,8 +622,10 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
     });
   }, Math.floor(SYNC_LOCK_TTL_MS / 3));
 
+  let activeProvider = null;
   try {
-    const provider = await getActiveRemoteProvider();
+    const provider = injectedProvider || await getActiveRemoteProvider();
+    activeProvider = provider;
     const changeTokenKey = changeTokenSettingKey(provider);
     phase = "read_local";
     await lease.assert();
@@ -685,8 +686,9 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
       if (modifiedTime && lastSeenModified && modifiedTime === lastSeenModified) {
         await lease.assert();
         await clearBackoff();
-        await recordCycleActivity({ changed: false, force });
-        return { status: "synced", warning: "", syncedAt: nowIso(), changed: false };
+        const timestamp = nowIso();
+        await recordCycleActivity({ changed: false, force, status: "synced", succeededAt: timestamp });
+        return { status: "synced", warning: "", syncedAt: timestamp, changed: false };
       }
     }
 
@@ -720,10 +722,20 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
     const quarantinedIds = new Set((snapshot.quarantined || []).map((item) => item.id).filter(Boolean));
 
     const forcedResolutions = await verifiedLocalResolutions(local, snapshot.entries);
+    const pendingBackupSetting = await getSetting(SETTING_KEY.SYNC_RECOVERY_PENDING, []);
+    const pendingBackupIds = new Set(Array.isArray(pendingBackupSetting) ? pendingBackupSetting : []);
+    const recoveryBlockedIds = await protectDeletionRecovery(
+      local,
+      snapshot.entries,
+      pendingBackupIds,
+      new Set(forcedResolutions.keys()),
+      { lease }
+    );
+    const blockedIds = new Set([...quarantinedIds, ...recoveryBlockedIds]);
     phase = "push";
     const pushedIds = await pushDirtyEntries(local, snapshot.entries, snapshot.entryRefs, {
       interactiveAuth,
-      blockedIds: quarantinedIds,
+      blockedIds,
       forcedIds: new Set(forcedResolutions.keys()),
       lease,
       provider
@@ -733,13 +745,13 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
       .map(([, resolutionId]) => resolutionId));
     await clearCompletedResolutions(completedResolutionIds, { lease });
     phase = "pull";
-    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { blockedIds: quarantinedIds, lease });
+    const pulled = await pullRemoteEntries(local, snapshot.entries, pushedIds, { blockedIds, lease });
     // Purge last: it consumes the same snapshot, and deleting rows first would
     // let the pull re-insert what it removed.
     phase = "purge";
     const purged = await purgeDeletedEntries(local, snapshot.entries, snapshot.entryRefs, snapshot.duplicates, {
       interactiveAuth,
-      blockedIds: quarantinedIds,
+      blockedIds,
       lease,
       provider,
       pushedIds
@@ -779,17 +791,19 @@ async function runSyncCycle({ interactiveAuth, force, migrationId = "" }) {
     const timestamp = nowIso();
     await lease.assert();
     await clearBackoff();
-    await recordCycleActivity({ changed, force });
+    const status = reviewCount ? "needs review" : "synced";
+    const warning = reviewCount ? `${reviewCount} item${reviewCount === 1 ? "" : "s"} need review` : "";
+    await recordCycleActivity({ changed, force, status, warning, succeededAt: timestamp });
     if (changed) notifyEntriesChanged({ action: "sync" });
     return {
-      status: reviewCount ? "needs review" : "synced",
-      warning: reviewCount ? `${reviewCount} item${reviewCount === 1 ? "" : "s"} need review` : "",
+      status,
+      warning,
       syncedAt: timestamp,
       changed
     };
   } catch (error) {
     const retryAt = await recordBackoff(error);
-    await recordSyncDiagnostic(phase, error, entryCount, retryAt);
+    await recordSyncDiagnostic(phase, error, entryCount, retryAt, { provider: activeProvider?.label });
     throw error;
   } finally {
     clearInterval(leaseTimer);
@@ -813,13 +827,21 @@ export async function clearRemoteReadMarker() {
  * Tracks how many cycles in a row found nothing to do. A cycle that moved data,
  * or any user-initiated sync, resets the count.
  */
-async function recordCycleActivity({ changed, force }) {
-  if (changed || force) {
-    await setSetting(IDLE_STREAK_KEY, 0);
-    return;
-  }
-  const streak = Number(await getSetting(IDLE_STREAK_KEY, 0)) || 0;
-  await setSetting(IDLE_STREAK_KEY, Math.min(streak + 1, IDLE_BACKOFF_STEPS.length));
+async function recordCycleActivity({ changed, force, status = "synced", succeededAt = nowIso() }) {
+  await mutateSettings([
+    IDLE_STREAK_KEY,
+    SETTING_KEY.SYNC_LAST_SUCCESS_AT,
+    SETTING_KEY.SYNC_LAST_STATUS
+  ], (settings) => {
+    settings.set(SETTING_KEY.SYNC_LAST_SUCCESS_AT, succeededAt);
+    settings.set(SETTING_KEY.SYNC_LAST_STATUS, status);
+    if (changed || force) {
+      settings.set(IDLE_STREAK_KEY, 0);
+      return;
+    }
+    const streak = Number(settings.get(IDLE_STREAK_KEY)) || 0;
+    settings.set(IDLE_STREAK_KEY, Math.min(streak + 1, IDLE_BACKOFF_STEPS.length));
+  });
 }
 
 /**
@@ -870,10 +892,10 @@ function startSyncDrain(options) {
   return cycle;
 }
 
-export function syncNow({ interactiveAuth = false, force = false, migrationId = "" } = {}) {
+export function syncNow({ interactiveAuth = false, force = false, migrationId = "", provider = null } = {}) {
   // Collapse overlapping calls from the same context, such as the poller firing
   // while a user action is still syncing.
-  if (!syncDrain) return startSyncDrain({ interactiveAuth, force, migrationId });
+  if (!syncDrain) return startSyncDrain({ interactiveAuth, force, migrationId, provider });
 
   const stronger = force && !syncDrain.current.options.force
     || interactiveAuth && !syncDrain.current.options.interactiveAuth;
@@ -881,12 +903,13 @@ export function syncNow({ interactiveAuth = false, force = false, migrationId = 
 
   const queued = syncDrain.queued || {
     deferred: deferred(),
-    options: { force: false, interactiveAuth: false, migrationId: "" }
+    options: { force: false, interactiveAuth: false, migrationId: "", provider: null }
   };
   queued.options = {
     force: force || queued.options.force,
     interactiveAuth: interactiveAuth || queued.options.interactiveAuth,
-    migrationId: migrationId || queued.options.migrationId
+    migrationId: migrationId || queued.options.migrationId,
+    provider: provider || queued.options.provider
   };
   syncDrain.queued = queued;
   return queued.deferred.promise;

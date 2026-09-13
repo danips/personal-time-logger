@@ -18,6 +18,13 @@ export const RECONCILIATION_INTENT_PENDING = RECONCILIATION_INTENT_STATE.PENDING
 export const RECONCILIATION_INTENT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_STALE_RECONCILIATION_INTENTS = 20;
 
+function removePendingRecovery(settings, id) {
+  const pending = Array.isArray(settings.get(SETTING_KEY.SYNC_RECOVERY_PENDING))
+    ? settings.get(SETTING_KEY.SYNC_RECOVERY_PENDING)
+    : [];
+  settings.set(SETTING_KEY.SYNC_RECOVERY_PENDING, pending.filter((candidate) => candidate !== id));
+}
+
 async function activeProvider(provider) {
   return provider || getActiveRemoteProvider();
 }
@@ -337,7 +344,14 @@ function applyReconciliationCommand(command, { entries, settings, remoteEntry = 
   let next;
 
   if (command.action === "keepLocal") {
-    next = normalizeEntry({ ...existing, dirty: true, sync_error: "" });
+    next = normalizeEntry({
+      ...existing,
+      dirty: true,
+      // An absent remote row is an explicit user decision to create this ID in
+      // the current destination, rather than an automatic stale-profile append.
+      ...(remoteEntry ? {} : { last_sync_at: "" }),
+      sync_error: ""
+    });
     entries.set(command.id, next);
     const intentRemote = remoteEntry || command.reportedRemote;
     replaceReconciliationIntent(
@@ -345,6 +359,7 @@ function applyReconciliationCommand(command, { entries, settings, remoteEntry = 
       command.id,
       intentRemote ? localResolutionIntent(existing, intentRemote) : null
     );
+    removePendingRecovery(settings, command.id);
     return next;
   }
 
@@ -352,6 +367,7 @@ function applyReconciliationCommand(command, { entries, settings, remoteEntry = 
     next = normalizeEntry({ ...remoteEntry, dirty: false, last_sync_at: nowIso(), sync_error: "" });
     entries.set(command.id, next);
     replaceReconciliationIntent(settings, command.id);
+    removePendingRecovery(settings, command.id);
     return next;
   }
 
@@ -368,6 +384,7 @@ function applyReconciliationCommand(command, { entries, settings, remoteEntry = 
   });
   entries.set(command.id, next);
   replaceReconciliationIntent(settings, command.id);
+  removePendingRecovery(settings, command.id);
   return next;
 }
 
@@ -386,7 +403,7 @@ export async function keepLocal(id, remoteEntry = null, { expectedRevision, expe
   });
   const entry = await mutateEntryState({
     entryIds: [command.id],
-    settingKeys: [RECONCILIATION_INTENTS_KEY]
+    settingKeys: [RECONCILIATION_INTENTS_KEY, SETTING_KEY.SYNC_RECOVERY_PENDING]
   }, ({ entries, settings }) => {
     return applyReconciliationCommand(command, { entries, settings });
   });
@@ -486,7 +503,7 @@ export async function keepRemote(remoteEntry, {
   const verifiedRemote = await verifyReconciliationRemote(command, { provider });
   const entry = await mutateEntryState({
     entryIds: [command.id],
-    settingKeys: [RECONCILIATION_INTENTS_KEY]
+    settingKeys: [RECONCILIATION_INTENTS_KEY, SETTING_KEY.SYNC_RECOVERY_PENDING]
   }, ({ entries, settings }) => {
     return applyReconciliationCommand(command, { entries, settings, remoteEntry: verifiedRemote });
   });
@@ -515,7 +532,7 @@ export async function deleteEverywhere(id, remoteEntry = null, {
   const verifiedRemote = await verifyReconciliationRemote(command, { provider });
   const entry = await mutateEntryState({
     entryIds: [command.id],
-    settingKeys: [RECONCILIATION_INTENTS_KEY]
+    settingKeys: [RECONCILIATION_INTENTS_KEY, SETTING_KEY.SYNC_RECOVERY_PENDING]
   }, ({ entries, settings }) => {
     return applyReconciliationCommand(command, { entries, settings, remoteEntry: verifiedRemote });
   });

@@ -35,6 +35,32 @@ h2 {
   color: #5f6368;
 }
 
+.operation-outcome {
+  margin-top: 6px;
+  color: #0b57d0;
+  font-weight: 600;
+}
+
+.report-search {
+  display: grid;
+  max-width: 420px;
+  gap: 5px;
+  margin-top: 14px;
+  color: #5f6368;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.report-search input {
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid #9aa0a6;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #202124;
+  font: inherit;
+}
+
 .panel {
   margin-bottom: 16px;
   padding: 16px;
@@ -57,6 +83,16 @@ h2 {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0 2px;
+  color: #5f6368;
+  font-size: 13px;
 }
 
 .panel-heading .actions {
@@ -183,6 +219,12 @@ dd {
 
   .row,
   .badge {
+    border-color: #5f6368;
+  }
+
+  .report-search input {
+    color: #e8eaed;
+    background: #303134;
     border-color: #5f6368;
   }
 

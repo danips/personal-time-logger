@@ -5,7 +5,8 @@
   "version": "0.1.76",
   "permissions": [
     "alarms",
-    "storage"
+    "storage",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",

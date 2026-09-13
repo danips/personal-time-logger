@@ -1,0 +1,235 @@
+{
+  "benchmark": "R34 history scaling",
+  "version": 1,
+  "generatedAt": "2026-09-12T20:43:52.578Z",
+  "seed": "r34-history-v1",
+  "command": "GECKODRIVER_BIN=/usr/local/bin/geckodriver node scripts/history-benchmark.mjs",
+  "sizes": [
+    10000,
+    50000,
+    100000
+  ],
+  "limitations": [
+    "Network request counts and timings are synthetic provider plans, not live service measurements.",
+    "Firefox memory is recorded as null when the runtime does not expose a supported metric.",
+    "The benchmark uses a temporary Firefox profile and synthetic IndexedDB records; it does not choose an archive threshold."
+  ],
+  "results": [
+    {
+      "backup": {
+        "durationMs": 263,
+        "entries": 10000,
+        "utf8Bytes": 5720906
+      },
+      "calendar": {
+        "cursorVisits": 84,
+        "longRunningEntryIncluded": true,
+        "queryMs": 79,
+        "returnedEntries": 84
+      },
+      "memoryBytes": null,
+      "memoryMetric": "unavailable: this Firefox runtime exposes neither measureUserAgentSpecificMemory nor performance.memory",
+      "migration": {
+        "digestPrefix": "fc9dbee5407a",
+        "disagreementCount": 0,
+        "durationMs": 37
+      },
+      "networkTiming": "simulated provider plan; no live service was contacted",
+      "popup": {
+        "cursorVisits": 108,
+        "expansionMs": [
+          65,
+          109,
+          133
+        ],
+        "queryMs": 8,
+        "returnedEntries": 101
+      },
+      "profile": "temporary Firefox WebDriver profile",
+      "reconciliation": {
+        "compareMs": 131,
+        "differingGroups": 21,
+        "localEntries": 10000,
+        "readAllMs": 121
+      },
+      "seed": "r34-history-v1",
+      "size": 10000,
+      "sync": [
+        {
+          "durationMs": 0,
+          "mode": "idle",
+          "requestCount": 1,
+          "requestPlan": [
+            "change-token"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        },
+        {
+          "durationMs": 0,
+          "mode": "dirty",
+          "requestCount": 3,
+          "requestPlan": [
+            "read-snapshot",
+            "write-entry",
+            "change-token"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        },
+        {
+          "durationMs": 0,
+          "mode": "forced",
+          "requestCount": 1,
+          "requestPlan": [
+            "read-snapshot"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        }
+      ],
+      "seedDurationMs": 814
+    },
+    {
+      "backup": {
+        "durationMs": 1240,
+        "entries": 50000,
+        "utf8Bytes": 28648538
+      },
+      "calendar": {
+        "cursorVisits": 414,
+        "longRunningEntryIncluded": true,
+        "queryMs": 535,
+        "returnedEntries": 414
+      },
+      "memoryBytes": null,
+      "memoryMetric": "unavailable: this Firefox runtime exposes neither measureUserAgentSpecificMemory nor performance.memory",
+      "migration": {
+        "digestPrefix": "4c219066aee3",
+        "disagreementCount": 0,
+        "durationMs": 252
+      },
+      "networkTiming": "simulated provider plan; no live service was contacted",
+      "popup": {
+        "cursorVisits": 534,
+        "expansionMs": [
+          256,
+          403,
+          532
+        ],
+        "queryMs": 26,
+        "returnedEntries": 496
+      },
+      "profile": "temporary Firefox WebDriver profile",
+      "reconciliation": {
+        "compareMs": 560,
+        "differingGroups": 101,
+        "localEntries": 50000,
+        "readAllMs": 590
+      },
+      "seed": "r34-history-v1",
+      "size": 50000,
+      "sync": [
+        {
+          "durationMs": 0,
+          "mode": "idle",
+          "requestCount": 1,
+          "requestPlan": [
+            "change-token"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        },
+        {
+          "durationMs": 0,
+          "mode": "dirty",
+          "requestCount": 3,
+          "requestPlan": [
+            "read-snapshot",
+            "write-entry",
+            "change-token"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        },
+        {
+          "durationMs": 0,
+          "mode": "forced",
+          "requestCount": 1,
+          "requestPlan": [
+            "read-snapshot"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        }
+      ],
+      "seedDurationMs": 3871
+    },
+    {
+      "backup": {
+        "durationMs": 2621,
+        "entries": 100000,
+        "utf8Bytes": 57408076
+      },
+      "calendar": {
+        "cursorVisits": 822,
+        "longRunningEntryIncluded": true,
+        "queryMs": 1078,
+        "returnedEntries": 822
+      },
+      "memoryBytes": null,
+      "memoryMetric": "unavailable: this Firefox runtime exposes neither measureUserAgentSpecificMemory nor performance.memory",
+      "migration": {
+        "digestPrefix": "8598989ba64b",
+        "disagreementCount": 0,
+        "durationMs": 444
+      },
+      "networkTiming": "simulated provider plan; no live service was contacted",
+      "popup": {
+        "cursorVisits": 1062,
+        "expansionMs": [
+          458,
+          723,
+          974
+        ],
+        "queryMs": 37,
+        "returnedEntries": 986
+      },
+      "profile": "temporary Firefox WebDriver profile",
+      "reconciliation": {
+        "compareMs": 1118,
+        "differingGroups": 201,
+        "localEntries": 100000,
+        "readAllMs": 1269
+      },
+      "seed": "r34-history-v1",
+      "size": 100000,
+      "sync": [
+        {
+          "durationMs": 0,
+          "mode": "idle",
+          "requestCount": 1,
+          "requestPlan": [
+            "change-token"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        },
+        {
+          "durationMs": 0,
+          "mode": "dirty",
+          "requestCount": 3,
+          "requestPlan": [
+            "read-snapshot",
+            "write-entry",
+            "change-token"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        },
+        {
+          "durationMs": 0,
+          "mode": "forced",
+          "requestCount": 1,
+          "requestPlan": [
+            "read-snapshot"
+          ],
+          "timing": "simulated; local provider/network was not contacted"
+        }
+      ],
+      "seedDurationMs": 7869
+    }
+  ]
+}

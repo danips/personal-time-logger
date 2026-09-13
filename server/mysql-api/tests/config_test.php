@@ -34,6 +34,14 @@ assertSameValue(false, $config->allowsOrigin('moz-extension://not-a-uuid'), 'Mal
 assertSameValue(false, $config->allowsOrigin('https://attacker.example.com'), 'Unconfigured web origin should be rejected.');
 assertSameValue(false, $config->allowsOrigin('https://admin.example.com/'), 'Origins with a path should be rejected.');
 
+$omitted = new Config(array_diff_key($values, ['cors_origins' => true]));
+assertSameValue(false, $omitted->allowsOrigin('https://admin.example.com'), 'Omitted origin list should default to no configured web origins.');
+assertSameValue(true, $omitted->allowsOrigin('moz-extension://f3bf897b-6d55-480f-b0f0-d1c425c789ad'), 'Omitted origin list should retain the extension-origin setting.');
+
+$empty = new Config([...$values, 'cors_origins' => []]);
+assertSameValue(false, $empty->allowsOrigin('https://admin.example.com'), 'An explicit empty origin list should deny web origins.');
+assertSameValue(true, $empty->allowsOrigin('moz-extension://f3bf897b-6d55-480f-b0f0-d1c425c789ad'), 'An explicit empty origin list should retain the extension-origin setting.');
+
 $disabled = new Config([...$values, 'allow_moz_extension_origins' => false]);
 assertSameValue(false, $disabled->allowsOrigin('moz-extension://f3bf897b-6d55-480f-b0f0-d1c425c789ad'), 'Firefox origins should be disabled when configured off.');
 
@@ -42,6 +50,13 @@ try {
     throw new RuntimeException('Invalid Firefox extension CORS setting should fail.');
 } catch (ApiException $error) {
     assertSameValue('SERVER_CONFIG_INVALID', $error->errorCode, 'Invalid Firefox extension CORS setting error code changed.');
+}
+
+try {
+    new Config([...$values, 'cors_origins' => ['https://admin.example.com', 42]]);
+    throw new RuntimeException('Invalid CORS origin list should fail.');
+} catch (ApiException $error) {
+    assertSameValue('SERVER_CONFIG_INVALID', $error->errorCode, 'Invalid CORS origin list error code changed.');
 }
 
 fwrite(STDOUT, "Config CORS checks passed.\n");

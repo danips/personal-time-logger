@@ -17,6 +17,16 @@
         <h2 id="firstRunHeading">Choose where your time data starts</h2>
         <p class="note">Choose a remote backend before configuring the rest of the extension. The remaining settings will appear after the backend is ready.</p>
         <p id="firstRunStatus" class="status" role="status" aria-live="polite">Loading...</p>
+        <section class="setup-backup" aria-labelledby="setupBackupHeading">
+          <h3 id="setupBackupHeading">Recover local data</h3>
+          <p class="note">You can save or restore this Firefox profile's local entries before choosing a remote backend. Unsynchronized work is included; credentials and API tokens are never included.</p>
+          <div class="actions">
+            <button id="setupExportBackup" type="button">Download Local Backup</button>
+            <button id="setupChooseBackupFile" type="button">Restore Local Backup</button>
+            <input id="setupImportBackupFile" type="file" accept="application/json,.json" hidden>
+          </div>
+          <p id="setupBackupStatus" class="status" role="status" aria-live="polite"></p>
+        </section>
         <div id="setupProviderChoices" class="setup-choice-grid">
           <button id="chooseGoogleSetup" class="setup-choice" type="button">
             <strong>Start with Google Sheets</strong>
@@ -49,15 +59,52 @@
           <label for="setupMysqlApiBaseUrl">HTTPS API base URL<input id="setupMysqlApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://time-api.cordoceo.com"></label>
           <label for="setupMysqlApiToken">API token<input id="setupMysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
           <p class="note">The token stays in this Firefox profile and is sent only to the configured API origin.</p>
-          <div class="actions"><button id="setupMysqlBack" type="button">Back</button><button id="setupMysqlExistingButton" type="button">Use existing MySQL data</button><button id="setupMysqlLocalButton" type="button">Start from local data</button></div>
+          <div class="actions"><button id="setupMysqlBack" type="button">Back</button><button id="setupMysqlExistingButton" type="button">Adopt existing MySQL data</button><button id="setupMysqlLocalButton" type="button">Initialize from this device</button></div>
         </div>
         <div id="setupCloudflareD1" class="setup-provider" hidden>
           <h3>Set up Cloudflare Worker + D1</h3>
           <label for="setupCloudflareD1ApiBaseUrl">Worker URL<input id="setupCloudflareD1ApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://your-worker.your-subdomain.workers.dev"></label>
           <label for="setupCloudflareD1ApiToken">API token<input id="setupCloudflareD1ApiToken" type="password" autocomplete="off" spellcheck="false"></label>
           <p class="note">The token stays only in this Firefox profile and is sent as a bearer token to your Worker.</p>
-          <div class="actions"><button id="setupCloudflareD1Back" type="button">Back</button><button id="setupCloudflareD1ExistingButton" type="button">Use existing D1 data</button><button id="setupCloudflareD1LocalButton" type="button">Start from local data</button></div>
+          <div class="actions"><button id="setupCloudflareD1Back" type="button">Back</button><button id="setupCloudflareD1ExistingButton" type="button">Adopt existing D1 data</button><button id="setupCloudflareD1LocalButton" type="button">Initialize from this device</button></div>
         </div>
+      </section>
+
+      <section id="backupPreview" class="panel backup-preview" hidden aria-labelledby="backupPreviewHeading">
+        <div class="section-heading">
+          <div>
+            <h2 id="backupPreviewHeading">Review backup restore</h2>
+            <p id="backupPreviewSummary" class="note"></p>
+          </div>
+        </div>
+        <p class="note">Existing conflicts stay on this device. The preview is recomputed inside the final local transaction before anything is changed.</p>
+        <h3>Entries to add</h3>
+        <ul id="backupPreviewAdditions" class="backup-list"></ul>
+        <h3>Already identical</h3>
+        <ul id="backupPreviewIdentical" class="backup-list"></ul>
+        <h3>Settings</h3>
+        <ul id="backupPreviewSettings" class="backup-list"></ul>
+        <label class="backup-choice"><input id="restoreBackupSettings" type="checkbox"> Restore selected non-secret settings</label>
+        <label class="backup-choice"><input id="restoreBackupAppearance" type="checkbox"> Restore appearance preferences when present</label>
+        <h3>Conflicts</h3>
+        <ul id="backupPreviewConflicts" class="backup-list"></ul>
+        <div class="actions">
+          <button id="cancelBackupRestore" type="button">Cancel</button>
+          <button id="confirmBackupRestore" type="button">Restore selected backup</button>
+        </div>
+      </section>
+
+      <section id="backupReport" class="panel backup-report" hidden aria-labelledby="backupReportHeading">
+        <h2 id="backupReportHeading">Last restore report</h2>
+        <p id="backupReportSummary" class="note"></p>
+        <h3>Added entries</h3>
+        <ul id="backupReportAdditions" class="backup-list"></ul>
+        <h3>Already identical</h3>
+        <ul id="backupReportIdentical" class="backup-list"></ul>
+        <h3>Settings changed</h3>
+        <ul id="backupReportSettings" class="backup-list"></ul>
+        <h3>Conflicts left unchanged</h3>
+        <ul id="backupReportConflicts" class="backup-list"></ul>
       </section>
 
       <div id="settingsLayout" class="options-layout" hidden>
@@ -116,12 +163,20 @@
 
           <section id="general" class="panel options-section">
             <h2>General</h2>
+            <p id="generalDraftIndicator" class="draft-indicator" hidden><span id="generalDraftMessage"></span><button id="generalDiscardDraft" type="button">Discard</button></p>
             <p class="note">Settings that apply to Time Logger regardless of the selected remote storage backend.</p>
+            <div class="sync-freshness" aria-labelledby="syncFreshnessHeading">
+              <h3 id="syncFreshnessHeading">Sync freshness</h3>
+              <p id="syncFreshnessDetails" class="note">Loading sync freshness...</p>
+              <p id="syncCadenceDetails" class="note">Loading background cadence...</p>
+            </div>
             <label>Sync interval seconds<input id="syncInterval" type="number" min="30" step="1"></label>
             <label>Duration multiplier<input id="durationMultiplier" type="number" min="1" max="5.001" step="0.001"></label>
             <p class="note">Entries with Multiply checked store duration as actual elapsed time times this multiplier.</p>
             <label>Calendar starts at hour<input id="workdayStartHour" type="number" min="0" max="23" step="1"></label>
             <p class="note">The Calendar initially starts displaying at this hour.</p>
+            <label class="checkbox-row"><input id="staleTimerReminderEnabled" type="checkbox"> Remind me about long-running timers</label>
+            <p class="note">When enabled, Firefox may show one reminder after a timer has run for eight hours. Reminders never stop or edit timers automatically.</p>
             <div class="actions"><button id="saveSettings" type="button">Save Settings</button></div>
           </section>
 
@@ -132,40 +187,44 @@
                 <p class="note">IndexedDB remains the local source of truth. This setting controls the one remote backend used for synchronization.</p>
               </div>
             </div>
+            <p id="storageDraftIndicator" class="draft-indicator" hidden><span id="storageDraftMessage"></span><button id="storageDiscardDraft" type="button">Discard</button></p>
             <dl>
               <div><dt>Active remote backend</dt><dd id="activeRemoteBackend">Google Sheets</dd></div>
             </dl>
-            <label for="remoteBackendTarget">Backend to prepare
+            <label for="remoteBackendTarget">Backend to prepare and test
               <select id="remoteBackendTarget">
                 <option value="google-sheets">Google Sheets</option>
                 <option value="mysql">MySQL 8.4</option>
                 <option value="cloudflare-d1">Cloudflare Worker + D1</option>
               </select>
             </label>
-            <p class="note">Choosing a backend here only prepares and tests it. Existing data is not switched until verified migration succeeds.</p>
+            <p id="preparedRemoteBackend" class="note">Prepared backend: Google Sheets</p>
+            <p class="note">Choosing a backend here only prepares and tests it. Existing data is not switched until verified migration succeeds; the active backend remains unchanged.</p>
             <p class="note">Migration pauses synchronization, verifies every canonical entry and shared setting, and switches only after the target digest matches. Close other devices and do not edit timers until it finishes.</p>
-            <div class="actions"><button id="migrateStorage" type="button">Migrate data and switch backend</button></div>
+            <div class="actions"><button id="migrateStorage" type="button">Migrate verified data and switch backend</button></div>
+            <p id="migrationPreview" class="note" hidden></p>
             <p id="migrationStatus" class="status" role="status" aria-live="polite"></p>
             <div id="mysqlStorageFields" hidden>
               <label for="mysqlApiBaseUrl">HTTPS API base URL<input id="mysqlApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://time-api.cordoceo.com"></label>
               <label for="mysqlApiToken">API token<input id="mysqlApiToken" type="password" autocomplete="off" spellcheck="false"></label>
-              <p class="note">The token stays in this Firefox profile and is sent only as a bearer token to the configured API origin. It is not put in Firefox Sync.</p>
-              <div class="actions"><button id="testMysqlConnection" type="button">Test connection</button><button id="saveMysqlSettings" type="button">Save MySQL settings</button><button id="activateMysqlFromLocal" type="button">Use MySQL directly</button><button id="activateMysqlFromRemote" type="button">Use existing MySQL data</button></div>
-              <p class="note">Use MySQL directly when you do not want a Google account. This initializes MySQL from this profile's local data only; Google Sheets is not read.</p>
-              <p class="note">Use existing MySQL data when the database already contains your time entries. It imports those records into this profile and does not read Google Sheets.</p>
+              <p class="note">The token stays in this Firefox profile and is sent only as a bearer token to the configured API origin. It is not put in Firefox Sync. Replacing this token changes credentials only; it does not select, migrate, or replace the dataset.</p>
+              <div class="actions"><button id="testMysqlConnection" type="button">Test MySQL connection</button><button id="saveMysqlSettings" type="button">Save MySQL settings</button><button id="clearMysqlToken" type="button">Clear MySQL token</button><button id="activateMysqlFromLocal" type="button">Initialize from this device</button><button id="activateMysqlFromRemote" type="button">Adopt existing MySQL data</button></div>
+              <p class="note">Initialize from this device when you do not want a Google account. This uses only this profile's local data; Google Sheets is not read.</p>
+              <p class="note">Adopt existing MySQL data when the database already contains your time entries. It imports those records into this profile and does not read Google Sheets.</p>
               <p id="mysqlConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
             <div id="cloudflareD1StorageFields" hidden>
               <label for="cloudflareD1ApiBaseUrl">Worker URL<input id="cloudflareD1ApiBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://your-worker.your-subdomain.workers.dev"></label>
               <label for="cloudflareD1ApiToken">API token<input id="cloudflareD1ApiToken" type="password" autocomplete="off" spellcheck="false"></label>
-              <p class="note">The token stays only in this Firefox profile. It is never placed in Firefox Sync, backups, diagnostics, URLs, or logs.</p>
-              <div class="actions"><button id="testCloudflareD1Connection" type="button">Test connection</button><button id="saveCloudflareD1Settings" type="button">Save D1 settings</button><button id="activateCloudflareD1FromLocal" type="button">Use D1 directly</button><button id="activateCloudflareD1FromRemote" type="button">Use existing D1 data</button></div>
+              <p class="note">The token stays only in this Firefox profile. It is never placed in Firefox Sync, backups, diagnostics, URLs, or logs. Replacing this token changes credentials only; it does not select, migrate, or replace the dataset.</p>
+              <div class="actions"><button id="testCloudflareD1Connection" type="button">Test Worker connection</button><button id="saveCloudflareD1Settings" type="button">Save D1 settings</button><button id="clearCloudflareD1Token" type="button">Clear D1 token</button><button id="activateCloudflareD1FromLocal" type="button">Initialize from this device</button><button id="activateCloudflareD1FromRemote" type="button">Adopt existing D1 data</button></div>
               <p id="cloudflareD1ConnectionStatus" class="status" role="status" aria-live="polite"></p>
             </div>
           </section>
 
           <section id="google-account" class="panel options-section">
             <h2>Google Account</h2>
+            <p id="google-accountDraftIndicator" class="draft-indicator" hidden><span id="google-accountDraftMessage"></span><button id="google-accountDiscardDraft" type="button">Discard</button></p>
             <label>
               OAuth client ID
               <input id="googleClientId" type="text" autocomplete="off" spellcheck="false">
@@ -221,18 +280,25 @@
 
           <section id="reconciliation" class="panel options-section" aria-labelledby="reconcileHeading">
             <div class="section-heading"><div><h2 id="reconcileHeading">Reconcile Local And Remote</h2><p id="reconcileStatusLine" class="status" role="status" aria-live="polite">Loading...</p><p id="remoteProviderLabel" class="note">Remote backend: Loading...</p></div><div class="actions section-actions"><button id="rescanButton" type="button">Rescan</button><button id="syncButton" type="button">Sync Now</button></div></div>
+            <p id="operationOutcome" class="operation-outcome" role="status" hidden></p>
+            <label class="report-search">Search loaded report
+              <input id="reconcileSearch" type="search" autocomplete="off" placeholder="ID, project, task, reason…">
+            </label>
+            <p id="reconcileFilterSummary" class="note">Showing all report items</p>
             <div class="options-subsection" aria-labelledby="summaryHeading">
               <h2 id="summaryHeading">Summary</h2>
               <dl id="summary"><div><dt>Entries on this device</dt><dd id="localCount">-</dd></div><div><dt>Remote records</dt><dd id="remoteRowCount">-</dd></div><div><dt>Remote entries</dt><dd id="remoteCount">-</dd></div><div id="duplicateSummaryMetric"><dt>Duplicate remote records</dt><dd id="duplicateRowCount">-</dd></div><div><dt>Identical on both sides</dt><dd id="inSyncCount">-</dd></div><div><dt>Divergences</dt><dd id="divergenceCount">-</dd></div></dl>
             </div>
             <div id="differentSection" class="options-subsection" aria-labelledby="differentHeading"><div class="panel-heading"><h2 id="differentHeading">Different on each side</h2><div class="actions"><button id="keepAllLocal" type="button">Keep all local</button><button id="keepAllRemote" type="button">Keep all remote</button><button id="keepAllNewest" type="button">Keep newest of each</button></div></div><div id="differentList" class="group-list"></div></div>
             <div id="duplicateSection" class="options-subsection" aria-labelledby="duplicateHeading"><div class="panel-heading"><h2 id="duplicateHeading">Duplicate remote records</h2><div class="actions"><button id="deleteAllDuplicates" type="button">Delete all extra rows</button></div></div><p class="note">The same entry appears in more than one remote record. Sync uses the most recently updated of them; the others are stale copies that only take up space.</p><div id="duplicateList" class="group-list"></div></div>
+            <div id="quarantinedSection" class="options-subsection" aria-labelledby="quarantinedHeading"><div class="panel-heading"><h2 id="quarantinedHeading">Invalid remote records</h2><button id="exportQuarantined" type="button">Export locations</button></div><p class="note">These records are excluded from sync until corrected at the remote backend.</p><div id="quarantinedList" class="group-list"></div></div>
             <div id="localOnlySection" class="options-subsection" aria-labelledby="localOnlyHeading"><div class="panel-heading"><h2 id="localOnlyHeading">Only on this device</h2><div class="actions"><button id="pushAllLocal" type="button">Push all to remote</button></div></div><div id="localOnlyList" class="group-list"></div></div>
             <div id="remoteOnlySection" class="options-subsection" aria-labelledby="remoteOnlyHeading"><div class="panel-heading"><h2 id="remoteOnlyHeading">Only in remote storage</h2><div class="actions"><button id="importAllRemote" type="button">Import all from remote</button></div></div><div id="remoteOnlyList" class="group-list"></div></div>
           </section>
 
           <section id="tempo" class="panel options-section">
             <h2>Tempo</h2>
+            <p id="tempoDraftIndicator" class="draft-indicator" hidden><span id="tempoDraftMessage"></span><button id="tempoDiscardDraft" type="button">Discard</button></p>
             <label>API token<input id="tempoApiToken" type="password" autocomplete="off" spellcheck="false"></label>
             <label>Author account ID<input id="tempoAuthorAccountId" type="text" autocomplete="off" spellcheck="false"></label>
             <p class="note">These credentials stay in this browser profile. Calendar sends the displayed week's completed logs directly to Tempo and uses each description as its comment.</p>
@@ -240,24 +306,25 @@
             <p class="note">When Calendar encounters a Task it does not know, it asks for the numeric Jira issue ID and remembers it here. You can edit or remove mappings before sending.</p>
             <div class="table-scroll"><table class="tempo-mappings"><thead><tr><th scope="col">Task</th><th scope="col">Issue ID</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="tempoMappings"></tbody></table></div>
             <p id="tempoMappingsEmpty" class="note">No Task issue IDs cached yet.</p>
-            <div class="actions"><button id="addTempoMapping" type="button">Add mapping</button><button id="saveTempoSettings" type="button">Save Tempo Settings</button></div>
+            <div class="actions"><button id="addTempoMapping" type="button">Add mapping</button><button id="saveTempoSettings" type="button">Save Tempo Settings</button><button id="clearTempoToken" type="button">Clear Tempo token</button></div>
           </section>
 
           <section id="backups" class="panel options-section">
             <h2>Backups</h2>
-            <p class="note">Backups are created manually after a successful sync. They include time entries and non-secret settings, but never credentials or API tokens.</p>
+            <p class="note">Backups capture this profile's local entries and non-secret settings without requiring a remote backend. A follow-up sync is attempted after a restore; local completion remains safe if synchronization is unavailable.</p>
             <div class="actions">
               <button id="exportBackup" type="button">Download Backup</button>
               <button id="chooseBackupFile" type="button">Restore Backup</button>
               <input id="importBackupFile" type="file" accept="application/json,.json" hidden>
-            </div>
-            <p id="backupStatus" class="status" role="status" aria-live="polite"></p>
+          </div>
+          <p id="backupStatus" class="status" role="status" aria-live="polite"></p>
           </section>
 
           <section id="diagnostics" class="panel options-section">
             <h2>Diagnostics</h2>
             <p id="diagnosticsSummary" class="note">Loading diagnostics...</p>
-            <p class="note">Recovery records contain time, component, error code, entry count, and suggested action. They do not contain time-entry content, OAuth tokens, spreadsheet IDs, URLs, or raw API responses.</p>
+            <div id="diagnosticsList" class="diagnostics-list"></div>
+            <p class="note">Recovery records contain time, component, stable error code, bounded occurrence count, safe provider/version/freshness context, entry count, and suggested action. They do not contain time-entry content, OAuth tokens, spreadsheet IDs, URLs, or raw API responses.</p>
             <div class="actions"><button id="copyDiagnostics" type="button">Copy diagnostics</button><button id="exportDiagnostics" type="button">Download diagnostics</button><button id="clearDiagnostics" type="button">Clear diagnostics</button></div>
           </section>
         </div>

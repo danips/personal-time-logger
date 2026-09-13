@@ -69,6 +69,16 @@
   gap: 6px;
 }
 
+.entry-editor-time-summary {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--surface-subtle, #f6f8fc);
+  color: var(--muted, #5f6368);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .entry-editor-options > label {
   display: flex;
   align-items: center;
@@ -102,4 +112,34 @@
  * the hidden attribute, leaving an empty merge control visible. */
 .entry-editor-merge-control[hidden] {
   display: none;
+}
+
+.entry-editor-preview {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #3567d6) 38%, var(--border, #d9e0ec));
+  border-radius: 8px;
+  background: var(--accent-soft, #eaf0ff);
+}
+
+.entry-editor-preview[hidden] {
+  display: none;
+}
+
+.entry-editor-preview p {
+  margin: 0;
+  color: var(--muted, #5f6368);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.entry-editor-preview-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.entry-editor-preview-actions button {
+  flex: 1;
 }

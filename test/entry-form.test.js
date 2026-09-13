@@ -48,4 +48,16 @@ describe("entry form decoder", () => {
       (error) => error.code === "ENTRY_INVALID" && /cannot be before/i.test(error.message)
     );
   });
+
+  it("explains how to correct nonexistent and ambiguous local times", () => {
+    process.env.TZ = "America/New_York";
+    assert.throws(
+      () => readEntryForm(fields({ start: { value: "2026-03-08T02:30" } })),
+      (error) => error.code === "ENTRY_INVALID" && /does not exist.*choose another local time/i.test(error.message)
+    );
+    assert.throws(
+      () => readEntryForm(fields({ start: { value: "2026-11-01T01:30" } })),
+      (error) => error.code === "ENTRY_INVALID" && /occurs twice.*occurrence selector is not available/i.test(error.message)
+    );
+  });
 });

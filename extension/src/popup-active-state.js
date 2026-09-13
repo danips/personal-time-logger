@@ -1,3 +1,6 @@
+import { STALE_ACTIVE_SECONDS } from "./analytics.js";
+import { durationSeconds } from "./time.js";
+
 export function activeTimerState(entry, {
   elapsed = "00:00:00",
   newTimerOpen = false,
@@ -13,10 +16,20 @@ export function activeTimerState(entry, {
     ariaLabel: active
       ? `Edit active timer ${label}`
       : newTimerOpen ? "Hide new timer" : "Start a new timer",
-    iconActive: active
   };
 }
 
-export function elapsedTimerState(entry, elapsed = "00:00:00") {
-  return { elapsed: entry ? elapsed : "00:00:00" };
+/** Returns actionable warning metadata without changing any timer record. */
+export function activeTimerWarningState(entries, { now = new Date() } = {}) {
+  const nowIso = new Date(now).toISOString();
+  return (entries || [])
+    .filter((entry) => entry && !entry.deleted_at && !entry.end_at)
+    .map((entry) => {
+      const elapsedSeconds = durationSeconds(entry.start_at, nowIso);
+      return {
+        entry,
+        elapsedSeconds,
+        stale: elapsedSeconds >= STALE_ACTIVE_SECONDS
+      };
+    });
 }

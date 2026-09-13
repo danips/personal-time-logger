@@ -32,8 +32,41 @@ describe("diagnostic ring", () => {
     await diagnostics.recordDiagnostic({ subsystem: "sync", phase: "remote_read", code: "API_TIMEOUT" });
     await diagnostics.recordDiagnostic({ subsystem: "sync", phase: "remote_read", code: "API_TIMEOUT" });
 
-    assert.equal((await diagnostics.getDiagnostics()).length, 1);
+    const records = await diagnostics.getDiagnostics();
+    assert.equal(records.length, 1);
+    assert.equal(records[0].occurrences, 2);
+    assert.match(diagnostics.diagnosticsText(records), /occurrences=2/);
     await diagnostics.clearDiagnostics();
     assert.deepEqual(await diagnostics.getDiagnostics(), []);
+  });
+
+  it("deduplicates the same phase across reporting layers but keeps phases distinct", async () => {
+    await diagnostics.clearDiagnostics();
+    await diagnostics.recordDiagnostic({ subsystem: "sync", phase: "remote_read", code: "OFFLINE" });
+    await diagnostics.recordDiagnostic({ subsystem: "background", phase: "remote_read", code: "OFFLINE" });
+    await diagnostics.recordDiagnostic({ subsystem: "background", phase: "retry", code: "OFFLINE" });
+
+    const records = await diagnostics.getDiagnostics();
+    assert.equal(records.length, 2);
+    assert.equal(records[0].occurrences, 2);
+    assert.equal(records[0].phase, "remote_read");
+    assert.equal(records[1].phase, "retry");
+  });
+
+  it("stores safe support context without raw URLs", async () => {
+    await diagnostics.clearDiagnostics();
+    await diagnostics.recordDiagnostic({
+      subsystem: "sync",
+      phase: "remote_read",
+      code: "API_TIMEOUT",
+      provider: "MySQL https://secret.invalid/token",
+      freshness: "last success https://secret.invalid/at"
+    });
+
+    const [record] = await diagnostics.getDiagnostics();
+    assert.equal(record.provider.includes("https"), false);
+    assert.equal(record.freshness.includes("https"), false);
+    assert.equal(record.extension_version, "unknown");
+    assert.equal(record.occurrences, 1);
   });
 });

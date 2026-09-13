@@ -9,6 +9,7 @@ import { ENTRY_FIELDS } from "./entry-contract.js";
 export const SHEET_HEADERS = ENTRY_FIELDS;
 
 const CREATE_FIELDS = new Set(["project", "task", "description", "multiply"]);
+const COMPLETED_CREATE_FIELDS = new Set([...CREATE_FIELDS, "start_at", "end_at", "status"]);
 const EDITABLE_FIELDS = new Set([
   "project",
   "task",
@@ -95,6 +96,28 @@ export function decodeEntryCreate(fields) {
     && decoded.multiply !== "false" && decoded.multiply !== "FALSE"
     && !normalizeMultiplierText(decoded.multiply)) {
     throw entryModelError("multiply must be empty or a valid numeric multiplier.");
+  }
+  return decoded;
+}
+
+/** Decodes the explicit fields required to create a completed local entry. */
+export function decodeCompletedEntryCreate(fields) {
+  assertAllowedFields(fields, COMPLETED_CREATE_FIELDS, "completed entry create request");
+  const decoded = decodeEntryCreate(Object.fromEntries(
+    [...CREATE_FIELDS].filter((field) => Object.hasOwn(fields, field)).map((field) => [field, fields[field]])
+  ));
+  if (typeof fields.start_at !== "string" || typeof fields.end_at !== "string"
+    || !fields.start_at || !fields.end_at) {
+    throw entryModelError("A completed entry requires both a start and end time.");
+  }
+  decoded.start_at = persistedTimestamp(fields.start_at, "start_at");
+  decoded.end_at = persistedTimestamp(fields.end_at, "end_at");
+  if (decoded.end_at < decoded.start_at) throw entryModelError("end_at must not precede start_at.");
+  if (fields.status !== undefined) {
+    if (fields.status !== "ok" && fields.status !== "needs_review") {
+      throw entryModelError("status must be ok or needs_review.");
+    }
+    decoded.status = fields.status;
   }
   return decoded;
 }
@@ -207,10 +230,6 @@ function sameMergeFields(first, second) {
     && first.description === second.description;
 }
 
-function actualDurationMs(entry) {
-  return durationSeconds(entry.start_at, entry.end_at) * 1000;
-}
-
 export function canMergeEntries(firstEntry, secondEntry) {
   if (!firstEntry || !secondEntry || firstEntry.id === secondEntry.id) return false;
   const first = normalizeEntry(firstEntry);
@@ -222,9 +241,90 @@ export function canMergeEntries(firstEntry, secondEntry) {
     && sameMergeFields(first, second);
 }
 
+export function mergeEntryPreview(targetEntry, sourceEntry) {
+  if (!canMergeEntries(targetEntry, sourceEntry)) {
+    throw new Error("Entries must be completed and have the same project, task, and description");
+  }
+  const target = normalizeEntry(targetEntry);
+  const source = normalizeEntry(sourceEntry);
+  const targetActualSeconds = durationSeconds(target.start_at, target.end_at);
+  const sourceActualSeconds = durationSeconds(source.start_at, source.end_at);
+  const actualSeconds = targetActualSeconds + sourceActualSeconds;
+  const startAt = target.start_at;
+  const endAt = new Date(new Date(startAt).getTime() + actualSeconds * 1000).toISOString();
+  return Object.freeze({
+    targetId: target.id,
+    sourceId: source.id,
+    targetActualSeconds,
+    sourceActualSeconds,
+    targetEffectiveSeconds: target.duration_seconds,
+    sourceEffectiveSeconds: source.duration_seconds,
+    actualSeconds,
+    effectiveSeconds: computedDurationSeconds(startAt, endAt, target.multiply),
+    startAt,
+    endAt,
+    // Merge compacts the elapsed gap regardless of which interval was chosen
+    // as the target. Keep the larger directional gap visible in the preview.
+    compactedGapSeconds: Math.max(
+      0,
+      durationSeconds(target.end_at, source.start_at),
+      durationSeconds(source.end_at, target.start_at)
+    ),
+    targetMultiply: target.multiply,
+    targetStatus: target.status,
+    sourceMultiply: source.multiply,
+    sourceStatus: source.status
+  });
+}
+
+export function duplicateEntryPreview(entry) {
+  const normalized = normalizeEntry(entry);
+  if (normalized.deleted_at || !normalized.end_at) throw new Error("Only completed entries can be duplicated");
+  const actualSeconds = durationSeconds(normalized.start_at, normalized.end_at);
+  return Object.freeze({
+    entryId: normalized.id,
+    actualSeconds,
+    effectiveSeconds: normalized.duration_seconds,
+    startAt: normalized.start_at,
+    endAt: normalized.end_at,
+    overlapSeconds: actualSeconds,
+    multiply: normalized.multiply,
+    status: normalized.status
+  });
+}
+
 async function selectedMultiplyValue(value) {
   if (value === true || value === "true" || value === "TRUE") return String(await getDurationMultiplier());
   return normalizeMultiplyValue(value);
+}
+
+/** Creates a completed entry in one local mutation, without an active timer. */
+export async function createCompletedEntry(fields) {
+  const decoded = decodeCompletedEntryCreate(fields);
+  const timestamp = nowIso();
+  const deviceId = await getDeviceId();
+  const multiply = await selectedMultiplyValue(decoded.multiply);
+  const entry = normalizeEntry({
+    ...decoded,
+    id: uuid(),
+    duration_seconds: computedDurationSeconds(decoded.start_at, decoded.end_at, multiply),
+    status: decoded.status || "ok",
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: "",
+    device_id: deviceId,
+    revision: 1,
+    dirty: true,
+    last_sync_at: "",
+    sync_error: "",
+    multiply
+  });
+  await mutateEntries([entry.id], (entries) => {
+    entries.set(entry.id, entry);
+    return entry;
+  });
+  notifyEntriesChanged({ action: "create_completed", ids: [entry.id] });
+  return entry;
 }
 
 function computedDurationSeconds(startAt, endAt, multiply) {
@@ -413,6 +513,108 @@ export async function softDeleteEntry(id, options = {}) {
   return updateEntry(id, { deleted_at: nowIso() }, options);
 }
 
+export function deletionUndoToken(entry) {
+  const normalized = normalizeEntry(entry);
+  if (!normalized.deleted_at) throw entryModelError("Only a deleted entry can be undone.");
+  return Object.freeze({
+    id: normalized.id,
+    expectedRevision: normalized.revision,
+    expectedDeletedAt: normalized.deleted_at,
+    expectedFingerprint: entryFingerprint(normalized)
+  });
+}
+
+const UNDOABLE_ENTRY_FIELDS = Object.freeze([
+  "project",
+  "task",
+  "description",
+  "start_at",
+  "end_at",
+  "status",
+  "multiply",
+  "deleted_at"
+]);
+
+/** Captures the prior editable values for a bounded, conflict-safe correction undo. */
+export function entryUpdateUndoToken(before, after) {
+  const previous = normalizeEntry(before);
+  const updated = normalizeEntry(after);
+  if (previous.id !== updated.id) throw entryModelError("An entry update must keep the same entry.");
+  return Object.freeze({
+    id: updated.id,
+    expectedRevision: updated.revision,
+    expectedFingerprint: entryFingerprint(updated),
+    previous: Object.freeze(Object.fromEntries(
+      UNDOABLE_ENTRY_FIELDS.map((field) => [field, previous[field]])
+    ))
+  });
+}
+
+function undoUnavailableError() {
+  const error = new Error("Entry undo is no longer available");
+  error.code = ERROR_CODE.UNDO_UNAVAILABLE;
+  return error;
+}
+
+export async function undoDeletedEntry(id, token = {}) {
+  if (!id || token.id !== id || !token.expectedDeletedAt || !token.expectedFingerprint) {
+    throw undoUnavailableError();
+  }
+
+  let restored;
+  try {
+    restored = await mutateEntry(id, token.expectedRevision, (existing) => {
+      if (!existing || existing.deleted_at !== token.expectedDeletedAt
+        || entryFingerprint(existing) !== token.expectedFingerprint) {
+        throw undoUnavailableError();
+      }
+      return normalizeEntry({
+        ...existing,
+        deleted_at: "",
+        updated_at: nowIso(),
+        revision: Number(existing.revision || 0) + 1,
+        dirty: true,
+        sync_error: ""
+      });
+    });
+  } catch (error) {
+    if (error.code === ERROR_CODE.STORAGE_CONFLICT) throw undoUnavailableError();
+    throw error;
+  }
+  notifyEntriesChanged({ action: "undo_delete", ids: [restored.id] });
+  return restored;
+}
+
+/** Restores one prior edit only while the edited record is still unchanged. */
+export async function undoEntryUpdate(token = {}) {
+  if (!token.id || !Number.isSafeInteger(token.expectedRevision)
+    || !token.expectedFingerprint || !token.previous || typeof token.previous !== "object") {
+    throw undoUnavailableError();
+  }
+
+  let restored;
+  try {
+    restored = await mutateEntry(token.id, token.expectedRevision, (existing) => {
+      if (!existing || entryFingerprint(existing) !== token.expectedFingerprint) {
+        throw undoUnavailableError();
+      }
+      return normalizeEntry({
+        ...existing,
+        ...decodeEntryEdit(token.previous),
+        updated_at: nowIso(),
+        revision: Number(existing.revision || 0) + 1,
+        dirty: true,
+        sync_error: ""
+      });
+    });
+  } catch (error) {
+    if (error.code === ERROR_CODE.STORAGE_CONFLICT) throw undoUnavailableError();
+    throw error;
+  }
+  notifyEntriesChanged({ action: "undo_update", ids: [restored.id] });
+  return restored;
+}
+
 export async function mergeEntries(targetId, sourceId, { expectedRevisions } = {}) {
   const timestamp = nowIso();
   const result = await mutateEntries([targetId, sourceId], expectedRevisions, (entries) => {
@@ -424,12 +626,12 @@ export async function mergeEntries(targetId, sourceId, { expectedRevisions } = {
 
     const target = normalizeEntry(targetExisting);
     const source = normalizeEntry(sourceExisting);
+    const preview = mergeEntryPreview(target, source);
     // A merge appends the selected source's elapsed work to the selected target.
     // It intentionally compacts gaps and retains the target's multiplier/status,
     // so differing historical multipliers never silently change the target.
-    const mergedStart = target.start_at;
-    const actualMs = actualDurationMs(target) + actualDurationMs(source);
-    const mergedEnd = new Date(new Date(mergedStart).getTime() + actualMs).toISOString();
+    const mergedStart = preview.startAt;
+    const mergedEnd = preview.endAt;
 
     const merged = normalizeEntry({
       ...target,

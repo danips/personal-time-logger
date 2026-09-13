@@ -63,3 +63,55 @@ The integration checklist is:
 - SQL-like text remains data and never changes the query;
 - empty `end_at` and `deleted_at` round-trip as `""`;
 - response and server logs never contain the bearer token or raw SQL details.
+
+## Disposable recovery drill
+
+The extension's JSON backup and a MySQL server backup are different recovery
+artifacts. The extension backup contains canonical local entries and selected
+non-secret settings; it does not contain the MySQL schema, API configuration,
+database credentials, or bearer token. A server backup is SQL produced from
+the disposable MySQL database and must be stored outside the public web root
+with the same care as database data.
+
+Run this drill only against a positively identified disposable MySQL 8.4
+database. Confirm the host, port, and database name before setting
+`PTL_TEST_MYSQL_ALLOW_RESET=1`; that flag permits the integration test to clear
+tables. From `server/mysql-api/`, a limited database user can create a clean
+schema/data backup without requiring the `PROCESS` privilege for tablespaces:
+
+```bash
+backup_dir="$(mktemp -d /tmp/ptl-mysql-backup.XXXXXX)"
+MYSQL_PWD="$PTL_TEST_MYSQL_PASSWORD" mysqldump \
+  --host=127.0.0.1 --port=3307 --user="$PTL_TEST_MYSQL_USER" \
+  --single-transaction --no-tablespaces personal_time_logger_test \
+  > "$backup_dir/personal-time-logger.sql"
+```
+
+Restore only into a newly created disposable database using an administrative
+database account, then inspect the target identity and run the API contract:
+
+```bash
+mysql --host=127.0.0.1 --port=3307 --user=... --password \
+  --execute='CREATE DATABASE ptl_restore_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;'
+mysql --host=127.0.0.1 --port=3307 --user=... --password \
+  ptl_restore_test < "$backup_dir/personal-time-logger.sql"
+PTL_TEST_MYSQL_DSN='mysql:host=127.0.0.1;port=3307;dbname=ptl_restore_test;charset=utf8mb4' \
+PTL_TEST_MYSQL_USER=... PTL_TEST_MYSQL_PASSWORD=... \
+PTL_TEST_MYSQL_ALLOW_RESET=1 bash tests/run.sh
+```
+
+The API configuration file remains outside `public/`. To replace a token,
+generate a new random 32-byte value, store only its SHA-256 hex digest in the
+configuration, restart the API, and update every extension device's local
+token promptly. Verify that the new token receives `200` from `/v1/health` and
+the old token receives `401`; this v1 setup intentionally has no dual-token
+zero-downtime period. Do not put either raw token in shell history, logs, SQL
+backups, or bug reports.
+
+For schema upgrades, make a server backup first, inspect `sql/*.sql` in sorted
+order, apply each new forward-only file once with an administrative account,
+then run the deterministic and disposable endpoint checks above. The current
+repository has only `001_initial_schema.sql` and no migration table or generic
+migration framework; do not rerun an unreviewed initial schema against a
+populated deployment or invent a second-version procedure before a real
+migration exists. Remove the temporary database and backup after the drill.

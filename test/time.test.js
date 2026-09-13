@@ -117,4 +117,10 @@ describe("local input values", () => {
     assert.deepEqual(fromLocalInputValue(""), { kind: "empty" });
     assert.deepEqual(fromLocalInputValue("nonsense"), { kind: "invalid", reason: "format" });
   });
+
+  it("rejects nonexistent and ambiguous local clock times", () => {
+    process.env.TZ = "America/New_York";
+    assert.deepEqual(fromLocalInputValue("2026-03-08T02:30"), { kind: "invalid", reason: "nonexistent" });
+    assert.deepEqual(fromLocalInputValue("2026-11-01T01:30"), { kind: "invalid", reason: "ambiguous" });
+  });
 });

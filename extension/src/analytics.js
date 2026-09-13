@@ -9,6 +9,7 @@ export const SHORT_FRAGMENT_SESSION_SECONDS = 15 * 60;
 
 const NO_PROJECT = "No project";
 const NO_TASK = "No task";
+export const ANALYTICS_MISSING_FILTER = "__missing__";
 const ANOMALY_ORDER = Object.freeze({
   stale_active: 0,
   overlap: 1,
@@ -34,6 +35,26 @@ function label(value, fallback) {
 function identityKey(value, missingKey) {
   const normalized = text(value);
   return normalized ? `value:${normalized}` : missingKey;
+}
+
+function matchesFilter(value, filter) {
+  const normalizedFilter = text(filter);
+  if (!normalizedFilter) return true;
+  if (normalizedFilter === ANALYTICS_MISSING_FILTER) return !text(value);
+  return text(value).toLocaleLowerCase() === normalizedFilter.toLocaleLowerCase();
+}
+
+/** Filters the same source collection used to build both report periods. */
+export function filterAnalyticsEntries(entries, { project = "", task = "" } = {}) {
+  return (entries || []).filter((entry) => matchesFilter(entry.project, project) && matchesFilter(entry.task, task));
+}
+
+/** Resolves a rendered anomaly to a live, non-deleted entry before navigation. */
+export function resolveAnalyticsEntryTarget(anomaly, entries) {
+  const entryId = String(anomaly?.entryId || "");
+  const entry = (entries || []).find((candidate) => identity(candidate) === entryId && !candidate.deleted_at);
+  if (!entry) return null;
+  return { entryId, date: entry.start_at || anomaly.start };
 }
 
 function compareLabels(left, right) {
@@ -98,10 +119,12 @@ function loggedDays(entries, period, now) {
 
 export function aggregatePeriod(sessions, { entries = [], period, now = new Date() } = {}) {
   const actual = sessions.map(({ actualSeconds }) => actualSeconds);
+  const totalActualSeconds = actual.reduce((sum, value) => sum + value, 0);
   const totalEffectiveSeconds = sessions.reduce((sum, session) => sum + session.effectiveSeconds, 0);
   const dayCount = period ? loggedDays(entries, period, now) : 0;
   return {
     totalEffectiveSeconds,
+    totalActualSeconds,
     loggedDays: dayCount,
     averageEffectiveSecondsPerLoggedDay: dayCount ? totalEffectiveSeconds / dayCount : 0,
     sessionCount: sessions.length,

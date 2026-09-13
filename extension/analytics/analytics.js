@@ -1,9 +1,11 @@
-import { buildAnalyticsReport } from "../src/analytics.js";
+import { ANALYTICS_MISSING_FILTER, buildAnalyticsReport, filterAnalyticsEntries, resolveAnalyticsEntryTarget } from "../src/analytics.js";
 import { ANALYTICS_PERIOD_PRESET, analyticsDateInputValue, resolveAnalyticsPeriod } from "../src/analytics-period.js";
+import { serializeAnalyticsReport } from "../src/analytics-export.js";
 import { getEntriesIntersecting } from "../src/db.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { onEntriesChanged } from "../src/events.js";
 import { startPage } from "../src/page-runtime.js";
+import { platform } from "../src/platform.js";
 import { addDays, formatElapsed, shortDateTime } from "../src/time.js";
 import { $ } from "../src/ui-helpers.js";
 
@@ -25,6 +27,9 @@ let unsubscribeEntries = null;
 let refreshGeneration = 0;
 let anomaliesExpanded = false;
 let refreshTimer = null;
+let latestEntries = [];
+let analyticsFilters = { project: "", task: "" };
+let expandedProjects = null;
 
 function setStatus(message, state = "ready") {
   const status = $("#statusLine");
@@ -70,6 +75,7 @@ function renderSummary(report) {
   const { primary, deltas, fragmentation, anomalies } = report;
   replaceChildren($("#summaryCards"), [
     summaryCard("Total effective time", duration(primary.totalEffectiveSeconds), `${delta(deltas.totalEffectiveSeconds)} vs previous`),
+    summaryCard("Total actual time", duration(primary.totalActualSeconds), "Elapsed intervals; excludes multiplier tails"),
     summaryCard("Logged days", String(primary.loggedDays)),
     summaryCard("Average / logged day", duration(primary.averageEffectiveSecondsPerLoggedDay)),
     summaryCard("Sessions", String(primary.sessionCount)),
@@ -113,12 +119,17 @@ function renderProjects(report) {
     const toggle = element("button", "project-toggle", `▾ ${project.label}`);
     toggle.type = "button";
     toggle.dataset.projectIndex = String(index);
-    toggle.setAttribute("aria-expanded", "true");
-    labelCell.replaceChildren(toggle);
+    toggle.dataset.projectLabel = project.label;
+    const expanded = expandedProjects ? expandedProjects.has(project.label) : true;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.textContent = `${expanded ? "▾" : "▸"} ${project.label}`;
+    const printLabel = element("span", "print-project-label", project.label);
+    labelCell.replaceChildren(toggle, printLabel);
     rows.push(projectRow);
     for (const task of project.tasks) {
       const taskRow = reportRow(task.label, task, "task-row");
       taskRow.dataset.projectIndex = String(index);
+      taskRow.hidden = !expanded;
       rows.push(taskRow);
     }
   }
@@ -164,7 +175,31 @@ function renderAnomalies({ anomalies }) {
     const title = element("div");
     title.append(element("div", "anomaly-type", anomaly.type.replaceAll("_", " ")),
       element("div", "anomaly-meta", `${shortDateTime(anomaly.start)} · ${duration(anomaly.actualSeconds)}`));
-    row.append(title, element("div", "", `${anomaly.project} / ${anomaly.task}`), element("div", "", anomaly.message));
+    const target = resolveAnalyticsEntryTarget(anomaly, latestEntries);
+    const destination = element("div", "anomaly-destination");
+    if (target) {
+      const open = element("button", "anomaly-link", "Open entry");
+      open.type = "button";
+      open.dataset.anomalyEntryId = target.entryId;
+      const query = new URLSearchParams({ entry: target.entryId, date: target.date });
+      open.dataset.anomalyDestination = `calendar/calendar.html?${query}`;
+      open.addEventListener("click", () => {
+        const currentTarget = resolveAnalyticsEntryTarget(anomaly, latestEntries);
+        if (!currentTarget) {
+          setStatus("This entry is no longer available", "error");
+          renderAnomalies(latestReport);
+          return;
+        }
+        const destination = `calendar/calendar.html?${new URLSearchParams({ entry: currentTarget.entryId, date: currentTarget.date })}`;
+        platform.openExtensionPage(destination).catch((error) => {
+          setStatus(error.message || "Could not open the calendar entry", "error");
+        });
+      });
+      destination.append(open);
+    } else {
+      destination.append(element("span", "anomaly-unavailable", "Entry unavailable"));
+    }
+    row.append(title, element("div", "", `${anomaly.project} / ${anomaly.task}`), element("div", "", anomaly.message), destination);
     return row;
   }));
   $("#anomaliesEmpty").hidden = totalCount > 0;
@@ -209,6 +244,82 @@ function renderReport(report) {
   renderDescriptions();
 }
 
+function filterLabel(value, fallback) {
+  if (!value) return fallback;
+  if (value === ANALYTICS_MISSING_FILTER) return `No ${fallback.toLowerCase()}`;
+  return value;
+}
+
+function renderFilterOptions(entries) {
+  for (const [field, labelText] of [["project", "projects"], ["task", "tasks"]]) {
+    const select = $(`#analytics${field[0].toUpperCase()}${field.slice(1)}Filter`);
+    const current = analyticsFilters[field];
+    const values = [...new Set((entries || []).map((entry) => String(entry[field] || "").trim()).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }) || left.localeCompare(right));
+    const options = [new Option(`All ${labelText}`, "")];
+    if ((entries || []).some((entry) => !String(entry[field] || "").trim())) {
+      options.push(new Option(`No ${field}`, ANALYTICS_MISSING_FILTER));
+    }
+    for (const value of values) options.push(new Option(value, value));
+    if (current && !options.some((option) => option.value === current)) {
+      options.push(new Option(`${filterLabel(current, field)} (not in loaded range)`, current));
+    }
+    select.replaceChildren(...options);
+    select.value = current;
+  }
+  $("#analyticsFilterSummary").textContent = `${filterLabel(analyticsFilters.project, "All projects")} · ${filterLabel(analyticsFilters.task, "All tasks")}`;
+}
+
+function browserTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "Browser local time";
+}
+
+function reportExportOptions() {
+  return {
+    primaryRange: $("#primaryRange").textContent,
+    comparisonRange: $("#comparisonRange").textContent,
+    timezone: browserTimezone(),
+    filters: {
+      project: filterLabel(analyticsFilters.project, "All projects"),
+      task: filterLabel(analyticsFilters.task, "All tasks")
+    }
+  };
+}
+
+function exportReport() {
+  if (!latestReport) return;
+  const csv = serializeAnalyticsReport(latestReport, reportExportOptions());
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `time-logger-analytics-${analyticsDateInputValue()}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setStatus("CSV exported", "ready");
+}
+
+function captureViewState() {
+  const active = document.activeElement;
+  return {
+    activeId: active?.id || "",
+    anomalyEntryId: active?.dataset?.anomalyEntryId || "",
+    projectLabel: active?.dataset?.projectLabel || "",
+    scrollTop: window.scrollY
+  };
+}
+
+function restoreViewState(state) {
+  if (!state) return;
+  let focusTarget = state.activeId ? document.getElementById(state.activeId) : null;
+  if (!focusTarget && state.anomalyEntryId) focusTarget = document.querySelector(`[data-anomaly-entry-id="${CSS.escape(state.anomalyEntryId)}"]`);
+  if (!focusTarget && state.projectLabel) {
+    focusTarget = [...document.querySelectorAll(".project-toggle")]
+      .find((toggle) => toggle.dataset.projectLabel === state.projectLabel);
+  }
+  focusTarget?.focus();
+  window.scrollTo(0, state.scrollTop);
+}
+
 function resolveSelectedPeriod() {
   const preset = $("#periodPreset").value;
   return resolveAnalyticsPeriod(preset, {
@@ -217,19 +328,22 @@ function resolveSelectedPeriod() {
   });
 }
 
-async function performRefresh(generation) {
+async function performRefresh(generation, viewState) {
   const now = new Date();
   const currentPreset = [ANALYTICS_PERIOD_PRESET.THIS_WEEK, ANALYTICS_PERIOD_PRESET.THIS_MONTH, ANALYTICS_PERIOD_PRESET.THIS_YEAR, ANALYTICS_PERIOD_PRESET.LAST_30_DAYS].includes($("#periodPreset").value);
   const period = currentPreset ? resolveAnalyticsPeriod($("#periodPreset").value, { now }) : (selectedPeriod || resolveSelectedPeriod());
   const earliest = period.primary.start < period.comparison.start ? period.primary.start : period.comparison.start;
   const latest = period.primary.end > period.comparison.end ? period.primary.end : period.comparison.end;
   const entries = await getEntriesIntersecting(earliest, latest);
-  const report = buildAnalyticsReport(entries, { ...period, now });
+  const report = buildAnalyticsReport(filterAnalyticsEntries(entries, analyticsFilters), { ...period, now });
   if (generation !== refreshGeneration) return;
+  latestEntries = entries;
+  renderFilterOptions(entries);
   selectedPeriod = period;
   $("#primaryRange").textContent = period.primary.label;
   $("#comparisonRange").textContent = period.comparison.label;
   renderReport(report);
+  restoreViewState(viewState);
   setStatus("Ready", "ready");
 }
 
@@ -239,8 +353,9 @@ async function performRefresh(generation) {
 // so startPage can expose its Retry path.
 function requestRefresh({ initial = false } = {}) {
   const generation = ++refreshGeneration;
+  const viewState = captureViewState();
   setStatus("Loading…", "pending");
-  return performRefresh(generation).catch((error) => {
+  return performRefresh(generation, viewState).catch((error) => {
     const current = generation === refreshGeneration;
     if (current) setStatus(error.message || "Could not load analytics", "error");
     if (!initial) {
@@ -267,6 +382,14 @@ function applyPeriod() {
   void requestRefresh();
 }
 
+function applyAnalyticsFilters() {
+  analyticsFilters = {
+    project: $("#analyticsProjectFilter").value,
+    task: $("#analyticsTaskFilter").value
+  };
+  void requestRefresh();
+}
+
 function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
@@ -276,6 +399,10 @@ function bindEvents() {
     if (!custom) applyPeriod();
   });
   $("#applyCustom").addEventListener("click", applyPeriod);
+  $("#exportAnalytics").addEventListener("click", exportReport);
+  $("#printAnalytics").addEventListener("click", () => window.print());
+  $("#analyticsProjectFilter").addEventListener("change", applyAnalyticsFilters);
+  $("#analyticsTaskFilter").addEventListener("change", applyAnalyticsFilters);
   $("#toggleDescriptions").addEventListener("click", () => {
     descriptionsExpanded = !descriptionsExpanded;
     renderDescriptions();
@@ -285,6 +412,9 @@ function bindEvents() {
     const toggle = event.target.closest(".project-toggle");
     if (!toggle) return;
     const expanded = toggle.getAttribute("aria-expanded") !== "true";
+    if (!expandedProjects) expandedProjects = new Set(latestReport?.projects.map((project) => project.label) || []);
+    if (expanded) expandedProjects.add(toggle.dataset.projectLabel);
+    else expandedProjects.delete(toggle.dataset.projectLabel);
     toggle.setAttribute("aria-expanded", String(expanded));
     toggle.textContent = `${expanded ? "▾" : "▸"} ${toggle.textContent.slice(2)}`;
     for (const row of $("#projectRows").querySelectorAll(`.task-row[data-project-index="${toggle.dataset.projectIndex}"]`)) {
@@ -292,7 +422,6 @@ function bindEvents() {
     }
   });
   unsubscribeEntries = onEntriesChanged(() => {
-    anomaliesExpanded = false;
     void requestRefresh();
   });
   globalThis.addEventListener("visibilitychange", () => {

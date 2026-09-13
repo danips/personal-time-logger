@@ -1,11 +1,13 @@
-import { allocateEntry } from "./time-allocation.js";
+import { allocateEntryByLocalDay } from "./time-allocation.js";
 import { ERROR_CODE } from "./error-codes.js";
+import { entryFingerprint } from "./fingerprints.js";
 import { localDateKey } from "./time.js";
 
 export const TEMPO_API_URL = "https://api.tempo.io/4";
 export const TEMPO_BULK_LIMIT = 50;
 export const TEMPO_HOST_PERMISSION = "https://api.tempo.io/*";
 export const TEMPO_UPLOAD_MESSAGE = "UPLOAD_TEMPO_WORKLOGS";
+export const TEMPO_CANCEL_MESSAGE = "CANCEL_TEMPO_UPLOAD";
 
 function tempoError(code, message) {
   const error = new Error(message);
@@ -38,6 +40,24 @@ export function normalizeTempoTaskIssueIds(value) {
   return Object.fromEntries(normalized);
 }
 
+export function tempoProjectTaskKey(project, task) {
+  return JSON.stringify([String(project ?? "").trim(), String(task ?? "").trim()]);
+}
+
+export function normalizeTempoProjectTaskIssueIds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized = {};
+  for (const [key, issueId] of Object.entries(value)) {
+    let parts;
+    try { parts = JSON.parse(key); } catch { continue; }
+    if (!Array.isArray(parts) || parts.length !== 2) continue;
+    const normalizedKey = tempoProjectTaskKey(parts[0], parts[1]);
+    const validIssueId = normalizeTempoIssueId(issueId);
+    if (validIssueId) normalized[normalizedKey] = validIssueId;
+  }
+  return normalized;
+}
+
 /** Accepts any iterable of local civil-date keys, ignoring unusable members. */
 export function normalizeTempoDayKeys(value) {
   if (!value || typeof value === "string" || typeof value[Symbol.iterator] !== "function") return new Set();
@@ -48,6 +68,32 @@ function dayIncluded(days, value) {
   if (!days) return true;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? false : days.has(localDateKey(date));
+}
+
+function stableSeconds(value) {
+  // Timestamp differences are millisecond based, but proportional effective
+  // seconds can still acquire a tiny binary-float tail. Keep real fractions
+  // while preventing an exact whole second from rounding up spuriously.
+  return Number(Number(value).toFixed(12));
+}
+
+function roundedDailyAllocations(allocations) {
+  const exact = allocations.map((allocation) => stableSeconds(allocation.effectiveSeconds));
+  const weeklyTarget = Math.ceil(stableSeconds(exact.reduce((total, seconds) => total + seconds, 0)));
+  const rounded = exact.map((seconds) => Math.floor(seconds));
+  let remaining = weeklyTarget - rounded.reduce((total, seconds) => total + seconds, 0);
+  const order = exact.map((seconds, index) => ({
+    index,
+    remainder: seconds - rounded[index],
+    date: localDateKey(allocations[index].start)
+  })).sort((first, second) => second.remainder - first.remainder || first.date.localeCompare(second.date));
+  for (let index = 0; index < order.length && remaining > 0; index += 1, remaining -= 1) {
+    rounded[order[index].index] += 1;
+  }
+  return allocations.map((allocation, index) => ({
+    ...allocation,
+    timeSpentSeconds: rounded[index]
+  }));
 }
 
 /**
@@ -61,19 +107,31 @@ export function prepareTempoWeek(entries, {
   periodEnd,
   authorAccountId,
   taskIssueIds,
+  projectTaskIssueIds,
   includedDays,
   now = new Date()
 } = {}) {
   const author = String(authorAccountId ?? "").trim();
   const mappings = normalizeTempoTaskIssueIds(taskIssueIds);
+  const projectMappings = normalizeTempoProjectTaskIssueIds(projectTaskIssueIds);
   const days = includedDays === undefined || includedDays === null
     ? null
     : normalizeTempoDayKeys(includedDays);
   const grouped = new Map();
   const missingTasks = new Set();
+  const missingTaskMappings = new Map();
+  const taskProjects = new Map();
   let skippedRunning = 0;
   let skippedZeroDuration = 0;
   let skippedExcludedDays = 0;
+
+  for (const entry of entries) {
+    if (!entry || entry.deleted_at) continue;
+    const task = String(entry.task ?? "").trim();
+    const project = String(entry.project ?? "").trim();
+    if (!taskProjects.has(task)) taskProjects.set(task, new Set());
+    taskProjects.get(task).add(project);
+  }
 
   for (const entry of entries) {
     if (!entry || entry.deleted_at) continue;
@@ -84,35 +142,47 @@ export function prepareTempoWeek(entries, {
       continue;
     }
 
-    const allocation = allocateEntry(entry, periodStart, periodEnd, { now });
-    if (!allocation) continue;
-    const startDate = localDateKey(allocation.start);
-    // Excluded days drop out before the mapping check so the calendar never
-    // prompts for a Jira issue ID belonging to a day nobody asked to send.
-    if (days && !days.has(startDate)) {
-      skippedExcludedDays += 1;
-      continue;
-    }
-    const timeSpentSeconds = Math.ceil(Number(allocation.effectiveSeconds) || 0);
-    if (timeSpentSeconds < 1) {
-      skippedZeroDuration += 1;
-      continue;
-    }
+    const allocations = roundedDailyAllocations(allocateEntryByLocalDay(entry, {
+      periodStart,
+      periodEnd,
+      now
+    }));
+    for (const allocation of allocations) {
+      const startDate = localDateKey(allocation.start);
+      // Excluded days drop out after per-entry rounding so a selected day gets
+      // the same allocation whether it is sent alone or with the whole week.
+      if (days && !days.has(startDate)) {
+        skippedExcludedDays += 1;
+        continue;
+      }
+      const timeSpentSeconds = allocation.timeSpentSeconds;
+      if (timeSpentSeconds < 1) {
+        skippedZeroDuration += 1;
+        continue;
+      }
 
-    const task = String(entry.task ?? "").trim();
-    const issueId = Object.hasOwn(mappings, task) ? mappings[task] : "";
-    if (!issueId) {
-      missingTasks.add(task);
-      continue;
-    }
+      const task = String(entry.task ?? "").trim();
+      const project = String(entry.project ?? "").trim();
+      const projectTaskKey = tempoProjectTaskKey(project, task);
+      const taskHasCollision = (taskProjects.get(task)?.size || 0) > 1;
+      const issueId = Object.hasOwn(projectMappings, projectTaskKey)
+        ? projectMappings[projectTaskKey]
+        : taskHasCollision ? "" : Object.hasOwn(mappings, task) ? mappings[task] : "";
+      if (!issueId) {
+        missingTasks.add(task);
+        missingTaskMappings.set(projectTaskKey, { project, task, key: projectTaskKey });
+        continue;
+      }
 
-    if (!grouped.has(issueId)) grouped.set(issueId, []);
-    grouped.get(issueId).push({
-      authorAccountId: author,
-      description: String(entry.description ?? ""),
-      startDate,
-      timeSpentSeconds
-    });
+      if (!grouped.has(issueId)) grouped.set(issueId, []);
+      grouped.get(issueId).push({
+        authorAccountId: author,
+        description: String(entry.description ?? ""),
+        startDate,
+        timeSpentSeconds,
+        entryFingerprint: entryFingerprint(entry)
+      });
+    }
   }
 
   const groups = [...grouped].map(([issueId, worklogs]) => ({ issueId, worklogs }));
@@ -122,7 +192,8 @@ export function prepareTempoWeek(entries, {
     skippedRunning,
     skippedZeroDuration,
     skippedExcludedDays,
-    totalWorklogs: groups.reduce((total, group) => total + group.worklogs.length, 0)
+    totalWorklogs: groups.reduce((total, group) => total + group.worklogs.length, 0),
+    missingTaskMappings: [...missingTaskMappings.values()]
   };
 }
 
@@ -149,8 +220,21 @@ async function responseDetail(response) {
   }
 }
 
+function tempoWireWorklog(worklog) {
+  return {
+    authorAccountId: worklog.authorAccountId,
+    description: worklog.description,
+    startDate: worklog.startDate,
+    timeSpentSeconds: worklog.timeSpentSeconds
+  };
+}
+
 function pause(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function notifyChunkOutcome(callback, details) {
+  if (typeof callback === "function") await callback(details);
 }
 
 /**
@@ -191,7 +275,10 @@ export async function sendTempoWorklogs(groups, {
   token,
   fetchImpl = globalThis.fetch,
   requestIntervalMs = 210,
-  wait = pause
+  wait = pause,
+  beforeChunk,
+  onChunkOutcome,
+  shouldCancel
 } = {}) {
   const bearerToken = String(token ?? "").trim();
   let sentWorklogs = 0;
@@ -207,8 +294,19 @@ export async function sendTempoWorklogs(groups, {
   for (const group of groups) {
     const issueId = normalizeTempoIssueId(group?.issueId);
     if (!issueId) throw tempoError(ERROR_CODE.TEMPO_API_ERROR, "A cached Tempo issue ID is invalid");
-    for (const worklogs of chunks(group.worklogs || [], TEMPO_BULK_LIMIT)) {
+    for (const originalWorklogs of chunks(group.worklogs || [], TEMPO_BULK_LIMIT)) {
+      if (!originalWorklogs.length) continue;
+      if (await shouldCancel?.()) {
+        throw progress(tempoError(ERROR_CODE.TEMPO_CANCELLED, "Tempo upload cancelled; acknowledged work was retained and no future chunks were sent."), sentWorklogs ? "acknowledged" : "not-started");
+      }
+      const preparedChunk = await beforeChunk?.({ issueId, worklogs: originalWorklogs }) || {};
+      const worklogs = preparedChunk.worklogs || originalWorklogs;
+      const claimIds = preparedChunk.claimIds || [];
       if (!worklogs.length) continue;
+      if (await shouldCancel?.()) {
+        await notifyChunkOutcome(onChunkOutcome, { issueId, worklogs, claimIds, outcome: "rejected" });
+        throw progress(tempoError(ERROR_CODE.TEMPO_CANCELLED, "Tempo upload cancelled before the next request; acknowledged work was retained and no future chunks were sent."), sentWorklogs ? "acknowledged" : "rejected");
+      }
       if (requestCount && requestIntervalMs > 0) await wait(requestIntervalMs);
       requestCount += 1;
       let response;
@@ -219,15 +317,17 @@ export async function sendTempoWorklogs(groups, {
             "Authorization": `Bearer ${bearerToken}`,
             "Content-Type": "application/json"
           },
-          body: JSON.stringify(worklogs)
+          body: JSON.stringify(worklogs.map(tempoWireWorklog))
         });
       } catch (error) {
+        await notifyChunkOutcome(onChunkOutcome, { issueId, worklogs, claimIds, outcome: "unknown" });
         const networkError = error?.code === ERROR_CODE.TEMPO_NETWORK
           ? error
           : tempoError(ERROR_CODE.TEMPO_NETWORK, "Tempo request could not complete; inspect Tempo before resending.");
         throw progress(networkError, "unknown");
       }
       if (!response.ok) {
+        await notifyChunkOutcome(onChunkOutcome, { issueId, worklogs, claimIds, outcome: "rejected" });
         const detail = await responseDetail(response);
         const partial = sentWorklogs
           ? ` ${sentWorklogs} worklog${sentWorklogs === 1 ? " was" : "s were"} already sent; do not retry the whole week.`
@@ -237,6 +337,7 @@ export async function sendTempoWorklogs(groups, {
           `Tempo rejected issue ${issueId} (HTTP ${response.status})${detail ? `: ${detail}` : "."}${partial}`
         ), "rejected");
       }
+      await notifyChunkOutcome(onChunkOutcome, { issueId, worklogs, claimIds, outcome: "acknowledged" });
       sentWorklogs += worklogs.length;
     }
   }

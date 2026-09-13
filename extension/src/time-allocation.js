@@ -53,14 +53,28 @@ export function allocateEntry(entry, periodStart, periodEnd, options = {}) {
   };
 }
 
-/** Splits an entry into local civil-day allocations, including DST-length days. */
+/**
+ * Splits an entry into local civil-day allocations, including DST-length days.
+ * Optional period bounds are applied before walking days so a short upload
+ * window cannot make this scan the entry's entire lifetime.
+ */
 export function allocateEntryByLocalDay(entry, options = {}) {
   const interval = entryInterval(entry, options);
   if (!interval) return [];
 
+  const periodStart = options.periodStart == null ? interval.start : asDate(options.periodStart);
+  const periodEnd = options.periodEnd == null ? interval.end : asDate(options.periodEnd);
+  if (!periodStart || !periodEnd || periodEnd <= periodStart) return [];
+  const clippedStart = interval.start > periodStart ? interval.start : periodStart;
+  const clippedEnd = interval.end < periodEnd ? interval.end : periodEnd;
+  if (clippedEnd <= clippedStart) return [];
+
   const allocations = [];
-  for (let dayStart = startOfLocalDay(interval.start); dayStart < interval.end; dayStart = addDays(dayStart, 1)) {
-    const allocation = allocateEntry(entry, dayStart, addDays(dayStart, 1), { now: interval.end });
+  for (let dayStart = startOfLocalDay(clippedStart); dayStart < clippedEnd; dayStart = addDays(dayStart, 1)) {
+    const dayEnd = addDays(dayStart, 1);
+    const segmentStart = dayStart > clippedStart ? dayStart : clippedStart;
+    const segmentEnd = dayEnd < clippedEnd ? dayEnd : clippedEnd;
+    const allocation = allocateEntry(entry, segmentStart, segmentEnd, { now: interval.end });
     if (allocation) allocations.push(allocation);
   }
   return allocations;

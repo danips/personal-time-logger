@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import {
   LONG_SESSION_SECONDS,
+  ANALYTICS_MISSING_FILTER,
   SHORT_ANOMALY_SECONDS,
   STALE_ACTIVE_SECONDS,
   aggregateDescriptions,
@@ -12,7 +13,9 @@ import {
   buildAnalyticsReport,
   comparisonDelta,
   detectAnomalies,
+  filterAnalyticsEntries,
   fragmentationMetrics,
+  resolveAnalyticsEntryTarget,
   sessionsForPeriod
 } from "../extension/src/analytics.js";
 
@@ -69,6 +72,7 @@ describe("clipped analytics sessions and totals", () => {
     const totals = aggregatePeriod([], { entries: [], period: primary, now });
     assert.deepEqual(totals, {
       totalEffectiveSeconds: 0,
+      totalActualSeconds: 0,
       loggedDays: 0,
       averageEffectiveSecondsPerLoggedDay: 0,
       sessionCount: 0,
@@ -94,6 +98,25 @@ describe("clipped analytics sessions and totals", () => {
 });
 
 describe("comparison and hierarchy", () => {
+  it("filters both project/task values without changing entry duration semantics", () => {
+    const entries = [
+      entry("alpha-build", "2026-09-02T09:00:00Z", "2026-09-02T10:00:00Z", { project: "Alpha", task: "Build" }),
+      entry("alpha-test", "2026-09-02T10:00:00Z", "2026-09-02T11:00:00Z", { project: "Alpha", task: "Test" }),
+      entry("missing", "2026-09-02T11:00:00Z", "2026-09-02T12:00:00Z", { project: "", task: "" })
+    ];
+    assert.deepEqual(filterAnalyticsEntries(entries, { project: "alpha", task: "Build" }).map(({ id }) => id), ["alpha-build"]);
+    assert.deepEqual(filterAnalyticsEntries(entries, { project: ANALYTICS_MISSING_FILTER }).map(({ id }) => id), ["missing"]);
+    assert.equal(buildAnalyticsReport(filterAnalyticsEntries(entries, { project: "Alpha" }), { primary, comparison, now }).primary.totalActualSeconds, 7200);
+  });
+
+  it("rejects missing or deleted anomaly targets before navigation", () => {
+    const live = entry("live", "2026-09-02T09:00:00Z", "2026-09-02T10:00:00Z");
+    const deleted = entry("deleted", "2026-09-02T10:00:00Z", "2026-09-02T11:00:00Z", { deleted_at: "2026-09-03T00:00:00Z" });
+    assert.deepEqual(resolveAnalyticsEntryTarget({ entryId: "live", start: live.start_at }, [live]), { entryId: "live", date: live.start_at });
+    assert.equal(resolveAnalyticsEntryTarget({ entryId: "deleted", start: deleted.start_at }, [deleted]), null);
+    assert.equal(resolveAnalyticsEntryTarget({ entryId: "gone" }, [live]), null);
+  });
+
   it("uses finite zero and New deltas", () => {
     assert.deepEqual(comparisonDelta(0, 0), { kind: "percent", percent: 0 });
     assert.deepEqual(comparisonDelta(1, 0), { kind: "new", percent: null });

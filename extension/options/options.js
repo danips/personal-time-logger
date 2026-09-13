@@ -33,20 +33,54 @@ import {
   planOptionsSettingsSave
 } from "../src/options-settings.js";
 import { storageUiState } from "../src/options-storage-ui.js";
-import { parseBackup, readPortableBackupSnapshot, restoreBackup, serializeBackup, MAX_BACKUP_BYTES } from "../src/backup.js";
+import { parseBackup, previewBackup, readPortableBackupSnapshot, restoreBackup, serializeBackup, MAX_BACKUP_BYTES } from "../src/backup.js";
 import { createProviderSetupController } from "./provider-setup-controller.js";
+import { formatSyncCadence, formatSyncContext, readSyncStatus } from "../src/sync-status.js";
 
 let diagnostics = [];
+let syncStatusSnapshot = null;
 let eventsBound = false;
 let auxiliaryPagesInitialized = false;
 let auxiliaryPagesInitialization = null;
 let settingsLayoutWasVisible = false;
 let syncSectionNavigation = () => {};
+const BACKUP_LOCK_KEY = "sync_lock";
+const BACKUP_LOCK_TTL_MS = 30_000;
+const BACKUP_FIELD_LABELS = Object.freeze({
+  project: "Project",
+  task: "Task",
+  description: "Description",
+  start_at: "Start",
+  end_at: "End",
+  duration_seconds: "Duration seconds",
+  status: "Status",
+  created_at: "Created",
+  updated_at: "Updated",
+  deleted_at: "Deleted",
+  device_id: "Device",
+  revision: "Revision",
+  multiply: "Multiplier"
+});
+const BACKUP_SETTING_LABELS = Object.freeze({
+  duration_multiplier: "Duration multiplier",
+  sync_interval_seconds: "Sync interval",
+  tempo_author_account_id: "Tempo author account",
+  tempo_task_issue_ids: "Tempo task mappings",
+  window_resize_presets: "Window presets",
+  workday_start_hour: "Workday start hour"
+});
 // A refresh may finish while a save is in flight, and a user may edit the same
 // field again before that save settles. Keep the local edit revision separate
 // from the last revision known to be persisted so a late save cannot clear the
 // protection for the newer draft.
 const optionDrafts = new Map();
+const externalDraftKeys = new Set();
+const DRAFT_SECTIONS = Object.freeze([
+  { id: "general", keys: ["syncInterval", "durationMultiplier", "workdayStartHour", "staleTimerReminderEnabled"] },
+  { id: "google-account", keys: ["googleClientId", "googleClientSecret"] },
+  { id: "storage", keys: ["remoteBackendTarget", "mysqlApiBaseUrl", "mysqlApiToken", "cloudflareD1ApiBaseUrl", "cloudflareD1ApiToken"] },
+  { id: "tempo", keys: ["tempoApiToken", "tempoAuthorAccountId", "tempoMappings"] }
+]);
 function providerSetupError(code, message, cause) {
   return Object.assign(new Error(message, cause ? { cause } : undefined), { code });
 }
@@ -88,6 +122,115 @@ function backupError(code, message = "The backup operation could not complete.")
   return Object.assign(new Error(message), { code });
 }
 
+function displayBackupValue(value) {
+  if (value === undefined) return "(not set)";
+  if (value === "") return "(empty)";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function backupEntryHeading(entry) {
+  return [entry?.project, entry?.task].filter(Boolean).join(" / ") || entry?.description || entry?.id || "Untitled entry";
+}
+
+function renderBackupConflictList(container, conflicts) {
+  if (!container) return;
+  container.replaceChildren();
+  for (const conflict of conflicts || []) {
+    const item = document.createElement("li");
+    const heading = document.createElement("strong");
+    heading.textContent = `${backupEntryHeading(conflict.backup)} (${conflict.id})`;
+    item.append(heading);
+    const differences = document.createElement("ul");
+    for (const difference of conflict.differences || []) {
+      const detail = document.createElement("li");
+      const label = BACKUP_FIELD_LABELS[difference.field] || difference.field;
+      detail.textContent = `${label}: local ${displayBackupValue(difference.local)}; backup ${displayBackupValue(difference.backup)}`;
+      differences.append(detail);
+    }
+    item.append(differences);
+    container.append(item);
+  }
+}
+
+function renderBackupEntryList(container, entries) {
+  if (!container) return;
+  container.replaceChildren();
+  for (const entry of entries || []) {
+    const item = document.createElement("li");
+    item.textContent = `${backupEntryHeading(entry)} (${entry.id})`;
+    container.append(item);
+  }
+}
+
+function renderBackupPreview(backup, preview) {
+  const panel = document.getElementById("backupPreview");
+  if (!panel) return;
+  document.getElementById("backupPreviewSummary").textContent = `${preview.additions.length} addition${preview.additions.length === 1 ? "" : "s"}, ${preview.identical.length} identical, ${preview.conflicts.length} conflict${preview.conflicts.length === 1 ? "" : "s"}, and ${preview.settingsChanges.length} setting change${preview.settingsChanges.length === 1 ? "" : "s"}.`;
+  const settingsChoice = document.getElementById("restoreBackupSettings");
+  settingsChoice.checked = preview.settingsChanges.length > 0;
+  settingsChoice.disabled = preview.settingsChanges.length === 0;
+  const appearanceChoice = document.getElementById("restoreBackupAppearance");
+  appearanceChoice.checked = Boolean(backup.appearance);
+  appearanceChoice.disabled = !backup.appearance;
+  const settingsList = document.getElementById("backupPreviewSettings");
+  settingsList.replaceChildren();
+  for (const change of preview.settingsChanges) {
+    const item = document.createElement("li");
+    item.textContent = `${BACKUP_SETTING_LABELS[change.key] || change.key}: ${displayBackupValue(change.current)} → ${displayBackupValue(change.backup)}`;
+    settingsList.append(item);
+  }
+  renderBackupEntryList(document.getElementById("backupPreviewAdditions"), preview.additions);
+  renderBackupEntryList(document.getElementById("backupPreviewIdentical"), preview.identical);
+  renderBackupConflictList(document.getElementById("backupPreviewConflicts"), preview.conflicts);
+  panel.hidden = false;
+  document.getElementById("confirmBackupRestore")?.focus();
+}
+
+function showBackupPreview(backup, preview) {
+  renderBackupPreview(backup, preview);
+  return new Promise((resolve) => {
+    const confirm = document.getElementById("confirmBackupRestore");
+    const cancel = document.getElementById("cancelBackupRestore");
+    const finish = (choice) => {
+      confirm.onclick = null;
+      cancel.onclick = null;
+      document.getElementById("backupPreview").hidden = true;
+      resolve(choice);
+    };
+    confirm.onclick = () => finish({
+      restoreSettings: document.getElementById("restoreBackupSettings").checked,
+      restoreAppearance: document.getElementById("restoreBackupAppearance").checked
+    });
+    cancel.onclick = () => finish(null);
+  });
+}
+
+function restoreReportText(summary, { syncPending = false } = {}) {
+  const conflictText = summary.conflicts.length
+    ? ` ${summary.conflicts.length} conflict${summary.conflicts.length === 1 ? " was" : "s were"} left unchanged.`
+    : "";
+  const pendingText = syncPending ? " Synchronization is pending; the local restore is committed." : "";
+  return `Backup restored locally: ${summary.added} added, ${summary.identical} identical, ${summary.settingsChanged} setting${summary.settingsChanged === 1 ? "" : "s"} changed.${conflictText}${pendingText}`;
+}
+
+function renderBackupReport(summary, { syncPending = false, restoreSettings = true, restoreAppearance = true } = {}) {
+  const report = document.getElementById("backupReport");
+  if (!report) return;
+  document.getElementById("backupReportSummary").textContent = `${restoreReportText(summary, { syncPending })} ${restoreSettings ? "Selected settings were applied." : "Settings were not selected."}${restoreAppearance ? " Appearance was applied when present." : " Appearance was not selected."}`;
+  renderBackupEntryList(document.getElementById("backupReportAdditions"), summary.addedEntries);
+  renderBackupEntryList(document.getElementById("backupReportIdentical"), summary.identicalEntries);
+  const settings = document.getElementById("backupReportSettings");
+  settings.replaceChildren();
+  for (const change of summary.settingsChanges || []) {
+    const item = document.createElement("li");
+    item.textContent = `${BACKUP_SETTING_LABELS[change.key] || change.key}: ${displayBackupValue(change.current)} → ${displayBackupValue(change.backup)}`;
+    settings.append(item);
+  }
+  renderBackupConflictList(document.getElementById("backupReportConflicts"), summary.conflictDetails);
+  report.hidden = false;
+}
+
 function optionDraftKey(element) {
   return element?.closest?.("#tempoMappings")?.id || element?.id || element?.name || "";
 }
@@ -100,6 +243,7 @@ function optionDraftState(key) {
 function markOptionEdited(key) {
   if (!key) return;
   optionDraftState(key).revision += 1;
+  updateOptionDraftIndicators();
 }
 
 function captureOptionDrafts(keys) {
@@ -114,7 +258,9 @@ function acknowledgeOptionDrafts(captured) {
   for (const [key, revision] of captured || []) {
     const state = optionDraftState(key);
     if (state.revision === revision) state.acknowledgedRevision = revision;
+    externalDraftKeys.delete(key);
   }
+  updateOptionDraftIndicators();
 }
 
 function isDirtyOptionDraft(key) {
@@ -123,25 +269,105 @@ function isDirtyOptionDraft(key) {
 }
 
 function setRefreshedValue(element, value) {
-  if (!element || isDirtyOptionDraft(optionDraftKey(element))) return;
+  if (!element) return;
+  const key = optionDraftKey(element);
+  if (isDirtyOptionDraft(key)) {
+    externalDraftKeys.add(key);
+    updateOptionDraftIndicators();
+    return;
+  }
   element.value = String(value ?? "");
+}
+
+function setRefreshedChecked(element, value) {
+  if (!element) return;
+  const key = optionDraftKey(element);
+  if (isDirtyOptionDraft(key)) {
+    externalDraftKeys.add(key);
+    updateOptionDraftIndicators();
+    return;
+  }
+  element.checked = Boolean(value);
+}
+
+function updateOptionDraftIndicators() {
+  for (const section of DRAFT_SECTIONS) {
+    const dirty = section.keys.some((key) => isDirtyOptionDraft(key));
+    const external = section.keys.some((key) => externalDraftKeys.has(key));
+    const indicator = document.getElementById(`${section.id}DraftIndicator`);
+    const message = document.getElementById(`${section.id}DraftMessage`);
+    const discard = document.getElementById(`${section.id}DiscardDraft`);
+    if (!indicator || !message || !discard) continue;
+    indicator.hidden = !dirty && !external;
+    message.textContent = external && !dirty
+      ? "Saved value changed elsewhere; your draft is still shown."
+      : external
+        ? "Unsaved changes; a saved value changed elsewhere."
+        : "Unsaved changes";
+    discard.hidden = !dirty && !external;
+  }
+}
+
+function discardOptionSection(sectionId) {
+  const section = DRAFT_SECTIONS.find((candidate) => candidate.id === sectionId);
+  if (!section) return;
+  for (const key of section.keys) {
+    const state = optionDraftState(key);
+    state.acknowledgedRevision = state.revision;
+    externalDraftKeys.delete(key);
+  }
+  void refresh().catch(() => {});
+  setStatus(`${sectionId === "google-account" ? "Google account" : sectionId[0].toUpperCase() + sectionId.slice(1)} draft discarded`);
+  updateOptionDraftIndicators();
+}
+
+function setOptionFieldError(input, message = "") {
+  if (!input) return;
+  const errorId = `${input.id}Error`;
+  let error = document.getElementById(errorId);
+  if (!error) {
+    error = document.createElement("span");
+    error.id = errorId;
+    error.className = "field-error";
+    error.setAttribute("role", "alert");
+    input.insertAdjacentElement("afterend", error);
+  }
+  error.textContent = message;
+  error.hidden = !message;
+  input.setCustomValidity(message);
+  input.toggleAttribute("aria-invalid", Boolean(message));
+  if (message) input.setAttribute("aria-describedby", errorId);
+  else input.removeAttribute("aria-describedby");
 }
 
 function configSaveOwner() {
   return `options-config:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 }
 
-async function ensureBackupSync() {
+function backupLockOwner() {
+  return `backup:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
+}
+
+async function withLocalBackupLock(task) {
+  const lock = await claimLock(BACKUP_LOCK_KEY, backupLockOwner(), BACKUP_LOCK_TTL_MS);
+  if (!lock) throw backupError(ERROR_CODE.SYNC_BUSY, "A sync or migration is active. Wait for it to finish, then retry the local backup.");
+  try {
+    return await task();
+  } finally {
+    await releaseLock(lock);
+  }
+}
+
+async function syncRestoredBackup() {
   const result = await syncNow({ force: true });
   if (result?.status !== "synced" || await getDirtyEntryCount()) {
-    throw backupError(ERROR_CODE.BACKUP_NOT_SYNCED);
+    throw backupError(ERROR_CODE.BACKUP_NOT_SYNCED, "The backup was restored locally, but synchronization is still pending.");
   }
 }
 
 async function exportBackupClicked() {
-  setStatus("Synchronizing before creating backup...");
-  await ensureBackupSync();
-  const snapshot = await readPortableBackupSnapshot();
+  setStatus("Capturing local backup...");
+  const snapshot = await withLocalBackupLock(() => readPortableBackupSnapshot());
   const text = serializeBackup({ ...snapshot, appearance: readThemePreferences() });
   const blob = new Blob([text], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -155,28 +381,31 @@ async function exportBackupClicked() {
 
 async function importBackupClicked(file) {
   if (!file) return false;
-  if (Number(file.size) > MAX_BACKUP_BYTES) throw Object.assign(new Error("This backup exceeds the 128 MiB UTF-8 limit. Choose a smaller file or use the documented alternate recovery path."), { code: ERROR_CODE.BACKUP_INVALID });
+  if (Number(file.size) > MAX_BACKUP_BYTES) throw Object.assign(new Error("This backup exceeds the 128 MiB UTF-8 limit. Chunked import is not supported; use a smaller backup."), { code: ERROR_CODE.BACKUP_INVALID });
   const backup = parseBackup(await file.text());
-  if (globalThis.confirm && !globalThis.confirm(
-    `Restore ${backup.entries.length} entr${backup.entries.length === 1 ? "y" : "ies"} from this backup? Existing entries with the same ID will be compared and conflicts will be left unchanged.`
-  )) return false;
+  const preview = await withLocalBackupLock(() => previewBackup(backup));
+  const choice = await showBackupPreview(backup, preview);
+  if (!choice) return false;
 
-  setStatus("Synchronizing before restoring backup...");
-  await ensureBackupSync();
-  const summary = await restoreBackup(backup);
-  if (backup.appearance) saveThemePreferences(backup.appearance);
+  setStatus("Restoring local backup...");
+  const summary = await withLocalBackupLock(() => restoreBackup(backup, { restoreSettings: choice.restoreSettings }));
+  if (choice.restoreAppearance && backup.appearance) saveThemePreferences(backup.appearance);
 
+  let syncPending = false;
   if (summary.added || summary.settingsChanged) {
-    setStatus("Synchronizing restored backup...");
-    try { await ensureBackupSync(); }
-    catch (error) { setStatus(`Restored locally; sync pending. Retry synchronization. ${formatError(error)}`); return true; }
+    setStatus("Backup restored locally; synchronizing...");
+    try { await syncRestoredBackup(); }
+    catch (error) {
+      syncPending = true;
+      setStatus(`Backup restored locally; sync pending. Retry synchronization. ${formatError(error)}`);
+    }
   }
-  const conflictIds = summary.conflicts.slice(0, 5).join(", ");
-  const conflictSuffix = summary.conflicts.length > 5 ? ", …" : "";
-  const conflictText = summary.conflicts.length
-    ? ` ${summary.conflicts.length} entr${summary.conflicts.length === 1 ? "y conflict was" : "y conflicts were"} left unchanged (${conflictIds}${conflictSuffix}).`
-    : "";
-  setStatus(`Backup restored: ${summary.added} entr${summary.added === 1 ? "y" : "ies"} added, ${summary.settingsChanged} setting${summary.settingsChanged === 1 ? "" : "s"} changed.${conflictText}`);
+  renderBackupReport(summary, {
+    syncPending,
+    restoreSettings: choice.restoreSettings,
+    restoreAppearance: choice.restoreAppearance
+  });
+  setStatus(restoreReportText(summary, { syncPending }));
   return true;
 }
 
@@ -292,10 +521,22 @@ async function saveTempoSettings() {
 }
 
 function setStatus(message) {
-  for (const id of ["statusLine", "firstRunStatus", "backupStatus"]) {
+  for (const id of ["statusLine", "firstRunStatus", "backupStatus", "setupBackupStatus"]) {
     const status = document.getElementById(id);
     if (status) status.textContent = message;
   }
+}
+
+function bindBackupControls(exportId, chooseId, inputId) {
+  document.getElementById(exportId)?.addEventListener("click", (event) => runOptionsAction(
+    "export-backup", exportBackupClicked, event.currentTarget, { refreshOnError: false }
+  ));
+  document.getElementById(chooseId)?.addEventListener("click", () => document.getElementById(inputId)?.click());
+  document.getElementById(inputId)?.addEventListener("change", (event) => {
+    const input = event.currentTarget;
+    void runOptionsAction("import-backup", () => importBackupClicked(input.files?.[0]), undefined, { refreshOnError: false })
+      .finally(() => { input.value = ""; });
+  });
 }
 
 async function backendIsEstablished() {
@@ -401,30 +642,33 @@ async function saveSettings() {
   });
   if (!next.valid) {
     const invalidInput = next.field === "interval" ? $("#syncInterval") : multiplierInput;
-    invalidInput.setCustomValidity(next.message);
-    invalidInput.reportValidity();
+    setOptionFieldError(invalidInput, next.message);
+    if (invalidInput !== $("#syncInterval")) setOptionFieldError($("#syncInterval"));
+    if (invalidInput !== multiplierInput) setOptionFieldError(multiplierInput);
     invalidInput.focus();
     setStatus(next.message);
     return false;
   }
-  multiplierInput.setCustomValidity("");
+  setOptionFieldError($("#syncInterval"));
+  setOptionFieldError(multiplierInput);
 
   const workdayStart = normalizeWorkdayStartHour(workdayStartInput.value);
   if (!workdayStart.valid) {
-    workdayStartInput.setCustomValidity(workdayStart.message);
-    workdayStartInput.reportValidity();
+    setOptionFieldError(workdayStartInput, workdayStart.message);
     workdayStartInput.focus();
     setStatus(workdayStart.message);
     return false;
   }
-  workdayStartInput.setCustomValidity("");
+  setOptionFieldError(workdayStartInput);
 
-  const captured = captureOptionDrafts(["syncInterval", "durationMultiplier", "workdayStartHour"]);
+  const staleTimerReminderEnabled = $("#staleTimerReminderEnabled").checked;
+  const captured = captureOptionDrafts(["syncInterval", "durationMultiplier", "workdayStartHour", "staleTimerReminderEnabled"]);
   const saved = await mutateSettings([
     SETTING_KEY.SYNC_INTERVAL_SECONDS,
     SETTING_KEY.DURATION_MULTIPLIER,
     SETTING_KEY.DURATION_MULTIPLIER_UPDATED_AT,
     SETTING_KEY.WORKDAY_START_HOUR,
+    SETTING_KEY.STALE_TIMER_REMINDER_ENABLED,
     NEXT_DUE_KEY
   ], (settings) => {
     const plan = planOptionsSettingsSave({
@@ -448,14 +692,16 @@ async function saveSettings() {
     if (workdayStartChanged) {
       settings.set(SETTING_KEY.WORKDAY_START_HOUR, workdayStart.start);
     }
-    return { ...plan, workdayStartChanged };
+    const reminderChanged = Boolean(settings.get(SETTING_KEY.STALE_TIMER_REMINDER_ENABLED, false)) !== staleTimerReminderEnabled;
+    if (reminderChanged) settings.set(SETTING_KEY.STALE_TIMER_REMINDER_ENABLED, staleTimerReminderEnabled);
+    return { ...plan, workdayStartChanged, reminderChanged };
   });
   if (isCurrentOptionDraft(captured, "syncInterval")) $("#syncInterval").value = String(next.interval);
   if (isCurrentOptionDraft(captured, "durationMultiplier")) multiplierInput.value = String(next.multiplier);
   if (isCurrentOptionDraft(captured, "workdayStartHour")) workdayStartInput.value = String(workdayStart.start);
   acknowledgeOptionDrafts(captured);
 
-  if (!saved.intervalChanged && !saved.multiplierSyncNeeded && !saved.workdayStartChanged) {
+  if (!saved.intervalChanged && !saved.multiplierSyncNeeded && !saved.workdayStartChanged && !saved.reminderChanged) {
     setStatus("Settings unchanged");
     return;
   }
@@ -513,6 +759,7 @@ function renderStorage(activeBackend) {
   const active = decodeRemoteProviderId(activeBackend);
   renderActiveBackendLabel(active);
   $("#remoteBackendTarget").value = active;
+  renderPreparedBackendLabel(active);
   renderProviderFields(active, $("#remoteBackendTarget").value);
   renderStorageProviderVisibility(active, $("#remoteBackendTarget").value);
 }
@@ -545,6 +792,15 @@ function renderActiveBackendLabel(activeBackend) {
   }
 }
 
+function renderPreparedBackendLabel(targetBackend) {
+  const target = decodeRemoteProviderId(targetBackend);
+  try {
+    $("#preparedRemoteBackend").textContent = `Prepared backend: ${getRemoteProvider(target).label}`;
+  } catch {
+    $("#preparedRemoteBackend").textContent = "Prepared backend: Unknown backend";
+  }
+}
+
 async function refreshActiveBackendLabel() {
   renderActiveBackendLabel(await getSetting(
     SETTING_KEY.REMOTE_BACKEND,
@@ -555,6 +811,7 @@ async function refreshActiveBackendLabel() {
 async function renderStorageTarget() {
   const active = await getSetting(SETTING_KEY.REMOTE_BACKEND, REMOTE_PROVIDER_ID.GOOGLE_SHEETS);
   renderProviderFields(active, $("#remoteBackendTarget").value);
+  renderPreparedBackendLabel($("#remoteBackendTarget").value);
   renderStorageProviderVisibility(
     active,
     $("#remoteBackendTarget").value
@@ -567,7 +824,17 @@ function renderMigration(activeBackend, migrationState) {
   const button = $("#migrateStorage");
   const running = migrationState && !["complete", "failed"].includes(migrationState.phase);
   button.hidden = !running && target === active;
-  button.textContent = running ? "Resume migration" : `Migrate data and switch to ${getRemoteProvider(target).label}`;
+  button.textContent = running ? "Resume migration" : `Migrate verified data and switch to ${getRemoteProvider(target).label}`;
+  const preview = migrationState?.preview;
+  const previewElement = $("#migrationPreview");
+  previewElement.hidden = !preview;
+  if (preview) {
+    const source = migrationState.source_provider === "local"
+      ? "this device"
+      : getRemoteProvider(decodeRemoteProviderId(migrationState.source_provider)).label;
+    const destination = getRemoteProvider(decodeRemoteProviderId(migrationState.target_provider)).label;
+    previewElement.textContent = `Verified dataset preview: ${source} has ${preview.sourceEntryCount} entries and ${preview.sourceConfigCount} shared settings; ${destination} has ${preview.targetEntryCount} entries and ${preview.targetConfigCount} shared settings; ${preview.disagreementCount} disagreement${preview.disagreementCount === 1 ? "" : "s"} will be checked before activation.`;
+  }
   if (running) {
     const entries = Number(migrationState.completed_entries || 0);
     const total = Number(migrationState.total_entries || 0);
@@ -621,6 +888,27 @@ async function testCloudflareD1Connection() {
   $("#cloudflareD1ConnectionStatus").textContent = cloudflareD1Setup.formatHealth(health);
   setStatus("Cloudflare D1 connection verified");
   return false;
+}
+
+async function clearSecretSetting(settingKey, inputId, label) {
+  const captured = captureOptionDrafts([inputId]);
+  await mutateSettings([settingKey], (settings) => settings.set(settingKey, ""));
+  if (isCurrentOptionDraft(captured, inputId)) $(inputId).value = "";
+  acknowledgeOptionDrafts(captured);
+  setStatus(`${label} token cleared on this device`);
+  return false;
+}
+
+async function clearMysqlToken() {
+  return clearSecretSetting(SETTING_KEY.MYSQL_API_TOKEN, "#mysqlApiToken", "MySQL");
+}
+
+async function clearCloudflareD1Token() {
+  return clearSecretSetting(SETTING_KEY.CLOUDFLARE_D1_API_TOKEN, "#cloudflareD1ApiToken", "Cloudflare D1");
+}
+
+async function clearTempoToken() {
+  return clearSecretSetting(SETTING_KEY.TEMPO_API_TOKEN, "#tempoApiToken", "Tempo");
 }
 
 async function migrateStorageClicked() {
@@ -723,7 +1011,8 @@ function renderFirstRun(established) {
   if (!established) {
     settingsLayoutWasVisible = false;
     history.replaceState(null, "", "#setup");
-    setStatus("Choose a storage backend to begin");
+    const status = document.getElementById("firstRunStatus");
+    if (status) status.textContent = "Choose a storage backend to begin";
     return;
   }
   // The layout is hidden during first-run setup, so reveal-and-scroll once to
@@ -819,15 +1108,60 @@ async function renderSpreadsheetBackupInfo() {
   $("#spreadsheetBackupInfo").textContent = `Local backup: ${liveText}${suffix}.`;
 }
 
+function diagnosticRecoveryTarget(record) {
+  const code = String(record?.code || "");
+  if (/RECONCILE|QUARANTINE|CONFLICT|RECOVERY_REQUIRED/.test(code)) {
+    return { href: "#reconciliation", label: "Open Reconciliation" };
+  }
+  if (/TEMPO/.test(code)) return { href: "#tempo", label: "Open Tempo settings" };
+  if (/AUTH|CONFIG|PERMISSION|BACKEND|REMOTE/.test(code)) {
+    return { href: "#storage", label: "Open Storage settings" };
+  }
+  return { href: "#general", label: "Open General settings" };
+}
+
 function renderDiagnostics() {
   const latest = diagnostics.at(-1);
-  const summary = diagnostics.length
+  const recordsSummary = diagnostics.length
     ? `${diagnostics.length} recovery record${diagnostics.length === 1 ? "" : "s"}. Latest: ${latest.code} during ${latest.phase}.`
     : "No recovery records on this device.";
-  $("#diagnosticsSummary").textContent = summary;
+  const contextSummary = syncStatusSnapshot
+    ? ` Provider: ${syncStatusSnapshot.provider.label}; last successful sync: ${syncStatusSnapshot.lastSuccessAt ? new Date(syncStatusSnapshot.lastSuccessAt).toLocaleString() : "not yet"}; current state: ${syncStatusSnapshot.state}.`
+    : " Sync freshness context is unavailable.";
+  $("#diagnosticsSummary").textContent = `${recordsSummary}${contextSummary}`;
+  const list = $("#diagnosticsList");
+  list.replaceChildren();
+  for (const record of diagnostics.slice(-5).reverse()) {
+    const item = document.createElement("article");
+    item.className = "diagnostic-record";
+    const heading = document.createElement("strong");
+    heading.textContent = `${record.code} · ${record.phase}`;
+    const details = document.createElement("p");
+    const occurrences = Number(record.occurrences) > 1 ? ` · ${record.occurrences} occurrences` : "";
+    details.textContent = `${record.recovery || "Retry the operation."}${occurrences}`;
+    const target = diagnosticRecoveryTarget(record);
+    const link = document.createElement("a");
+    link.href = target.href;
+    link.textContent = target.label;
+    item.append(heading, details, link);
+    list.append(item);
+  }
   $("#copyDiagnostics").disabled = diagnostics.length === 0;
   $("#exportDiagnostics").disabled = diagnostics.length === 0;
   $("#clearDiagnostics").disabled = diagnostics.length === 0;
+}
+
+async function renderSyncFreshness() {
+  try {
+    const snapshot = await readSyncStatus();
+    syncStatusSnapshot = snapshot;
+    $("#syncFreshnessDetails").textContent = formatSyncContext(snapshot);
+    $("#syncCadenceDetails").textContent = formatSyncCadence(snapshot);
+  } catch {
+    syncStatusSnapshot = null;
+    $("#syncFreshnessDetails").textContent = "Sync freshness is unavailable; local entries remain the source of truth.";
+    $("#syncCadenceDetails").textContent = "Background cadence is unavailable.";
+  }
 }
 
 async function refresh() {
@@ -856,10 +1190,12 @@ async function refresh() {
   renderSpreadsheet(await getSpreadsheetId());
   await renderSpreadsheetBackupInfo();
   diagnostics = await getDiagnostics();
+  await renderSyncFreshness();
   renderDiagnostics();
   setRefreshedValue($("#syncInterval"), await getSetting(SETTING_KEY.SYNC_INTERVAL_SECONDS, 60));
   setRefreshedValue($("#durationMultiplier"), await getSetting(SETTING_KEY.DURATION_MULTIPLIER, 1));
   setRefreshedValue($("#workdayStartHour"), await getSetting(SETTING_KEY.WORKDAY_START_HOUR, DEFAULT_WORKDAY_START_HOUR));
+  setRefreshedChecked($("#staleTimerReminderEnabled"), await getSetting(SETTING_KEY.STALE_TIMER_REMINDER_ENABLED, false));
   setRefreshedValue($("#tempoApiToken"), await getSetting(SETTING_KEY.TEMPO_API_TOKEN, ""));
   setRefreshedValue($("#tempoAuthorAccountId"), await getSetting(SETTING_KEY.TEMPO_AUTHOR_ACCOUNT_ID, ""));
   renderTempoMappings(await getSetting(SETTING_KEY.TEMPO_TASK_ISSUE_IDS, {}));
@@ -876,6 +1212,7 @@ async function refresh() {
   const established = await backendIsEstablished();
   renderFirstRun(established);
   if (established) await initializeAuxiliaryPages();
+  updateOptionDraftIndicators();
 }
 
 async function signInClicked() {
@@ -999,6 +1336,10 @@ function bindEvents() {
     field.addEventListener("input", () => markOptionEdited(optionDraftKey(field)));
     field.addEventListener("change", () => markOptionEdited(optionDraftKey(field)));
   }
+  for (const section of DRAFT_SECTIONS) {
+    document.getElementById(`${section.id}DiscardDraft`)?.addEventListener("click", () => discardOptionSection(section.id));
+  }
+  updateOptionDraftIndicators();
   $("#tempoMappings").addEventListener("input", () => markOptionEdited("tempoMappings"));
   $("#tempoMappings").addEventListener("change", () => markOptionEdited("tempoMappings"));
   $("#saveSettings").addEventListener("click", (event) => runOptionsAction("save-settings", saveSettings, event.currentTarget));
@@ -1009,13 +1350,8 @@ function bindEvents() {
   $("#copyDiagnostics").addEventListener("click", copyDiagnosticsClicked);
   $("#exportDiagnostics").addEventListener("click", exportDiagnosticsClicked);
   $("#clearDiagnostics").addEventListener("click", (event) => runOptionsAction("clear-diagnostics", clearDiagnosticsClicked, event.currentTarget));
-  $("#exportBackup").addEventListener("click", (event) => runOptionsAction("export-backup", exportBackupClicked, event.currentTarget));
-  $("#chooseBackupFile").addEventListener("click", () => $("#importBackupFile").click());
-  $("#importBackupFile").addEventListener("change", (event) => {
-    const input = event.currentTarget;
-    void runOptionsAction("import-backup", () => importBackupClicked(input.files?.[0]))
-      .finally(() => { input.value = ""; });
-  });
+  bindBackupControls("exportBackup", "chooseBackupFile", "importBackupFile");
+  bindBackupControls("setupExportBackup", "setupChooseBackupFile", "setupImportBackupFile");
   $("#addTempoMapping").addEventListener("click", () => {
     markOptionEdited("tempoMappings");
     const row = createTempoMappingRow();
@@ -1024,6 +1360,7 @@ function bindEvents() {
     row.querySelector(".tempo-task").focus();
   });
   $("#saveTempoSettings").addEventListener("click", (event) => runOptionsAction("save-tempo-settings", saveTempoSettings, event.currentTarget));
+  $("#clearTempoToken").addEventListener("click", (event) => runOptionsAction("clear-tempo-token", clearTempoToken, event.currentTarget, { refreshOnError: false }));
 
   $("#saveGoogleCredentials").addEventListener("click", (event) => runOptionsAction("save-google-credentials", saveGoogleCredentials, event.currentTarget));
   $("#signInButton").addEventListener("click", (event) => runOptionsAction("google-sign-in", signInClicked, event.currentTarget));
@@ -1037,8 +1374,10 @@ function bindEvents() {
   ));
   $("#saveMysqlSettings").addEventListener("click", (event) => runOptionsAction("save-mysql-settings", saveMysqlSettings, event.currentTarget, { refreshOnError: false }));
   $("#testMysqlConnection").addEventListener("click", (event) => runOptionsAction("test-mysql-connection", testMysqlConnection, event.currentTarget, { refreshOnError: false }));
+  $("#clearMysqlToken").addEventListener("click", (event) => runOptionsAction("clear-mysql-token", clearMysqlToken, event.currentTarget, { refreshOnError: false }));
   $("#saveCloudflareD1Settings").addEventListener("click", (event) => runOptionsAction("save-cloudflare-d1-settings", saveCloudflareD1Settings, event.currentTarget, { refreshOnError: false }));
   $("#testCloudflareD1Connection").addEventListener("click", (event) => runOptionsAction("test-cloudflare-d1-connection", testCloudflareD1Connection, event.currentTarget, { refreshOnError: false }));
+  $("#clearCloudflareD1Token").addEventListener("click", (event) => runOptionsAction("clear-cloudflare-d1-token", clearCloudflareD1Token, event.currentTarget, { refreshOnError: false }));
   $("#migrateStorage").addEventListener("click", (event) => runOptionsAction("migrate-storage", migrateStorageClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromLocal").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-local", activateMysqlFromLocalClicked, event.currentTarget, { refreshOnError: false }));
   $("#activateMysqlFromRemote").addEventListener("click", (event) => runOptionsAction("activate-mysql-from-remote", activateMysqlFromRemoteClicked, event.currentTarget, { refreshOnError: false }));

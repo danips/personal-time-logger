@@ -6,7 +6,9 @@ namespace PersonalTimeLogger\MysqlApi;
 
 final class Config
 {
-    public function __construct(private readonly array $values)
+    private readonly array $values;
+
+    public function __construct(array $values)
     {
         $database = $values['database'] ?? null;
         $tokenHash = $values['api_token_sha256'] ?? '';
@@ -27,6 +29,8 @@ final class Config
         if (!is_bool($values['allow_moz_extension_origins'] ?? false)) {
             throw new ApiException(500, 'SERVER_CONFIG_INVALID', 'The Firefox extension CORS setting is invalid.');
         }
+
+        $this->values = [...$values, 'cors_origins' => $origins];
     }
 
     public static function load(): self

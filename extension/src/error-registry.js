@@ -178,6 +178,14 @@ export const ERROR_REGISTRY = {
     retryable: false, status: "error", title: "Tempo setup is incomplete",
     detail: "A Tempo API token and author account ID are required.", recovery: "Open Options and save both Tempo values."
   },
+  [ERROR_CODE.TEMPO_CANCELLED]: {
+    retryable: true, status: "pending", title: "Tempo upload cancelled",
+    detail: "The current request was allowed to finish; acknowledged work was retained and future chunks were not sent.", recovery: "Open the Tempo send preview again to review acknowledged, rejected, and unknown allocations."
+  },
+  [ERROR_CODE.TEMPO_LEDGER_INVALID]: {
+    retryable: true, status: "error", title: "Tempo submission history is invalid",
+    detail: "The local Tempo submission ledger contains an unsupported record.", recovery: "Open the Tempo send preview again; no ledger record is replayed automatically."
+  },
   [ERROR_CODE.TEMPO_PERMISSION_MISSING]: {
     retryable: true, status: "error", title: "Tempo access is not granted",
     detail: "Firefox did not grant access to the Tempo API host.", recovery: "Click Send to Tempo again and approve the permission request."
@@ -193,6 +201,10 @@ export const ERROR_REGISTRY = {
   [ERROR_CODE.TEMPO_PARTIAL]: {
     retryable: false, status: "error", title: "Tempo upload was only partly completed",
     detail: "At least one earlier batch was created before a later batch failed.", recovery: "Do not resend the whole week; inspect Tempo and send only missing worklogs manually."
+  },
+  [ERROR_CODE.UNDO_UNAVAILABLE]: {
+    retryable: false, status: "error", title: "Deletion undo is unavailable",
+    detail: "The deleted entry was changed, replaced, or removed after deletion.", recovery: "Review the current history or Reconcile results; the extension will not resurrect a different record."
   },
   [ERROR_CODE.STORAGE_CONFLICT]: {
     retryable: true, status: "pending", title: "Entry changed in another window",
@@ -232,8 +244,8 @@ export function errorInfo(error) {
 
 export function userErrorMessage(error) {
   const info = errorInfo(error);
-  const progress = [ERROR_CODE.TEMPO_NETWORK, ERROR_CODE.TEMPO_API_ERROR, ERROR_CODE.TEMPO_PARTIAL].includes(error?.code)
-    && ["unknown", "rejected"].includes(error?.currentRequestOutcome)
+  const progress = [ERROR_CODE.TEMPO_NETWORK, ERROR_CODE.TEMPO_API_ERROR, ERROR_CODE.TEMPO_PARTIAL, ERROR_CODE.TEMPO_CANCELLED].includes(error?.code)
+    && ["unknown", "rejected", "acknowledged"].includes(error?.currentRequestOutcome)
     ? ` ${Number(error.acknowledgedWorklogs) || 0} worklogs were acknowledged across ${Number(error.requestCount) || 0} request${Number(error.requestCount) === 1 ? "" : "s"}; the current request outcome is ${error.currentRequestOutcome}. Inspect Tempo before resending.`
     : "";
   return `${info.title}. ${info.detail} ${info.recovery}${progress}`;

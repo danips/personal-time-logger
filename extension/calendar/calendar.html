@@ -21,7 +21,7 @@
               <p class="eyebrow">Time Logger</p>
               <div class="calendar-heading-row">
                 <h1>Calendar</h1>
-                <p id="statusLine" class="status" data-status="pending" aria-label="Loading calendar">pending</p>
+                <p id="statusLine" class="status" data-status="pending" role="status" aria-live="polite" aria-label="Loading calendar">pending</p>
               </div>
             </div>
           </div>
@@ -34,6 +34,7 @@
           </label>
           <button id="nextWeek" class="icon-button" type="button" title="Next week" aria-label="Next week"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
           <button id="todayButton" type="button">Today</button>
+          <button id="addCompletedEntryButton" type="button">Add completed entry</button>
           <button id="undoCalendarButton" class="undo-calendar-button" type="button" hidden>Undo</button>
           <div class="tempo-send-control">
             <button id="sendTempoButton" type="button" title="Send the displayed week to Tempo">Send week to Tempo</button>
@@ -45,6 +46,7 @@
               <button id="chooseTempoDaysOption" type="button" role="menuitem">Choose individual days…</button>
             </div>
           </div>
+          <button id="cancelTempoButton" class="cancel-tempo-button" type="button" hidden>Cancel Tempo upload</button>
         </div>
       </header>
 
@@ -53,6 +55,28 @@
           <div id="calendarEntryEditor"></div>
         </div>
       </div>
+
+      <dialog id="tempoPreviewDialog" aria-labelledby="tempoPreviewTitle">
+        <form id="tempoPreviewForm">
+          <h2 id="tempoPreviewTitle">Tempo send preview</h2>
+          <p id="tempoPreviewSummary" class="tempo-preview-summary"></p>
+          <p id="tempoPreviewSkipped" class="tempo-preview-skipped"></p>
+          <p id="tempoPreviewError" class="tempo-preview-error" role="alert" hidden></p>
+          <section id="tempoPreviewMappings" class="tempo-preview-mappings" aria-label="Tempo task mappings"></section>
+          <div class="tempo-preview-table-wrap">
+            <table class="tempo-preview-table">
+              <thead>
+                <tr><th scope="col">Send</th><th scope="col">Task</th><th scope="col">Project</th><th scope="col">Day</th><th scope="col">Issue</th><th scope="col">Seconds</th><th scope="col">Hours</th><th scope="col">Submission</th></tr>
+              </thead>
+              <tbody id="tempoPreviewRows"></tbody>
+            </table>
+          </div>
+          <div class="tempo-preview-actions">
+            <button id="tempoPreviewCancel" type="button">Cancel</button>
+            <button id="tempoPreviewConfirm" type="submit">Send selected allocations</button>
+          </div>
+        </form>
+      </dialog>
 
       <section class="calendar-shell" aria-label="Weekly time log calendar">
         <div id="dayHeader" class="day-header"></div>

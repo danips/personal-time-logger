@@ -10,11 +10,15 @@ import {
 import { runAction } from "../src/action-runner.js";
 import { onEntriesChanged } from "../src/events.js";
 import {
+  bulkResolutionPreview,
   duplicateRecordsSupported,
+  operationOutcome,
+  paginateReconciliationItems,
   reconciliationActionDisabled,
   reconciliationActionEligibility,
   buildKeepNewestCommands
 } from "../src/reconcile-ui-state.js";
+import { serializeQuarantinedRecords } from "../src/reconcile-export.js";
 import { syncNow } from "../src/sync.js";
 import { recordDiagnostic } from "../src/diagnostics.js";
 import { durationSeconds, formatElapsed, shortDateTime } from "../src/time.js";
@@ -25,6 +29,10 @@ let report = null;
 let busy = false;
 let unsubscribeEntryEvents = null;
 let eventsBound = false;
+const PAGE_SIZE = 50;
+let searchTerm = "";
+const groupPages = new Map();
+let reviewViewState = null;
 
 function setStatus(message) {
   $("#reconcileStatusLine").textContent = message;
@@ -117,11 +125,12 @@ function differenceTable(differences, remoteLabel) {
 function actionRow(buttons) {
   const container = document.createElement("div");
   container.className = "actions";
-  for (const { label, action, danger } of buttons) {
+  for (const { label, action, danger, id } of buttons) {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.resolutionAction = "true";
     button.textContent = label;
+    if (id) button.dataset.reconcileActionId = id;
     if (danger) button.classList.add("danger");
     button.addEventListener("click", () => resolve(action));
     container.append(button);
@@ -148,8 +157,8 @@ function renderDifferent(items) {
       rowHeading(item.local, badges),
       differenceTable(item.differences, report.provider?.label || "Remote storage"),
       actionRow([
-        { label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) },
-        { label: "Keep remote", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) }
+        { id: item.id, label: "Keep this device", action: () => keepLocal(item.id, item.remote, { expectedRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) },
+        { id: item.id, label: "Keep remote", action: () => keepRemote(item.remote, { expectedLocalRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) }
       ])
     );
     return row;
@@ -167,6 +176,7 @@ function renderDuplicates(items) {
       rowHeading(item.entry, [`rows ${rows.join(", ")}`, `keeping row ${item.keepRowIndex}`]),
       actionRow([
         {
+          id: item.id,
           label: `Delete ${item.extraRowIndexes.length} extra row${item.extraRowIndexes.length === 1 ? "" : "s"}`,
           action: () => confirmDeleteRows(item.extraRows),
           danger: true
@@ -225,8 +235,8 @@ function renderLocalOnly(items) {
     row.append(
       rowHeading(item.local, item.local.dirty ? ["pending upload"] : []),
       actionRow([
-        { label: "Push to remote", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) },
-        { label: "Delete", action: () => deleteEverywhere(item.id, null, { expectedLocalRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }), danger: true }
+        { id: item.id, label: "Push to remote", action: () => keepLocal(item.id, null, { expectedRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }) },
+        { id: item.id, label: "Delete", action: () => deleteEverywhere(item.id, null, { expectedLocalRevision: item.local.revision, expectedLocalFingerprint: entryFingerprint(item.local) }), danger: true }
       ])
     );
     return row;
@@ -242,12 +252,117 @@ function renderRemoteOnly(items) {
     row.append(
       rowHeading(item.remote),
       actionRow([
-        { label: "Import from remote", action: () => keepRemote(item.remote) },
-        { label: "Delete", action: () => deleteEverywhere(item.id, item.remote, { expectedRemoteFingerprint: entryFingerprint(item.remote) }), danger: true }
+        { id: item.id, label: "Import from remote", action: () => keepRemote(item.remote) },
+        { id: item.id, label: "Delete", action: () => deleteEverywhere(item.id, item.remote, { expectedRemoteFingerprint: entryFingerprint(item.remote) }), danger: true }
       ])
     );
     return row;
   });
+}
+
+function searchableText(group, item) {
+  if (group === "different") return [item.id, entryTitle(item.local), item.local.project, item.local.task, item.local.description, ...(item.differences || []).flatMap((difference) => [difference.field, difference.local, difference.remote])].join(" ");
+  if (group === "duplicates") return [item.id, entryTitle(item.entry), ...(item.extraRowIndexes || [])].join(" ");
+  if (group === "quarantined") return [item.id, item.reason, item.rowIndex, item.ref?.version].join(" ");
+  if (group === "localOnly") return [item.id, entryTitle(item.local), item.local.project, item.local.task, item.local.description].join(" ");
+  return [item.id, entryTitle(item.remote), item.remote.project, item.remote.task, item.remote.description].join(" ");
+}
+
+function matchingItems(group, items) {
+  const needle = searchTerm.trim().toLocaleLowerCase();
+  if (!needle) return items;
+  return items.filter((item) => searchableText(group, item).toLocaleLowerCase().includes(needle));
+}
+
+function groupPager(group, page, pageCount, total) {
+  if (pageCount <= 1) return null;
+  const nav = document.createElement("nav");
+  nav.className = "pagination";
+  nav.setAttribute("aria-label", `${group} pages`);
+  const previous = document.createElement("button");
+  previous.type = "button";
+  previous.textContent = "Previous";
+  previous.disabled = page === 0;
+  previous.addEventListener("click", () => {
+    groupPages.set(group, page - 1);
+    render();
+  });
+  const next = document.createElement("button");
+  next.type = "button";
+  next.textContent = "Next";
+  next.disabled = page >= pageCount - 1;
+  next.addEventListener("click", () => {
+    groupPages.set(group, page + 1);
+    render();
+  });
+  const status = document.createElement("span");
+  status.textContent = `Page ${page + 1} of ${pageCount} · ${total} shown`;
+  nav.append(previous, status, next);
+  return nav;
+}
+
+function renderGroup(group, items, renderer) {
+  const matching = matchingItems(group, items);
+  const paged = paginateReconciliationItems(matching, { page: groupPages.get(group) || 0, pageSize: PAGE_SIZE });
+  groupPages.set(group, paged.page);
+  const host = $(`#${group}List`);
+  const pager = groupPager(group, paged.page, paged.pageCount, matching.length);
+  host.replaceChildren(...renderer(paged.items), ...(pager ? [pager] : []));
+  return { total: items.length, matching: matching.length };
+}
+
+function captureReviewViewState() {
+  const active = document.activeElement;
+  return {
+    activeId: active?.id || "",
+    actionId: active?.dataset?.reconcileActionId || "",
+    scrollTop: window.scrollY
+  };
+}
+
+function restoreReviewViewState(state) {
+  if (!state) return;
+  const target = state.activeId
+    ? document.getElementById(state.activeId)
+    : state.actionId
+      ? document.querySelector(`[data-reconcile-action-id="${CSS.escape(state.actionId)}"]`)
+      : null;
+  target?.focus();
+  window.scrollTo(0, state.scrollTop);
+}
+
+function showOperationOutcome(outcome) {
+  const normalized = operationOutcome(outcome);
+  const parts = [
+    `Completed: ${normalized.completed}`,
+    `Pending: ${normalized.pending}`,
+    `Failed: ${normalized.failed}`
+  ];
+  const output = $("#operationOutcome");
+  output.textContent = parts.join(" · ");
+  output.hidden = false;
+}
+
+function previewBulk(items, label, action) {
+  const preview = bulkResolutionPreview(items);
+  if (!preview.affectedCount) return;
+  const conflictNote = preview.equalTimestampConflicts
+    ? ` Equal-timestamp conflicts left unresolved by this choice: ${preview.equalTimestampConflicts}.`
+    : "";
+  if (!confirm(`${label}\n\nAffected entries: ${preview.affectedCount}. Preconditions to recheck: ${preview.preconditionCount}.${conflictNote}\n\nContinue?`)) return;
+  return resolveMany(items, action, preview.affectedCount);
+}
+
+function exportQuarantineReport() {
+  if (!report) return;
+  const csv = serializeQuarantinedRecords(report.quarantined, { provider: report.provider?.label });
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "time-logger-quarantined-records.csv";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setStatus("Quarantined-record report exported");
 }
 
 function divergenceCount() {
@@ -285,19 +400,31 @@ function render() {
   $("#localOnlyHeading").textContent = `Only on this device (${report.localOnly.length})`;
   $("#remoteOnlyHeading").textContent = `Only in remote storage (${report.remoteOnly.length})`;
 
-  $("#differentList").replaceChildren(...renderDifferent(report.different));
-  $("#localOnlyList").replaceChildren(...renderLocalOnly(report.localOnly));
-  $("#remoteOnlyList").replaceChildren(...renderRemoteOnly(report.remoteOnly));
+  const groups = [
+    ["different", report.different, renderDifferent],
+    ["duplicates", report.duplicates, renderDuplicates],
+    ["quarantined", report.quarantined, renderQuarantined],
+    ["localOnly", report.localOnly, renderLocalOnly],
+    ["remoteOnly", report.remoteOnly, renderRemoteOnly]
+  ];
+  const counts = groups.map(([group, items, renderer]) => renderGroup(group, items, renderer));
+  const total = counts.reduce((sum, count) => sum + count.total, 0);
+  const matching = counts.reduce((sum, count) => sum + count.matching, 0);
+  $("#reconcileFilterSummary").textContent = searchTerm.trim()
+    ? `Showing ${matching} of ${total} report items`
+    : `Showing all ${total} report items`;
 
   applyControlState();
 }
 
 async function scan({ quiet = false, manageBusy = true } = {}) {
+  reviewViewState = captureReviewViewState();
   if (!quiet) setStatus("Comparing this device with remote storage...");
   if (manageBusy) setBusy(true);
   try {
     report = await loadReconciliation({ interactiveAuth: false });
     render();
+    restoreReviewViewState(reviewViewState);
     const divergences = divergenceCount();
     setStatus(divergences
       ? `${divergences} divergence${divergences === 1 ? "" : "s"} found. Choose a side, then sync.`
@@ -323,18 +450,31 @@ async function scan({ quiet = false, manageBusy = true } = {}) {
  * Resolutions only write locally, marking a side as the one to keep. The sync that
  * follows carries the decision to remote storage, so one code path owns remote writes.
  */
-function resolve(action, status = "Applying...") {
+function resolve(action, status = "Applying...", affectedCount = 1) {
   if (busy) return;
+  reviewViewState = captureReviewViewState();
   return runAction("reconciliation-resolution", async () => {
     setStatus(status);
     const outcome = await action();
+    let syncError = null;
     if (outcome?.results) setStatus(`Applied ${outcome.results.length} selected entr${outcome.results.length === 1 ? "y" : "ies"}; syncing...`);
-    await syncNow({ force: true });
+    try {
+      await syncNow({ force: true });
+    } catch (error) {
+      syncError = error;
+    }
     await scan({ quiet: true, manageBusy: false });
+    showOperationOutcome({
+      completed: outcome?.results?.length || affectedCount,
+      pending: syncError ? affectedCount : 0,
+      failed: syncError ? 1 : 0
+    });
+    if (syncError) throw syncError;
   }, {
     setBusy,
     onError(error) {
       setStatus(`Could not apply: ${formatError(error)}`);
+      showOperationOutcome({ completed: 0, pending: 0, failed: affectedCount });
     },
     onFinally() {
       applyControlState();
@@ -342,10 +482,11 @@ function resolve(action, status = "Applying...") {
   });
 }
 
-function resolveMany(items) {
+function resolveMany(items, affectedCount = items.length) {
   return resolve(
     () => resolveReconciliationBatch(items, { interactiveAuth: false }),
-    `Prevalidating and applying ${items.length} selected entr${items.length === 1 ? "y" : "ies"}...`
+    `Prevalidating and applying ${items.length} selected entr${items.length === 1 ? "y" : "ies"}...`,
+    affectedCount
   );
 }
 
@@ -372,31 +513,45 @@ function bindEvents() {
     if (!duplicateRecordsSupported(report)) return;
     return resolve(() => confirmDeleteRows(report.duplicates.flatMap((item) => item.extraRows)));
   });
-  $("#keepAllLocal").addEventListener("click", () => resolveMany(report.different.map((item) => ({
-    action: "keepLocal",
-    id: item.id,
-    remoteEntry: item.remote,
-    expectedRevision: item.local.revision,
-    expectedLocalFingerprint: entryFingerprint(item.local)
-  }))));
-  $("#keepAllRemote").addEventListener("click", () => resolveMany(report.different.map((item) => ({
-    action: "keepRemote",
-    id: item.id,
-    remoteEntry: item.remote,
-    expectedLocalRevision: item.local.revision,
-    expectedLocalFingerprint: entryFingerprint(item.local)
-  }))));
-  $("#keepAllNewest").addEventListener("click", () => resolveMany(buildKeepNewestCommands(report.different)));
-  $("#pushAllLocal").addEventListener("click", () => resolveMany(report.localOnly.map((item) => ({
-    action: "keepLocal",
-    id: item.id,
-    expectedRevision: item.local.revision
-  }))));
-  $("#importAllRemote").addEventListener("click", () => resolveMany(report.remoteOnly.map((item) => ({
-    action: "keepRemote",
-    id: item.id,
-    remoteEntry: item.remote
-  }))));
+  $("#keepAllLocal").addEventListener("click", () => {
+    const commands = report.different.map((item) => ({
+      action: "keepLocal",
+      id: item.id,
+      remoteEntry: item.remote,
+      expectedRevision: item.local.revision,
+      expectedLocalFingerprint: entryFingerprint(item.local)
+    }));
+    return previewBulk(report.different, "Keep this device for every differing entry", () => resolveMany(commands));
+  });
+  $("#keepAllRemote").addEventListener("click", () => {
+    const commands = report.different.map((item) => ({
+      action: "keepRemote",
+      id: item.id,
+      remoteEntry: item.remote,
+      expectedLocalRevision: item.local.revision,
+      expectedLocalFingerprint: entryFingerprint(item.local)
+    }));
+    return previewBulk(report.different, "Keep remote for every differing entry", () => resolveMany(commands));
+  });
+  $("#keepAllNewest").addEventListener("click", () => {
+    const eligible = report.different.filter((item) => item.newer === "local" || item.newer === "remote");
+    return previewBulk(eligible, "Keep the newer side for each differing entry", () => resolveMany(buildKeepNewestCommands(report.different)));
+  });
+  $("#pushAllLocal").addEventListener("click", () => {
+    const commands = report.localOnly.map((item) => ({ action: "keepLocal", id: item.id, expectedRevision: item.local.revision }));
+    return previewBulk(report.localOnly, "Push every local-only entry", () => resolveMany(commands));
+  });
+  $("#importAllRemote").addEventListener("click", () => {
+    const commands = report.remoteOnly.map((item) => ({ action: "keepRemote", id: item.id, remoteEntry: item.remote }));
+    return previewBulk(report.remoteOnly, "Import every remote-only entry", () => resolveMany(commands));
+  });
+  $("#reconcileSearch").addEventListener("input", (event) => {
+    searchTerm = event.currentTarget.value;
+    groupPages.clear();
+    render();
+    event.currentTarget.focus();
+  });
+  $("#exportQuarantined").addEventListener("click", exportQuarantineReport);
 }
 
 export async function initReconcilePage() {

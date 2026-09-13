@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { entryToRow, normalizeEntry, SHEET_HEADERS } from "../extension/src/entries.js";
+import { SETTING_KEY } from "../extension/src/setting-keys.js";
 import { seedEntry, seedEntries } from "./support/db-fixtures.js";
 import { installFakeIndexedDB } from "./support/fake-indexeddb.js";
 import { createGoogleApiMock } from "./support/mock-google-api.js";
@@ -166,5 +167,23 @@ describe("reconciliation actions", () => {
     const entryWrites = indexedDB._getWriteLog().filter((operation) => operation.store === "time_entries");
     assert.deepEqual(entryWrites, [{ store: "time_entries", operation: "put", key: selected.id }]);
     assert.deepEqual(await db.getEntry(unrelated.id), unrelated);
+  });
+
+  it("requires an explicit local choice before re-creating a missing synced ID", async () => {
+    const stale = fixture({
+      id: "missing-synced-entry",
+      dirty: true,
+      last_sync_at: "2026-08-08T10:00:00.000Z",
+      sync_error: "Remote recovery requires review before upload."
+    });
+    await seedEntry(db, stale);
+    await db.setSetting(SETTING_KEY.SYNC_RECOVERY_PENDING, [stale.id]);
+
+    const chosen = await reconcile.keepLocal(stale.id, null, { expectedRevision: stale.revision });
+
+    assert.equal(chosen.dirty, true);
+    assert.equal(chosen.last_sync_at, "");
+    assert.equal(chosen.sync_error, "");
+    assert.deepEqual(await db.getSetting(SETTING_KEY.SYNC_RECOVERY_PENDING), []);
   });
 });

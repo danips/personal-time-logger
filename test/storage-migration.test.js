@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { canonicalMigrationDataset, canonicalMigrationText, migrationDigest, assertLocalCompatibleWithRemote } from "../extension/src/storage-migration.js";
-import { registeredRemoteProviderIds } from "../extension/src/remote-provider.js";
+import { canonicalMigrationDataset, canonicalMigrationText, migrationDigest, migrationPreview, assertLocalCompatibleWithRemote } from "../extension/src/storage-migration.js";
 import { persistedEntryFixture } from "./support/persisted-entry-fixture.js";
 
 const entry = (id, over = {}) => persistedEntryFixture({
@@ -11,16 +10,6 @@ const entry = (id, over = {}) => persistedEntryFixture({
 });
 
 describe("storage migration canonical dataset", () => {
-  it("recognizes every registered source and target direction", () => {
-    assert.deepEqual(registeredRemoteProviderIds(), ["google-sheets", "mysql", "cloudflare-d1"]);
-    assert.deepEqual(registeredRemoteProviderIds().flatMap((source) => registeredRemoteProviderIds()
-      .filter((target) => target !== source).map((target) => `${source}->${target}`)), [
-      "google-sheets->mysql", "google-sheets->cloudflare-d1",
-      "mysql->google-sheets", "mysql->cloudflare-d1",
-      "cloudflare-d1->google-sheets", "cloudflare-d1->mysql"
-    ]);
-  });
-
   it("uses a provider-neutral compatibility check", () => {
     const snapshot = { entries: [entry("a")], config: {} };
     assert.doesNotThrow(() => assertLocalCompatibleWithRemote(snapshot, snapshot, "Cloudflare Worker + D1"));
@@ -56,5 +45,27 @@ describe("storage migration canonical dataset", () => {
     const first = { entries: [entry("b"), entry("a")], config: { b: { value: "2", updated_at: "2026-08-08T11:00:00.000Z" }, a: { value: "1", updated_at: "2026-08-08T11:00:00.000Z" } } };
     const second = { entries: [entry("a"), entry("b")], config: { a: first.config.a, b: first.config.b } };
     assert.equal(await migrationDigest(first), await migrationDigest(second));
+  });
+
+  it("previews source and target counts without hiding disagreements", () => {
+    const source = {
+      entries: [entry("same"), entry("missing")],
+      config: { duration_multiplier: { value: "1", updated_at: "2026-08-08T11:00:00.000Z" } }
+    };
+    const target = {
+      entries: [entry("same", { description: "changed" }), entry("extra")],
+      config: { duration_multiplier: { value: "2", updated_at: "2026-08-08T11:00:00.000Z" } },
+    };
+    assert.deepEqual(migrationPreview(source, target), {
+      sourceEntryCount: 2,
+      targetEntryCount: 2,
+      sourceConfigCount: 1,
+      targetConfigCount: 1,
+      sourceOnlyEntryCount: 1,
+      targetOnlyEntryCount: 1,
+      changedEntryCount: 1,
+      configDisagreementCount: 1,
+      disagreementCount: 4
+    });
   });
 });

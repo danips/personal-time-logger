@@ -43,7 +43,7 @@ try {
 
     $token = Http::bearerToken();
     if (!$config->tokenMatches($token)) {
-        throw new ApiException(401, 'AUTH_INVALID', 'The bearer token is invalid.');
+        throw new ApiException(401, 'AUTH_REQUIRED', 'Authentication is required.');
     }
 
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';

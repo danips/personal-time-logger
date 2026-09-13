@@ -11,9 +11,14 @@ const FIELD_IDS = [
   "entry-editor-status",
   "entry-editor-start",
   "entry-editor-end",
+  "entry-editor-time-summary",
   "entry-editor-merge-control",
   "entry-editor-merge-target",
   "entry-editor-merge-button",
+  "entry-editor-preview",
+  "entry-editor-preview-text",
+  "entry-editor-preview-confirm",
+  "entry-editor-preview-cancel",
   "entry-editor-save",
   "entry-editor-cancel",
   "entry-editor-delete",
@@ -71,12 +76,16 @@ describe("entry editor mounting", () => {
       assert.equal(popup.form.id, "editForm");
       assert.equal(popup.fields.project.id, "editProject");
       assert.equal(popup.merge.target.id, "mergeTarget");
+      assert.equal(popup.preview.confirm.id, "confirmEditPreview");
+      assert.equal(popup.timeSummary.id, "editTimeSummary");
       assert.equal(popup.actions.save.id, "saveEdit");
       assert.equal(popup.actions.duplicate, null);
 
       const calendar = mountEntryEditor(new FakeContainer(), { variant: "calendar", showDuplicate: true, saveType: "submit" });
       assert.equal(calendar.form.id, "calendarEditForm");
       assert.equal(calendar.actions.duplicate.id, "duplicateEntryButton");
+      assert.equal(calendar.preview.panel.id, "calendarPreview");
+      assert.equal(calendar.timeSummary.id, "calendarEditTimeSummary");
       assert.equal(calendar.actions.save.type, "submit");
       assert.notEqual(popup.fields.project, calendar.fields.project);
     } finally {

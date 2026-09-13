@@ -12,8 +12,13 @@
     <main class="page">
       <header>
         <h1>Reconcile Local And Remote</h1>
-        <p id="reconcileStatusLine" class="status" role="status">Loading...</p>
+        <p id="reconcileStatusLine" class="status" role="status" aria-live="polite">Loading...</p>
+        <p id="operationOutcome" class="operation-outcome" role="status" hidden></p>
         <p id="remoteProviderLabel" class="note">Remote backend: Loading...</p>
+        <label class="report-search">Search loaded report
+          <input id="reconcileSearch" type="search" autocomplete="off" placeholder="ID, project, task, reason…">
+        </label>
+        <p id="reconcileFilterSummary" class="note">Showing all report items</p>
         <div class="actions">
           <button id="rescanButton" type="button">Rescan</button>
           <button id="syncButton" type="button">Sync Now</button>
@@ -81,7 +86,10 @@
       </section>
 
       <section id="quarantinedSection" class="panel" aria-labelledby="quarantinedHeading">
-        <h2 id="quarantinedHeading">Invalid remote records</h2>
+        <div class="panel-heading">
+          <h2 id="quarantinedHeading">Invalid remote records</h2>
+          <button id="exportQuarantined" type="button">Export locations</button>
+        </div>
         <p class="note">These records are excluded from sync until corrected at the remote backend.</p>
         <div id="quarantinedList" class="group-list"></div>
       </section>

@@ -43,15 +43,15 @@ final class Http
         $stream = fopen('php://input', 'rb');
         $raw = $stream === false ? false : stream_get_contents($stream, $maxBytes + 1);
         if ($raw === false || $raw === '' || strlen($raw) > $maxBytes) {
-            throw new ApiException(strlen((string) $raw) > $maxBytes ? 413 : 400, strlen((string) $raw) > $maxBytes ? 'INVALID_REQUEST' : 'INVALID_JSON', 'The request body must be a JSON object.');
+            throw new ApiException(strlen((string) $raw) > $maxBytes ? 413 : 400, 'INVALID_REQUEST', 'The request body must be a JSON object.');
         }
         try {
             $body = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
-            throw new ApiException(400, 'INVALID_JSON', 'The request body must be valid JSON.');
+            throw new ApiException(400, 'INVALID_REQUEST', 'The request body must be valid JSON.');
         }
         if (!is_array($body) || array_is_list($body)) {
-            throw new ApiException(400, 'INVALID_JSON', 'The request body must be a JSON object.');
+            throw new ApiException(400, 'INVALID_REQUEST', 'The request body must be a JSON object.');
         }
         return $body;
     }

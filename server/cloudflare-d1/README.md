@@ -117,6 +117,52 @@ and [D1 import/export guide](https://developers.cloudflare.com/d1/best-practices
 Treat a restore or import as destructive to the current database and make a
 fresh backup first.
 
+### Local disposable recovery drill
+
+Use two temporary Wrangler working directories and configurations for this
+drill; never point `--remote` at a personal or production database. The local
+database is separate from the Cloudflare D1 database selected by the binding.
+Each temporary configuration should use absolute paths for this repository's
+`src/index.js` and `migrations` directory, and a synthetic token digest. After
+applying the current migrations, export SQL, import it into the second
+working directory, and verify the migration and API contract:
+
+```bash
+recovery_dir="$(mktemp -d /tmp/ptl-d1-recovery.XXXXXX)"
+source_dir="$recovery_dir/source"
+restore_dir="$recovery_dir/restore"
+mkdir -p "$source_dir" "$restore_dir"
+# Create wrangler.jsonc in each directory with absolute main/migrations paths.
+local_config="$source_dir/wrangler.jsonc"
+restore_config="$restore_dir/wrangler.jsonc"
+npx wrangler d1 migrations apply DB --local --cwd "$source_dir" \
+  --config "$local_config"
+npx wrangler d1 export DB --local --cwd "$source_dir" \
+  --config "$local_config" --skip-confirmation \
+  --output "$recovery_dir/backup.sql"
+npx wrangler d1 execute DB --local --cwd "$restore_dir" \
+  --config "$restore_config" --file "$recovery_dir/backup.sql" --yes
+npx wrangler d1 migrations list DB --local --cwd "$restore_dir" \
+  --config "$restore_config"
+```
+
+Start the Worker with `--cwd "$restore_dir"` and `--config
+"$restore_config"`, run the local health/shared HTTP checks, and compare a
+sentinel entry/config value before deleting `recovery_dir`. `wrangler d1
+export` and `wrangler d1 execute --file` are the local SQL backup/restore
+boundary; `--persist-to` is supported for local migration/execute commands but
+not for `d1 export`. The repository's integration harness also applies the
+real migration and runs the shared contract against an isolated local Worker.
+
+For an upgrade, export first, inspect pending forward-only files with
+`d1 migrations list`, apply migrations before deploying code that needs their
+columns, and verify health plus one local sync. A failed migration is expected
+to leave the last successful migration applied. Remote export/import and
+remote token rotation remain operator procedures that require an explicitly
+identified target and are not exercised by this local drill. Raw bearer tokens
+remain device-local; replacing the Worker digest requires updating every
+device, and this v1 configuration does not promise dual-token rotation.
+
 ## Operational boundaries
 
 - `wrangler.jsonc`, `.wrangler/`, SQL exports, raw tokens, and token digests are

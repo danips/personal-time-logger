@@ -1,6 +1,6 @@
-import { getEntriesIntersecting, getSetting, mutateSetting } from "../src/db.js";
+import { getEntriesIntersecting, getEntry, getSetting, mutateSetting } from "../src/db.js";
 import { isActionRunning, runAction } from "../src/action-runner.js";
-import { canMergeEntries, duplicateEntry, hasMultiplier, mergeEntries, softDeleteEntry, updateEntry } from "../src/entries.js";
+import { canMergeEntries, createCompletedEntry, deletionUndoToken, duplicateEntry, duplicateEntryPreview, entryUpdateUndoToken, hasMultiplier, mergeEntries, mergeEntryPreview, softDeleteEntry, undoDeletedEntry, undoEntryUpdate, updateEntry } from "../src/entries.js";
 import { readEntryForm, writeEntryForm } from "../src/entry-form.js";
 import { mountEntryEditor, setEntryEditorMergeAvailability } from "../src/entry-editor.js";
 import { moveEntryChanges, ownsGesturePointer, resizeEntryChanges } from "../src/calendar-gesture-state.js";
@@ -62,6 +62,8 @@ const $mergeTarget = entryEditor.merge.target;
 const $mergeButton = entryEditor.merge.button;
 const $mergeControl = entryEditor.merge.control;
 const $duplicateButton = entryEditor.actions.duplicate;
+const $deleteButton = entryEditor.actions.delete;
+const $timeSummary = entryEditor.timeSummary;
 
 const DRAG_THRESHOLD_PX = 5;
 const NO_DAYS_SELECTED_MESSAGE = "Check at least one day to send to Tempo";
@@ -79,6 +81,8 @@ let selectedEntryId = "";
 let editingEntryId = "";
 let editingEntryRevision = null;
 let editingMultiplyValue = "";
+let creatingCompletedEntry = false;
+let editorReturnFocusId = "";
 let unsubscribeEntryEvents = null;
 let eventsBound = false;
 // The latest completed calendar time change stays undoable until it is used or
@@ -88,11 +92,22 @@ let renderGeneration = 0;
 let renderInFlight = null;
 let renderPending = false;
 let clampEditorToViewport = () => {};
+let tempoUploadCancel = null;
+let pendingEditorPreview = null;
+const $editorPreview = entryEditor.preview;
 
 function setStatus(message, state = message) {
   const status = $("#statusLine");
   status.textContent = message;
   status.dataset.status = state;
+}
+
+function setTempoUploadState({ active = false, cancel = null } = {}) {
+  tempoUploadCancel = active ? cancel : null;
+  const button = $("#cancelTempoButton");
+  if (!button) return;
+  button.hidden = !active;
+  button.disabled = !active;
 }
 
 function runCalendarAction(key, action, { button = null, expectedRevision, afterRender } = {}) {
@@ -119,7 +134,43 @@ function setCalendarUndo(action) {
   lastCalendarUndo = action;
   const button = $("#undoCalendarButton");
   button.hidden = !action;
-  button.textContent = action ? `Undo ${action.kind}` : "Undo";
+  button.textContent = action?.kind === "deletion" ? "Undo deletion" : action ? `Undo ${action.kind}` : "Undo";
+}
+
+function clearEditorPreview() {
+  pendingEditorPreview = null;
+  $editorPreview.panel.hidden = true;
+  $editorPreview.text.textContent = "";
+  $mergeTarget.disabled = false;
+}
+
+function showEditorPreview(text, action) {
+  pendingEditorPreview = action;
+  $editorPreview.text.textContent = text;
+  $editorPreview.panel.hidden = false;
+  $mergeTarget.disabled = true;
+  $editorPreview.confirm.focus();
+}
+
+function editorConflictError() {
+  const error = new Error("Entry changed in another window");
+  error.code = "STORAGE_CONFLICT";
+  return error;
+}
+
+function previewDuration(seconds) {
+  return formatElapsed(Math.max(0, Number(seconds) || 0));
+}
+
+function mergePreviewText(target, source, preview) {
+  const gap = preview.compactedGapSeconds
+    ? ` The ${previewDuration(preview.compactedGapSeconds)} gap is compacted.`
+    : " Any gap is compacted.";
+  return `Merge ${entryTitle(target)} with ${entryTitle(source)}. Actual duration ${previewDuration(preview.actualSeconds)} (${previewDuration(preview.targetActualSeconds)} + ${previewDuration(preview.sourceActualSeconds)}); effective duration ${previewDuration(preview.effectiveSeconds)}. Result: ${preview.startAt} to ${preview.endAt}.${gap} Target multiplier ${preview.targetMultiply || "none"} and status ${preview.targetStatus} are retained; the source becomes a tombstone.`;
+}
+
+function duplicatePreviewText(entry, preview) {
+  return `Duplicate ${entryTitle(entry)}. The copy overlaps the original from ${preview.startAt} to ${preview.endAt} for ${previewDuration(preview.overlapSeconds)} actual seconds and keeps ${previewDuration(preview.effectiveSeconds)} effective seconds. Multiplier ${preview.multiply || "none"} and status ${preview.status} are copied.`;
 }
 
 function shortDay(date) {
@@ -463,6 +514,11 @@ async function performRender(generation, requestedWeekStart) {
   $("#weekPicker").value = isoWeekValue(weekStart);
   renderHeader(dailyTotalsFromSegments(segmentsByDay));
   renderCalendar(segmentsByDay);
+  if ($("#calendarEditOverlay").hidden && editorReturnFocusId) {
+    const returnFocusId = editorReturnFocusId;
+    editorReturnFocusId = "";
+    document.querySelector(`[data-entry-id="${CSS.escape(returnFocusId)}"]`)?.focus();
+  }
   syncScrollbarGutter();
   scrollToWorkingHours(startHour.valid ? startHour.start : DEFAULT_WORKDAY_START_HOUR);
 }
@@ -508,6 +564,7 @@ async function selectEntryFromBlock(event) {
   }
 
   closeEditor();
+  editorReturnFocusId = nextId;
   selectedEntryId = nextId;
   await render();
   openSelectedEntryEditor();
@@ -576,13 +633,25 @@ function loadEditor(entry) {
   editingEntryRevision = Number(entry.revision || 0);
   editingMultiplyValue = entry.multiply || "";
   writeEntryForm(editFields(), entry);
+  renderEditorTimeSummary(entry);
+}
+
+function renderEditorTimeSummary(entry) {
+  const actualSeconds = durationSeconds(entry.start_at, entry.end_at || undefined);
+  const effectiveSeconds = entry.end_at ? Number(entry.duration_seconds) : actualSeconds;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "browser local time";
+  const multiplier = hasMultiplier(entry) ? `x${entry.multiply}` : "none";
+  $timeSummary.textContent = `Displayed timezone: ${timeZone} · Actual duration: ${formatElapsed(actualSeconds)} · Effective duration: ${formatElapsed(effectiveSeconds)} · Multiplier: ${multiplier}. Multiplier-added tails are visual only; actual work remains within the actual interval.`;
+  $timeSummary.hidden = false;
 }
 
 function refreshSelectedEntryEditor() {
   const entry = getEntryById(selectedEntryId);
   if (!entry || !editingEntryId) return;
+  const activeId = document.activeElement?.id;
   loadEditor(entry);
   positionPopupForEntry(entry.id);
+  if (activeId) document.getElementById(activeId)?.focus();
 }
 
 function ensurePreview(state) {
@@ -888,14 +957,22 @@ async function undoCalendarChange() {
   setCalendarUndo(null);
 
   try {
-    await updateEntry(undo.id, {
-      start_at: undo.start_at,
-      end_at: undo.end_at
-    }, { expectedRevision: undo.revision });
-    setStatus(`${undo.kind[0].toUpperCase()}${undo.kind.slice(1)} undone`);
+    if (undo.kind === "deletion") {
+      await undoDeletedEntry(undo.id, undo);
+      setStatus("Deletion undone");
+    } else if (undo.kind === "edit") {
+      await undoEntryUpdate(undo);
+      setStatus("Edit undone");
+    } else {
+      await updateEntry(undo.id, {
+        start_at: undo.start_at,
+        end_at: undo.end_at
+      }, { expectedRevision: undo.revision });
+      setStatus(`${undo.kind[0].toUpperCase()}${undo.kind.slice(1)} undone`);
+    }
     queueSync();
   } catch (error) {
-    setCalendarUndo(undo);
+    if (undo.kind !== "deletion") setCalendarUndo(undo);
     throw error;
   }
 }
@@ -924,15 +1001,14 @@ async function mergeSelectedEntry() {
   const target = getEntryById(selectedEntryId);
   const source = getEntryById(sourceId);
   if (!target || !source) throw new Error("Entry changed in another window; refreshed");
-  await mergeEntries(selectedEntryId, sourceId, {
-    expectedRevisions: {
-      [selectedEntryId]: target.revision,
-      [sourceId]: source.revision
-    }
+  const preview = mergeEntryPreview(target, source);
+  showEditorPreview(mergePreviewText(target, source, preview), {
+    kind: "merge",
+    targetId: selectedEntryId,
+    sourceId,
+    expectedTargetRevision: target.revision,
+    expectedSourceRevision: source.revision
   });
-  closeEditor();
-  setStatus("Entries merged");
-  queueSync();
 }
 
 async function duplicateSelectedEntry() {
@@ -941,7 +1017,34 @@ async function duplicateSelectedEntry() {
   setCalendarUndo(null);
   const entry = getEntryById(selectedEntryId);
   if (!entry) throw new Error("Entry changed in another window; refreshed");
-  const duplicate = await duplicateEntry(selectedEntryId, { expectedRevision: entry.revision });
+  const preview = duplicateEntryPreview(entry);
+  showEditorPreview(duplicatePreviewText(entry, preview), {
+    kind: "duplicate",
+    targetId: selectedEntryId,
+    expectedTargetRevision: entry.revision
+  });
+}
+
+async function confirmEditorPreview() {
+  const pending = pendingEditorPreview;
+  if (!pending || pending.targetId !== selectedEntryId || !editingEntryId
+    || editingEntryId !== selectedEntryId) {
+    clearEditorPreview();
+    throw editorConflictError();
+  }
+  if (pending.kind === "merge") {
+    await mergeEntries(pending.targetId, pending.sourceId, {
+      expectedRevisions: {
+        [pending.targetId]: pending.expectedTargetRevision,
+        [pending.sourceId]: pending.expectedSourceRevision
+      }
+    });
+    closeEditor();
+    setStatus("Entries merged");
+    queueSync();
+    return;
+  }
+  const duplicate = await duplicateEntry(pending.targetId, { expectedRevision: pending.expectedTargetRevision });
   closeEditor();
   selectedEntryId = duplicate.id;
   setStatus("Entry duplicated");
@@ -949,16 +1052,28 @@ async function duplicateSelectedEntry() {
 }
 
 function closeEditor() {
+  if (editingEntryId) editorReturnFocusId = editingEntryId;
   editingEntryId = "";
   editingEntryRevision = null;
   editingMultiplyValue = "";
+  creatingCompletedEntry = false;
+  clearEditorPreview();
+  $deleteButton.hidden = false;
+  $duplicateButton.hidden = false;
   $editForm.reset();
+  $timeSummary.hidden = true;
+  $timeSummary.textContent = "";
   $("#calendarEditOverlay").hidden = true;
 }
 
 function openSelectedEntryEditor() {
   const entry = getEntryById(selectedEntryId);
   if (!entry) return;
+
+  creatingCompletedEntry = false;
+  clearEditorPreview();
+  $deleteButton.hidden = false;
+  $duplicateButton.hidden = false;
 
   loadEditor(entry);
 
@@ -985,11 +1100,32 @@ function openSelectedEntryEditor() {
   $editProject.focus();
 }
 
+async function openCompletedEntryEditor() {
+  await clearSelection();
+  creatingCompletedEntry = true;
+  editingEntryId = "";
+  editingEntryRevision = null;
+  editingMultiplyValue = "";
+  $editForm.reset();
+  $mergeTarget.replaceChildren();
+  $mergeButton.disabled = true;
+  setEntryEditorMergeAvailability($mergeControl, false);
+  $deleteButton.hidden = true;
+  $duplicateButton.hidden = true;
+  $("#calendarEditOverlay").hidden = false;
+  const popup = $(".edit-popup");
+  popup.style.left = `${Math.max(12, (window.innerWidth - 380) / 2)}px`;
+  popup.style.top = "12px";
+  clampEditorToViewport();
+  $editProject.focus();
+}
+
 async function deleteCalendarEntry() {
   if (!editingEntryId) return;
   if (!confirm("Delete this time log entry?")) return;
   setCalendarUndo(null);
-  await softDeleteEntry(editingEntryId, { expectedRevision: editingEntryRevision });
+  const deleted = await softDeleteEntry(editingEntryId, { expectedRevision: editingEntryRevision });
+  setCalendarUndo({ kind: "deletion", ...deletionUndoToken(deleted) });
   closeEditor();
   selectedEntryId = "";
   setStatus("Entry deleted");
@@ -998,14 +1134,21 @@ async function deleteCalendarEntry() {
 
 async function saveCalendarEdit(event) {
   event.preventDefault();
-  if (!editingEntryId) return;
-
   setCalendarUndo(null);
-  await updateEntry(
-    editingEntryId,
-    readEntryForm(editFields(), { multiplyValue: editingMultiplyValue }),
-    { expectedRevision: editingEntryRevision }
-  );
+  const formValues = readEntryForm(editFields(), { multiplyValue: editingMultiplyValue });
+  if (creatingCompletedEntry) {
+    await createCompletedEntry(formValues);
+    closeEditor();
+    await render();
+    setStatus("Completed entry created");
+    queueSync();
+    return;
+  }
+  if (!editingEntryId) return;
+  const before = await getEntry(editingEntryId);
+  if (!before || Number(before.revision || 0) !== editingEntryRevision) throw editorConflictError();
+  const updated = await updateEntry(editingEntryId, formValues, { expectedRevision: editingEntryRevision });
+  setCalendarUndo({ kind: "edit", ...entryUpdateUndoToken(before, updated) });
   closeEditor();
   setStatus("Entry updated");
   queueSync();
@@ -1045,6 +1188,17 @@ async function changeWeek(nextStart) {
   setStatus("Ready", "synced");
 }
 
+function requestedNavigation() {
+  const params = new URLSearchParams(globalThis.location?.search || "");
+  const entryId = params.get("entry") || "";
+  const dateValue = params.get("date") || "";
+  const date = dateValue ? new Date(dateValue) : null;
+  return {
+    entryId,
+    date: date && !Number.isNaN(date.getTime()) ? date : null
+  };
+}
+
 async function sendDisplayedWeekToTempo() {
   return tempoController.send();
 }
@@ -1060,7 +1214,8 @@ const tempoController = createTempoController({
   mutateSetting,
   platform,
   setStatus,
-  setSelectionActive: setTempoDaySelectionActive
+  setSelectionActive: setTempoDaySelectionActive,
+  setUploadState: setTempoUploadState
 });
 
 function sendWholeWeekToTempo(button) {
@@ -1076,9 +1231,23 @@ function bindEvents() {
   $("#prevWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, -DAY_COUNT)), { button: event.currentTarget }));
   $("#nextWeek").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(addDays(weekStart, DAY_COUNT)), { button: event.currentTarget }));
   $("#todayButton").addEventListener("click", (event) => runCalendarAction("change-week", () => changeWeek(new Date()), { button: event.currentTarget }));
+  $("#addCompletedEntryButton").addEventListener("click", () => {
+    openCompletedEntryEditor().catch((error) => setStatus(formatError(error)));
+  });
   $("#sendTempoButton").addEventListener("click", (event) => {
     setTempoSendMenuOpen(false);
     runCalendarAction("send-tempo", sendDisplayedWeekToTempo, { button: event.currentTarget });
+  });
+  $("#cancelTempoButton").addEventListener("click", async (event) => {
+    if (!tempoUploadCancel) return;
+    event.currentTarget.disabled = true;
+    setStatus("Finishing the current Tempo request; future chunks will be cancelled...", "pending");
+    try {
+      const response = await tempoUploadCancel();
+      if (!response?.ok) throw new Error("Tempo cancellation was not accepted");
+    } catch (error) {
+      setStatus(formatError(error), "error");
+    }
   });
   $("#tempoSendMenuButton").addEventListener("click", () => {
     setTempoSendMenuOpen($("#tempoSendMenu").hidden);
@@ -1103,6 +1272,8 @@ function bindEvents() {
   }));
   $duplicateButton.addEventListener("click", (event) => runCalendarAction(`duplicate-entry:${selectedEntryId}`, duplicateSelectedEntry, { button: event.currentTarget }));
   $mergeButton.addEventListener("click", (event) => runCalendarAction(`merge-entry:${selectedEntryId}`, mergeSelectedEntry, { button: event.currentTarget }));
+  $editorPreview.confirm.addEventListener("click", (event) => runCalendarAction(`confirm-entry-preview:${selectedEntryId}`, confirmEditorPreview, { button: event.currentTarget }));
+  $editorPreview.cancel.addEventListener("click", clearEditorPreview);
   $editForm.addEventListener("submit", (event) => runCalendarAction(`save-entry:${editingEntryId}`, () => saveCalendarEdit(event), { expectedRevision: editingEntryRevision }));
   entryEditor.actions.cancel.addEventListener("click", () => clearSelection().catch((error) => setStatus(formatError(error))));
 
@@ -1120,12 +1291,26 @@ function bindEvents() {
     if (!event.target.closest?.(".tempo-send-control")) setTempoSendMenuOpen(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") setTempoSendMenuOpen(false);
+    if (event.key !== "Escape") return;
+    if (!$("#tempoSendMenu").hidden) {
+      setTempoSendMenuOpen(false);
+      return;
+    }
+    if (!$("#calendarEditOverlay").hidden) {
+      event.preventDefault();
+      clearSelection().catch((error) => setStatus(formatError(error)));
+    }
   });
   window.addEventListener("resize", handleViewportResize);
 }
 
 async function init() {
+  const navigation = requestedNavigation();
+  if (navigation.date) {
+    weekStart = startOfWeek(navigation.date);
+    selectedDayKeys = new Set(weekDayKeys(weekStart, DAY_COUNT));
+    initialScrollDone = false;
+  }
   bindEvents();
   if (!unsubscribeEntryEvents) {
     unsubscribeEntryEvents = onEntriesChanged(() => {
@@ -1140,7 +1325,17 @@ async function init() {
     });
   }
   await render();
-  setStatus("Ready", "synced");
+  let navigationUnavailable = false;
+  if (navigation.entryId) {
+    if (renderedEntries.some((entry) => entry.id === navigation.entryId)) {
+      selectedEntryId = navigation.entryId;
+      await render();
+      openSelectedEntryEditor();
+    } else {
+      navigationUnavailable = true;
+    }
+  }
+  setStatus(navigationUnavailable ? "The requested entry is no longer available" : "Ready", navigationUnavailable ? "error" : "synced");
   runCalendarAction("initial-sync", () => runSync({ force: false }));
   if (!refreshTimer) {
     refreshTimer = setInterval(() => {

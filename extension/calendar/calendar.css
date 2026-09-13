@@ -150,6 +150,15 @@ h1 {
   align-items: stretch;
 }
 
+.cancel-tempo-button {
+  border-color: var(--danger, #b23b3b);
+  color: var(--danger, #b23b3b);
+}
+
+.cancel-tempo-button[hidden] {
+  display: none;
+}
+
 .tempo-send-control #sendTempoButton {
   border-radius: 6px 0 0 6px;
 }
@@ -194,6 +203,136 @@ h1 {
   white-space: nowrap;
 }
 
+#tempoPreviewDialog {
+  width: min(1080px, 94vw);
+  max-width: 1080px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+}
+
+#tempoPreviewDialog::backdrop {
+  background: rgba(20, 28, 45, 0.42);
+}
+
+#tempoPreviewForm {
+  display: grid;
+  gap: 12px;
+  max-height: 86vh;
+  padding: 20px;
+}
+
+#tempoPreviewTitle,
+.tempo-preview-summary,
+.tempo-preview-skipped,
+.tempo-preview-error {
+  margin: 0;
+}
+
+.tempo-preview-summary {
+  font-weight: 700;
+}
+
+.tempo-preview-skipped {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tempo-preview-error {
+  padding: 9px 11px;
+  border: 1px solid #d93025;
+  border-radius: 8px;
+  background: #fce8e6;
+  color: #a50e0e;
+}
+
+.tempo-preview-mappings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px 12px;
+}
+
+.tempo-preview-mappings h3,
+.tempo-preview-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.tempo-mapping-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.tempo-preview-table-wrap {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.tempo-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tempo-preview-table th,
+.tempo-preview-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tempo-preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tempo-preview-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tempo-status {
+  font-weight: 650;
+}
+
+.tempo-status-untracked,
+.tempo-status-changed {
+  color: #8a5d00;
+}
+
+.tempo-status-acknowledged,
+.tempo-status-unknown {
+  color: #9b3c00;
+}
+
+.tempo-status-rejected {
+  color: #1b6b3a;
+}
+
+.tempo-status-pending {
+  color: var(--muted);
+}
+
+.tempo-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .icon-button {
   width: 36px;
   padding: 0;
@@ -206,6 +345,11 @@ h1 {
   gap: 4px;
   color: var(--muted);
   font-size: 12px;
+}
+
+#addCompletedEntryButton {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  color: var(--accent-strong);
 }
 
 input,

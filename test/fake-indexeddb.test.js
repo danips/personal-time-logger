@@ -12,6 +12,18 @@ function openDatabase(name) {
   });
 }
 
+function waitUntil(predicate, label, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (predicate()) return resolve();
+      if (Date.now() >= deadline) return reject(new Error(`${label} did not complete before the ${timeoutMs}ms deadline.`));
+      setTimeout(check, 0);
+    };
+    check();
+  });
+}
+
 describe("fake IndexedDB transaction scheduler", () => {
   it("runs transactions in FIFO order after completion", async () => {
     installFakeIndexedDB();
@@ -24,11 +36,7 @@ describe("fake IndexedDB transaction scheduler", () => {
     second.objectStore("items").put({ id: "second" });
     second.oncomplete = () => completed.push("second");
 
-    await new Promise((resolve, reject) => {
-      second.onerror = () => reject(second.error);
-      const check = () => completed.length === 2 ? resolve() : setTimeout(check, 0);
-      check();
-    });
+    await waitUntil(() => completed.length === 2, "FIFO transactions");
     assert.deepEqual(completed, ["first", "second"]);
   });
 
@@ -47,10 +55,6 @@ describe("fake IndexedDB transaction scheduler", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(secondStarted, false);
     gate.release();
-    await new Promise((resolve, reject) => {
-      second.onerror = () => reject(second.error);
-      const check = () => secondStarted ? resolve() : setTimeout(check, 0);
-      check();
-    });
+    await waitUntil(() => secondStarted, "paused transaction release");
   });
 });
