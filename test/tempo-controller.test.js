@@ -2,54 +2,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createTempoController, buildTempoPreviewRows } from "../extension/calendar/tempo-controller.js";
-import { tempoAllocationIdentity } from "../extension/src/tempo-submission-ledger.js";
-import { normalizeEntry } from "../extension/src/entries.js";
-import { prepareTempoWeek } from "../extension/src/tempo.js";
-
-const entry = normalizeEntry({
-  id: "controller-entry",
-  project: "Project",
-  task: "Implementation",
-  description: "Build preview",
-  start_at: "2026-09-08T09:00:00.000Z",
-  end_at: "2026-09-08T10:00:00.000Z",
-  duration_seconds: 3600,
-  created_at: "2026-09-08T10:00:00.000Z",
-  updated_at: "2026-09-08T10:00:00.000Z",
-  revision: 1
-});
-
-const snapshot = {
-  weekStart: new Date("2026-09-07T00:00:00.000Z"),
-  weekEnd: new Date("2026-09-14T00:00:00.000Z"),
-  entries: [entry]
-};
-
-const selection = {
-  includedDays: new Set(["2026-09-08"]),
-  noneSelected: false,
-  scopeLabel: "1 selected day",
-  repeatScopeLabel: "day"
-};
+import {
+  tempoAllocationKey,
+  tempoEntry,
+  tempoPreparation,
+  tempoSelection,
+  tempoSnapshot
+} from "./support/tempo-fixtures.js";
 
 describe("Tempo preview model", () => {
   it("includes task, project, daily seconds, hours, and ledger presentation", () => {
-    const prepared = prepareTempoWeek([entry], {
-      periodStart: snapshot.weekStart,
-      periodEnd: snapshot.weekEnd,
-      authorAccountId: "author-1",
-      taskIssueIds: { Implementation: "123" },
-      includedDays: selection.includedDays
-    });
+    const prepared = tempoPreparation();
     const worklog = prepared.groups[0].worklogs[0];
-    const key = tempoAllocationIdentity({
-      entryFingerprint: worklog.entryFingerprint,
-      localDate: worklog.startDate,
-      timeSpentSeconds: worklog.timeSpentSeconds,
-      issueId: "123",
-      authorAccountId: "author-1"
-    }).key;
-    const rows = buildTempoPreviewRows(prepared, snapshot, new Map([[key, {
+    const key = tempoAllocationKey(worklog);
+    const rows = buildTempoPreviewRows(prepared, tempoSnapshot, new Map([[key, {
       state: "acknowledged",
       history: "known"
     }]]), "author-1");
@@ -69,22 +35,10 @@ describe("Tempo preview model", () => {
   });
 
   it("selects post-tracking unsent allocations and leaves historical work for review", () => {
-    const prepared = prepareTempoWeek([entry], {
-      periodStart: snapshot.weekStart,
-      periodEnd: snapshot.weekEnd,
-      authorAccountId: "author-1",
-      taskIssueIds: { Implementation: "123" },
-      includedDays: selection.includedDays
-    });
+    const prepared = tempoPreparation();
     const worklog = prepared.groups[0].worklogs[0];
-    const key = tempoAllocationIdentity({
-      entryFingerprint: worklog.entryFingerprint,
-      localDate: worklog.startDate,
-      timeSpentSeconds: worklog.timeSpentSeconds,
-      issueId: "123",
-      authorAccountId: "author-1"
-    }).key;
-    const rows = buildTempoPreviewRows(prepared, snapshot, new Map([[key, {
+    const key = tempoAllocationKey(worklog);
+    const rows = buildTempoPreviewRows(prepared, tempoSnapshot, new Map([[key, {
       state: "unsent",
       reason: "unsent",
       eligible: true
@@ -102,8 +56,8 @@ describe("Tempo controller preview flow", () => {
     const settingWrites = [];
     let request;
     const controller = createTempoController({
-      getSnapshot: () => snapshot,
-      currentSelection: () => selection,
+      getSnapshot: () => tempoSnapshot,
+      currentSelection: () => tempoSelection,
       getSetting: async (key, fallback) => key === "tempo_api_token" ? "token" : key === "tempo_author_account_id" ? "author-1" : (previews.length ? { Implementation: "123" } : fallback),
       mutateSetting: async (key, update) => {
         const next = update({});
@@ -132,13 +86,7 @@ describe("Tempo controller preview flow", () => {
           return { confirmed: true, taskIssueIds: { Implementation: "123" } };
         }
         const worklog = state.prepared.groups[0].worklogs[0];
-        const key = tempoAllocationIdentity({
-          entryFingerprint: worklog.entryFingerprint,
-          localDate: worklog.startDate,
-          timeSpentSeconds: worklog.timeSpentSeconds,
-          issueId: "123",
-          authorAccountId: "author-1"
-        }).key;
+        const key = tempoAllocationKey(worklog);
         return {
           confirmed: true,
           taskIssueIds: { Implementation: "123" },
@@ -157,26 +105,12 @@ describe("Tempo controller preview flow", () => {
   });
 
   it("rejects a stale snapshot before dispatch", async () => {
-    let current = snapshot;
+    let current = tempoSnapshot;
     let requests = 0;
-    const prepared = prepareTempoWeek([entry], {
-      periodStart: snapshot.weekStart,
-      periodEnd: snapshot.weekEnd,
-      authorAccountId: "author-1",
-      taskIssueIds: { Implementation: "123" },
-      includedDays: selection.includedDays
-    });
-    const worklog = prepared.groups[0].worklogs[0];
-    const key = tempoAllocationIdentity({
-      entryFingerprint: worklog.entryFingerprint,
-      localDate: worklog.startDate,
-      timeSpentSeconds: worklog.timeSpentSeconds,
-      issueId: "123",
-      authorAccountId: "author-1"
-    }).key;
+    const key = tempoAllocationKey();
     const controller = createTempoController({
       getSnapshot: () => current,
-      currentSelection: () => selection,
+      currentSelection: () => tempoSelection,
       getSetting: async (keyName) => {
         if (keyName === "tempo_api_token") return "token";
         if (keyName === "tempo_author_account_id") return "author-1";
@@ -192,7 +126,7 @@ describe("Tempo controller preview flow", () => {
       ensureTempoSubmissionTrackingStartedImpl: async () => "2026-09-08T00:00:00.000Z",
       getTempoAllocationStatusImpl: async () => ({ state: "rejected", eligible: true, reason: "known-rejection" }),
       previewFn: async () => {
-        current = { ...snapshot, entries: [{ ...entry, revision: 2, description: "Changed" }] };
+        current = { ...tempoSnapshot, entries: [{ ...tempoEntry, revision: 2, description: "Changed" }] };
         return { confirmed: true, taskIssueIds: { Implementation: "123" }, selectedAllocationKeys: [key] };
       }
     });
@@ -208,23 +142,10 @@ describe("Tempo controller preview flow", () => {
       tempo_task_issue_ids: { Implementation: "123" }
     };
     let requests = 0;
-    const prepared = prepareTempoWeek([entry], {
-      periodStart: snapshot.weekStart,
-      periodEnd: snapshot.weekEnd,
-      authorAccountId: "author-1",
-      taskIssueIds: settings.tempo_task_issue_ids,
-      includedDays: selection.includedDays
-    });
-    const key = tempoAllocationIdentity({
-      entryFingerprint: prepared.groups[0].worklogs[0].entryFingerprint,
-      localDate: "2026-09-08",
-      timeSpentSeconds: 3600,
-      issueId: "123",
-      authorAccountId: "author-1"
-    }).key;
+    const key = tempoAllocationKey();
     const controller = createTempoController({
-      getSnapshot: () => snapshot,
-      currentSelection: () => selection,
+      getSnapshot: () => tempoSnapshot,
+      currentSelection: () => tempoSelection,
       getSetting: async (name) => settings[name] || {},
       mutateSetting: async (name, update) => { settings[name] = update(settings[name]); return settings[name]; },
       platform: {
@@ -250,8 +171,8 @@ describe("Tempo controller preview flow", () => {
     let uploadMessage;
     let uploadState;
     const controller = createTempoController({
-      getSnapshot: () => snapshot,
-      currentSelection: () => selection,
+      getSnapshot: () => tempoSnapshot,
+      currentSelection: () => tempoSelection,
       getSetting: async (name) => name === "tempo_api_token" ? "token" : name === "tempo_author_account_id" ? "author-1" : { Implementation: "123" },
       mutateSetting: async (name, update) => update({ Implementation: "123" }),
       platform: {
@@ -268,23 +189,10 @@ describe("Tempo controller preview flow", () => {
       ensureTempoSubmissionTrackingStartedImpl: async () => "2026-09-08T00:00:00.000Z",
       getTempoAllocationStatusImpl: async () => ({ state: "rejected", eligible: true, reason: "known-rejection" }),
       previewFn: async () => {
-        const worklog = prepareTempoWeek([entry], {
-          periodStart: snapshot.weekStart,
-          periodEnd: snapshot.weekEnd,
-          authorAccountId: "author-1",
-          taskIssueIds: { Implementation: "123" },
-          includedDays: selection.includedDays
-        }).groups[0].worklogs[0];
         return {
           confirmed: true,
           taskIssueIds: { Implementation: "123" },
-          selectedAllocationKeys: [tempoAllocationIdentity({
-            entryFingerprint: worklog.entryFingerprint,
-            localDate: worklog.startDate,
-            timeSpentSeconds: worklog.timeSpentSeconds,
-            issueId: "123",
-            authorAccountId: "author-1"
-          }).key]
+          selectedAllocationKeys: [tempoAllocationKey()]
         };
       }
     });
