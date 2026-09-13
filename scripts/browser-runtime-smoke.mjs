@@ -186,43 +186,37 @@ async function waitForCondition(baseUrl, sessionId, label, script, diagnosticScr
   throw new Error(`${label} did not complete.${diagnostic ? ` Last state: ${diagnostic}` : ""}`);
 }
 
-async function exerciseThemeSelection(baseUrl, sessionId, origin) {
+async function exerciseAppearance(baseUrl, sessionId, origin) {
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
-  await waitForPage(baseUrl, sessionId, ["#themeSelect", "#highContrast"]);
-  const settingsTheme = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+  await waitForPage(baseUrl, sessionId, ["#highContrast"]);
+  const settingsAppearance = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
-      const select = document.querySelector("#themeSelect");
       const contrast = document.querySelector("#highContrast");
-      select.value = "blue-archive";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
       contrast.checked = true;
       contrast.dispatchEvent(new Event("change", { bubbles: true }));
-      return {
-        theme: document.documentElement.dataset.theme,
-        contrast: document.documentElement.dataset.contrast
-      };
+      return { contrast: document.documentElement.dataset.contrast };
     `,
     args: []
   });
-  if (settingsTheme.theme !== "blue-archive" || settingsTheme.contrast !== "high") {
-    throw new Error(`Settings theme controls did not apply the selection: ${JSON.stringify(settingsTheme)}`);
+  if (settingsAppearance.contrast !== "high") {
+    throw new Error(`High contrast control did not apply: ${JSON.stringify(settingsAppearance)}`);
   }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/calendar/calendar.html` });
   await waitForPage(baseUrl, sessionId, ["#calendarGrid"]);
-  const calendarTheme = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
-    script: "return { theme: document.documentElement.dataset.theme, contrast: document.documentElement.dataset.contrast };",
+  const calendarAppearance = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+    script: "return { contrast: document.documentElement.dataset.contrast };",
     args: []
   });
-  if (calendarTheme.theme !== "blue-archive" || calendarTheme.contrast !== "high") {
-    throw new Error(`Theme selection did not persist across extension pages: ${JSON.stringify(calendarTheme)}`);
+  if (calendarAppearance.contrast !== "high") {
+    throw new Error(`High contrast did not persist across extension pages: ${JSON.stringify(calendarAppearance)}`);
   }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
-  await waitForPage(baseUrl, sessionId, ["#themeSelect", ".section-nav"]);
-  const renderedThemeState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+  await waitForPage(baseUrl, sessionId, ["#highContrast", ".section-nav"]);
+  const renderedAppearanceState = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
-      const control = document.querySelector("#themeSelect");
+      const control = document.querySelector("#highContrast");
       control.focus();
       const style = getComputedStyle(control);
       return {
@@ -235,13 +229,13 @@ async function exerciseThemeSelection(baseUrl, sessionId, origin) {
     `,
     args: []
   });
-  if (!renderedThemeState.themeText
-    || renderedThemeState.highContrastBorder !== "2px"
-    || renderedThemeState.focusStyle.outlineStyle !== "solid"
-    || Number.parseFloat(renderedThemeState.focusStyle.outlineWidth) < 3
-    || !renderedThemeState.reducedMotion
-    || Number.parseFloat(renderedThemeState.transitionDuration) > 0.01) {
-    throw new Error(`Rendered theme accessibility sample was incomplete: ${JSON.stringify(renderedThemeState)}`);
+  if (!renderedAppearanceState.themeText
+    || renderedAppearanceState.highContrastBorder !== "2px"
+    || renderedAppearanceState.focusStyle.outlineStyle !== "solid"
+    || Number.parseFloat(renderedAppearanceState.focusStyle.outlineWidth) < 3
+    || !renderedAppearanceState.reducedMotion
+    || Number.parseFloat(renderedAppearanceState.transitionDuration) > 0.01) {
+    throw new Error(`Rendered appearance accessibility sample was incomplete: ${JSON.stringify(renderedAppearanceState)}`);
   }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/popup/popup.html` });
@@ -270,7 +264,7 @@ async function exerciseThemeSelection(baseUrl, sessionId, origin) {
   }
 
   await webdriver(baseUrl, "POST", `/session/${sessionId}/url`, { url: `${origin}/options/options.html#appearance` });
-  await waitForPage(baseUrl, sessionId, ["#themeSelect", ".section-nav"]);
+  await waitForPage(baseUrl, sessionId, ["#highContrast", ".section-nav"]);
   await webdriver(baseUrl, "POST", `/session/${sessionId}/window/rect`, { width: 480, height: 900 });
   const longLabelLayout = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
@@ -969,27 +963,23 @@ async function exerciseAnalytics(baseUrl, sessionId, origin) {
     };
   `);
 
-  const themeAndRerender = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
+  const analyticsRerender = await webdriver(baseUrl, "POST", `/session/${sessionId}/execute/sync`, {
     script: `
       const before = document.querySelector("#primaryRange")?.textContent;
       const preset = document.querySelector("#periodPreset");
       preset.value = "last_30_days";
       preset.dispatchEvent(new Event("change", { bubbles: true }));
-      return {
-        before,
-        theme: document.documentElement.dataset.theme,
-        contrast: document.documentElement.dataset.contrast
-      };
+      return { before, contrast: document.documentElement.dataset.contrast };
     `,
     args: []
   });
-  if (themeAndRerender.theme !== "blue-archive" || themeAndRerender.contrast !== "high") {
-    throw new Error(`Analytics did not apply the selected theme: ${JSON.stringify(themeAndRerender)}`);
+  if (analyticsRerender.contrast !== "high") {
+    throw new Error(`Analytics did not retain high contrast: ${JSON.stringify(analyticsRerender)}`);
   }
   await waitForCondition(baseUrl, sessionId, "Analytics period rerender", `
     return document.documentElement.dataset.pageRuntime === "ready"
       && document.querySelector("#statusLine")?.dataset.status === "ready"
-      && document.querySelector("#primaryRange")?.textContent !== ${JSON.stringify(themeAndRerender.before)}
+      && document.querySelector("#primaryRange")?.textContent !== ${JSON.stringify(analyticsRerender.before)}
       && document.querySelector("#pageFatalPanel")?.hidden !== false;
   `);
 
@@ -2294,7 +2284,7 @@ try {
     await waitForPage(baseUrl, sessionId, selectors);
   }
 
-  await exerciseThemeSelection(baseUrl, sessionId, origin);
+  await exerciseAppearance(baseUrl, sessionId, origin);
   await exerciseSyncFreshness(baseUrl, sessionId, origin);
   await exerciseOfflineBackup(baseUrl, sessionId, origin);
 

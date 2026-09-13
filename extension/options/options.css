@@ -480,20 +480,9 @@ code {
 
 .appearance-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
+  grid-template-columns: minmax(280px, 1fr);
   gap: 16px;
   align-items: end;
-}
-
-.appearance-controls select {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  background: var(--surface-subtle);
-  color: var(--text);
-  font: inherit;
 }
 
 .contrast-switch {
@@ -565,51 +554,8 @@ code {
   font-size: 12px;
 }
 
-.theme-preview {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 0.7fr 0.45fr;
-  height: 70px;
-  margin-top: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  box-shadow: var(--shadow-sm);
-}
-
-.theme-preview::before {
-  content: attr(data-theme-name);
-  position: absolute;
-  z-index: 1;
-  top: 10px;
-  left: 12px;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 750;
-  text-shadow: 0 1px 3px var(--page);
-}
-
-.theme-preview::after {
-  content: attr(data-theme-description);
-  position: absolute;
-  z-index: 1;
-  bottom: 9px;
-  left: 12px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.theme-preview span:nth-child(1) { background: var(--page); }
-.theme-preview span:nth-child(2) { background: var(--surface); }
-.theme-preview span:nth-child(3) { background: var(--surface-raised); }
-.theme-preview span:nth-child(4) { background: var(--accent-soft); }
-.theme-preview span:nth-child(5) { background: var(--accent); }
-
 @media (max-width: 760px) {
-  .appearance-controls {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
+  .appearance-controls { gap: 4px; }
 }
 
 /* Settings visual system. This file loads last on the options page, so these

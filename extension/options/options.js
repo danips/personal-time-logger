@@ -15,7 +15,7 @@ import { retireGoogleState } from "../src/provider-retirement.js";
 import { $, formatError } from "../src/ui-helpers.js";
 import { nowIso } from "../src/time.js";
 import { normalizeTempoIssueId, normalizeTempoTaskIssueIds } from "../src/tempo.js";
-import { bindThemeControls, readThemePreferences, saveThemePreferences, THEME_OPTIONS } from "../src/themes.js";
+import { bindAppearanceControls, readAppearancePreferences, saveAppearancePreferences } from "../src/themes.js";
 import { initReconcilePage } from "../reconcile/reconcile.js";
 import { initUsagePage } from "../usage/usage.js";
 import {
@@ -206,7 +206,7 @@ function restoreReportText(summary, { syncPending = false } = {}) {
 function renderBackupReport(summary, { syncPending = false, restoreSettings = true, restoreAppearance = true } = {}) {
   const report = document.getElementById("backupReport");
   if (!report) return;
-  document.getElementById("backupReportSummary").textContent = `${restoreReportText(summary, { syncPending })} ${restoreSettings ? "Selected settings were applied." : "Settings were not selected."}${restoreAppearance ? " Appearance was applied when present." : " Appearance was not selected."}`;
+  document.getElementById("backupReportSummary").textContent = `${restoreReportText(summary, { syncPending })} ${restoreSettings ? "Selected settings were applied." : "Settings were not selected."}${restoreAppearance ? " High-contrast preference was applied when present." : " High-contrast preference was not selected."}`;
   renderBackupEntryList(document.getElementById("backupReportAdditions"), summary.addedEntries);
   renderBackupEntryList(document.getElementById("backupReportIdentical"), summary.identicalEntries);
   const settings = document.getElementById("backupReportSettings");
@@ -357,7 +357,7 @@ async function syncRestoredBackup() {
 async function exportBackupClicked() {
   setStatus("Capturing local backup...");
   const snapshot = await withLocalBackupLock(() => readPortableBackupSnapshot());
-  const text = serializeBackup({ ...snapshot, appearance: readThemePreferences() });
+  const text = serializeBackup({ ...snapshot, appearance: readAppearancePreferences() });
   const blob = new Blob([text], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -378,7 +378,7 @@ async function importBackupClicked(file) {
 
   setStatus("Restoring local backup...");
   const summary = await withLocalBackupLock(() => restoreBackup(backup, { restoreSettings: choice.restoreSettings }));
-  if (choice.restoreAppearance && backup.appearance) saveThemePreferences(backup.appearance);
+  if (choice.restoreAppearance && backup.appearance) saveAppearancePreferences(backup.appearance);
 
   let syncPending = false;
   if (summary.added || summary.settingsChanged) {
@@ -396,14 +396,6 @@ async function importBackupClicked(file) {
   });
   setStatus(restoreReportText(summary, { syncPending }));
   return true;
-}
-
-function renderThemeSelection({ theme, highContrast }) {
-  const selected = THEME_OPTIONS.find(({ id }) => id === theme);
-  const preview = $("#themePreview");
-  preview.dataset.themeName = selected?.label || "Codex";
-  preview.dataset.themeDescription = selected?.description || "";
-  preview.classList.toggle("is-high-contrast", highContrast);
 }
 
 function bindSectionNavigation() {
@@ -1097,17 +1089,11 @@ async function clearDiagnosticsClicked() {
 function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
-  bindThemeControls({
-    themeSelect: $("#themeSelect"),
+  bindAppearanceControls({
     contrastToggle: $("#highContrast"),
     onChange(preferences) {
-      renderThemeSelection(preferences);
-      setStatus(`${THEME_OPTIONS.find(({ id }) => id === preferences.theme)?.label || "Theme"}${preferences.highContrast ? " · High contrast" : ""} applied`);
+      setStatus(`Blue Archive${preferences.highContrast ? " · High contrast" : ""} applied`);
     }
-  });
-  renderThemeSelection({
-    theme: $("#themeSelect").value,
-    highContrast: $("#highContrast").checked
   });
   for (const field of document.querySelectorAll("input, select, textarea")) {
     field.addEventListener("input", () => markOptionEdited(optionDraftKey(field)));

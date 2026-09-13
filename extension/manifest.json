@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Personal Time Logger",
   "description": "Local-first time tracking with MySQL or Cloudflare Worker + D1 sync and Tempo upload.",
-  "version": "0.1.77",
+  "version": "0.1.78",
   "permissions": [
     "alarms",
     "storage",

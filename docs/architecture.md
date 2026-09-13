@@ -40,12 +40,12 @@ the section's acknowledgement and reloads persisted values. Inline field errors
 use the existing settings normalizers and native validity state, so validation
 stays close to the input without adding a second state framework.
 
-Theme selection is shared across pages through `extension/src/themes.js` and
-`extension/src/themes.css`. Page styles retain only the fallback and geometry
-tokens they need; the shared stylesheet owns selected palettes, high-contrast
-edges, focus outlines, and reduced-motion overrides. Theme and responsive
-checks use rendered computed styles and visible control geometry rather than
-CSS spelling assertions.
+The fixed Blue Archive theme is shared across pages through
+`extension/src/themes.js` and `extension/src/themes.css`. Page styles retain
+only the fallback and geometry tokens they need; the shared stylesheet owns
+the palette, high-contrast edges, focus outlines, and reduced-motion overrides.
+Theme and responsive checks use rendered computed styles and visible control
+geometry rather than CSS spelling assertions.
 
 ChatGPT usage presentation is shared by the Usage page and Popup through
 `extension/src/usage-presentation.js`. It owns window names, local reset

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="moss-circuit" data-contrast="standard">
+<html lang="en" data-contrast="standard">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -68,7 +68,7 @@
         <h3>Settings</h3>
         <ul id="backupPreviewSettings" class="backup-list"></ul>
         <label class="backup-choice"><input id="restoreBackupSettings" type="checkbox"> Restore selected non-secret settings</label>
-        <label class="backup-choice"><input id="restoreBackupAppearance" type="checkbox"> Restore appearance preferences when present</label>
+        <label class="backup-choice"><input id="restoreBackupAppearance" type="checkbox"> Restore high-contrast preference when present</label>
         <h3>Conflicts</h3>
         <ul id="backupPreviewConflicts" class="backup-list"></ul>
         <div class="actions">
@@ -120,25 +120,11 @@
             <div class="section-heading">
               <div>
                 <h2>Appearance</h2>
-                <p class="note">Choose a dark palette. Changes apply immediately across Time Logger.</p>
+                <p class="note">Blue Archive is the fixed palette. High contrast applies immediately across Time Logger.</p>
               </div>
             </div>
             <div class="appearance-controls">
-              <label for="themeSelect">Theme
-                <select id="themeSelect">
-                  <option value="cinder-glow">Cinder Glow</option>
-                  <option value="moss-circuit">Moss Circuit</option>
-                  <option value="blue-archive">Blue Archive</option>
-                  <option value="violet-orbit">Violet Orbit</option>
-                  <option value="amethyst-stack">Amethyst Stack</option>
-                  <option value="sienna-paper">Sienna Paper</option>
-                  <option value="harbor-terminal">Harbor Terminal</option>
-                </select>
-              </label>
               <label class="contrast-switch"><input id="highContrast" type="checkbox"><span class="switch-track" aria-hidden="true"><span></span></span><span><strong>High contrast</strong><small>Stronger panel edges, text, and focus indicators</small></span></label>
-            </div>
-            <div id="themePreview" class="theme-preview" aria-hidden="true">
-              <span></span><span></span><span></span><span></span><span></span>
             </div>
           </section>
 
